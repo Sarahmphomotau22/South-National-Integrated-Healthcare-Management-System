@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NIHMS — National Integrated Healthcare Management System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/auth.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/pages.css" />
+</head>
+<body>
+
+<!-- ══════════════════════════════════
+     AUTH SCREEN
+══════════════════════════════════ -->
+<div id="auth-screen">
+
+  <!-- LEFT: Forms -->
+  <div class="auth-left">
+    <div class="auth-logo">NI<span>HMS</span></div>
+
+    <!-- LOGIN -->
+    <div class="auth-panel active" id="panel-login">
+      <div class="auth-heading">Welcome back</div>
+      <div class="auth-sub">Sign in to your NIHMS account</div>
+      <div id="login-alert" class="alert alert-error hidden"></div>
+      <div class="form-group">
+        <label class="form-label">Email address</label>
+        <div class="input-icon-wrap">
+          <i class="ti ti-mail input-icon"></i>
+          <input class="form-input" type="email" id="login-email" placeholder="name@facility.gov.za" autocomplete="email" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <div class="input-icon-wrap">
+          <i class="ti ti-lock input-icon"></i>
+          <input class="form-input" type="password" id="login-password" placeholder="Enter your password" autocomplete="current-password" />
+          <span class="input-eye" onclick="togglePwd('login-password', this)"><i class="ti ti-eye"></i></span>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:20px">
+        <button class="btn-link" onclick="showPanel('reset')">Forgot password?</button>
+      </div>
+      <button class="btn-primary" id="login-btn" onclick="doLogin()"><span>Sign in</span></button>
+      <div class="auth-switch">
+        Don't have an account? <button class="btn-link" onclick="showPanel('register')">Register</button>
+      </div>
+      <div class="demo-accounts">
+        <div class="demo-title">Demo accounts (click to fill)</div>
+        <div class="demo-grid">
+          <span onclick="fillDemo('doctor')"   class="demo-link">doctor@nihms.gov.za</span>
+          <span onclick="fillDemo('patient')"  class="demo-link">patient@nihms.gov.za</span>
+          <span onclick="fillDemo('pharmacy')" class="demo-link">pharmacy@nihms.gov.za</span>
+          <span onclick="fillDemo('admin')"    class="demo-link">admin@nihms.gov.za</span>
+          <span onclick="fillDemo('nurse')"    class="demo-link">nurse@nihms.gov.za</span>
+        </div>
+        <div class="demo-pwd">Password: <span class="mono">Demo@1234</span></div>
+      </div>
+    </div>
+
+    <!-- REGISTER -->
+    <div class="auth-panel" id="panel-register">
+      <div class="auth-heading">Create account</div>
+      <div class="auth-sub">Register for NIHMS access</div>
+      <div id="register-alert" class="alert hidden"></div>
+
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-hint);margin-bottom:10px">Account details</div>
+      <div class="two-col-inputs">
+        <div class="form-group"><label class="form-label">First name *</label><input class="form-input" type="text" id="reg-first" placeholder="Nomsa" /></div>
+        <div class="form-group"><label class="form-label">Last name *</label><input class="form-input" type="text" id="reg-last" placeholder="Dlamini" /></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email address *</label>
+        <div class="input-icon-wrap">
+          <i class="ti ti-mail input-icon"></i>
+          <input class="form-input" type="email" id="reg-email" placeholder="name@example.com" />
+        </div>
+      </div>
+      <div class="two-col-inputs">
+        <div class="form-group"><label class="form-label">Role *</label>
+          <select class="form-select" id="reg-role">
+            <option value="">— Select role —</option>
+            <option value="doctor">Doctor</option>
+            <option value="nurse">Nurse</option>
+            <option value="pharmacy">Pharmacist</option>
+            <option value="patient">Patient</option>
+            <option value="admin">Facility Admin</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Facility *</label>
+          <select class="form-select" id="reg-facility" onfocus="loadRegFacilities()">
+            <option value="">— Select facility —</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="patient-extra-fields" style="display:none">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-hint);margin:12px 0 10px">Patient information</div>
+        <div class="form-group"><label class="form-label">Date of birth *</label><input class="form-input" type="date" id="reg-dob" /></div>
+        <div class="two-col-inputs">
+          <div class="form-group"><label class="form-label">Gender *</label>
+            <select class="form-select" id="reg-gender">
+              <option value="">— Select —</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="non-binary">Non-binary</option>
+              <option value="prefer_not_to_say">Prefer not to say</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">ID type *</label>
+            <select class="form-select" id="reg-idtype">
+              <option value="sa_id">South African ID</option>
+              <option value="passport">Passport</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group"><label class="form-label">ID / Passport number *</label><input class="form-input" type="text" id="reg-idnum" placeholder="8203041234083" /></div>
+        <div class="form-group"><label class="form-label">Mobile phone *</label><input class="form-input" type="tel" id="reg-phone" placeholder="+27 82 000 0000" /></div>
+      </div>
+
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-hint);margin:12px 0 10px">Password</div>
+      <div class="two-col-inputs">
+        <div class="form-group">
+          <label class="form-label">Password *</label>
+          <div class="input-icon-wrap">
+            <i class="ti ti-lock input-icon"></i>
+            <input class="form-input" type="password" id="reg-password" placeholder="Create password" oninput="checkPwd()" />
+            <span class="input-eye" onclick="togglePwd('reg-password', this)"><i class="ti ti-eye"></i></span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm password *</label>
+          <div class="input-icon-wrap">
+            <i class="ti ti-lock input-icon"></i>
+            <input class="form-input" type="password" id="reg-confirm" placeholder="Repeat password" />
+            <span class="input-eye" onclick="togglePwd('reg-confirm', this)"><i class="ti ti-eye"></i></span>
+          </div>
+        </div>
+      </div>
+      <div class="password-rules" id="pwd-rules">
+        <div class="rule" id="rule-len"><i class="ti ti-circle"></i> At least 8 characters</div>
+        <div class="rule" id="rule-upper"><i class="ti ti-circle"></i> One uppercase letter</div>
+        <div class="rule" id="rule-num"><i class="ti ti-circle"></i> One number</div>
+      </div>
+      <div style="margin:16px 0">
+        <label class="checkbox-label">
+          <input type="checkbox" id="reg-terms" />
+          I agree to the NIHMS <a href="#" class="link">Terms of Use</a> and <a href="#" class="link">POPIA Privacy Policy</a>
+        </label>
+      </div>
+      <button class="btn-primary" onclick="doRegister()"><span>Create account</span></button>
+      <div class="auth-switch">
+        Already registered? <button class="btn-link" onclick="showPanel('login')">Sign in</button>
+      </div>
+    </div>
+
+    <!-- RESET PASSWORD -->
+    <div class="auth-panel" id="panel-reset">
+      <div class="auth-heading">Reset password</div>
+      <div class="auth-sub">We'll send you a reset OTP</div>
+      <div id="reset-alert" class="alert hidden"></div>
+      <div id="reset-step-1">
+        <div class="form-group">
+          <label class="form-label">Email address</label>
+          <div class="input-icon-wrap">
+            <i class="ti ti-mail input-icon"></i>
+            <input class="form-input" type="email" id="reset-email" placeholder="name@facility.gov.za" />
+          </div>
+        </div>
+        <button class="btn-primary" onclick="doReset()"><span>Send OTP</span></button>
+      </div>
+      <div id="reset-step-2" style="display:none">
+        <div class="alert alert-success" style="display:flex;gap:10px">
+          <i class="ti ti-terminal" style="font-size:20px;flex-shrink:0"></i>
+          <div><div style="font-weight:500;margin-bottom:2px">OTP generated</div><div>Check your <strong>backend terminal</strong> (PowerShell running npm run dev) for the 6-digit code. Look for <strong>Code: ######</strong></div></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">OTP code</label>
+          <input class="form-input otp-input" type="text" id="reset-otp" placeholder="123456" maxlength="6" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">New password</label>
+          <div class="input-icon-wrap">
+            <i class="ti ti-lock input-icon"></i>
+            <input class="form-input" type="password" id="reset-newpwd" placeholder="New password" />
+            <span class="input-eye" onclick="togglePwd('reset-newpwd', this)"><i class="ti ti-eye"></i></span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm new password</label>
+          <div class="input-icon-wrap">
+            <i class="ti ti-lock input-icon"></i>
+            <input class="form-input" type="password" id="reset-confirmpwd" placeholder="Confirm password" />
+            <span class="input-eye" onclick="togglePwd('reset-confirmpwd', this)"><i class="ti ti-eye"></i></span>
+          </div>
+        </div>
+        <button class="btn-primary" onclick="doResetConfirm()"><span>Set new password</span></button>
+      </div>
+      <div class="auth-switch" style="margin-top:16px">
+        <button class="btn-link" onclick="showPanel('login')">
+          <i class="ti ti-arrow-left" style="font-size:13px;vertical-align:-2px"></i> Back to sign in
+        </button>
+      </div>
+    </div>
+
+  </div><!-- end .auth-left -->
+
+  <!-- RIGHT: Branding -->
+  <div class="auth-right">
+    <div class="auth-right-content">
+      <div class="auth-icon-circle"><i class="ti ti-building-hospital"></i></div>
+      <div class="auth-tagline"><strong>Connecting</strong><br />South Africa's<br />healthcare</div>
+      <div class="auth-desc">A unified platform for 4,800 public health facilities — real-time queues, electronic records, telemedicine, and NHI billing in one system.</div>
+      <div class="stat-pills">
+        <div class="stat-pill"><strong>4,800</strong> Facilities</div>
+        <div class="stat-pill"><strong>12 M+</strong> Patients</div>
+        <div class="stat-pill"><strong>50 K</strong> Consultations/day</div>
+        <div class="stat-pill"><strong>POPIA</strong> Compliant</div>
+      </div>
+    </div>
+  </div><!-- end .auth-right -->
+
+</div><!-- end #auth-screen -->
+
+<!-- ══════════════════════════════════
+     MAIN APP SHELL
+══════════════════════════════════ -->
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-logo">NI<span>HMS</span></div>
+    <div class="topbar-center" id="topbar-roles"></div>
+    <div class="topbar-right">
+      <div class="conn-badge conn-online" id="conn-badge">
+        <div class="dot dot-green"></div>
+        <span id="conn-text">Online · Johannesburg CHC</span>
+      </div>
+      <div class="user-menu" onclick="toggleDropdown()">
+        <div class="user-avatar" id="topbar-avatar">ND</div>
+        <div>
+          <div class="user-name" id="topbar-name">User</div>
+          <div class="user-role-tag" id="topbar-role">Role</div>
+        </div>
+        <i class="ti ti-chevron-down" style="font-size:14px;color:var(--text-hint)"></i>
+      </div>
+      <div class="profile-dropdown" id="profile-dropdown">
+        <div class="dd-item"><i class="ti ti-user"></i> My profile</div>
+        <div class="dd-item"><i class="ti ti-settings"></i> Settings</div>
+        <div class="dd-item"><i class="ti ti-shield-check"></i> POPIA data rights</div>
+        <div class="dd-sep"></div>
+        <div class="dd-item dd-logout" onclick="doLogout()"><i class="ti ti-logout"></i> Sign out</div>
+      </div>
+    </div>
+  </div>
+  <div class="app-body">
+    <div class="sidebar" id="sidebar"></div>
+    <div class="content" id="content"></div>
+  </div>
+</div><!-- end #app -->
+
+<!-- TOAST -->
+<div id="toast"><i class="ti ti-check"></i><span id="toast-msg"></span></div>
+
+<!-- SCRIPTS -->
+<script src="js/api.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/router.js"></script>
+<script src="js/pages/doctor.js"></script>
+<script src="js/pages/nurse.js"></script>
+<script src="js/pages/patient.js"></script>
+<script src="js/pages/pharmacy.js"></script>
+<script src="js/pages/admin.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
