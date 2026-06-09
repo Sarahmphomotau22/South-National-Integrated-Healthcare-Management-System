@@ -1,7 +1,795 @@
 <!DOCTYPE html>
-<html><head>
-  <meta charset="UTF-8">
-  <meta http-equiv="refresh" content="0; url=welcome.html">
-  <title>NIHMS</title>
-  <script>window.location.replace('welcome.html');</script>
-</head><body></body></html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NIHMS — National Integrated Healthcare Management System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/pages.css" />
+  <style>
+    /* ═══════════════════════════════════
+       FULL-SCREEN AUTH WITH BACKGROUND
+    ═══════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body { width: 100%; min-height: 100vh; font-family: 'DM Sans', sans-serif; }
+
+    /* SA flag stripe */
+    body::before {
+      content: '';
+      position: fixed; top: 0; left: 0; right: 0; height: 5px; z-index: 100;
+      background: linear-gradient(90deg,
+        #007A4D 0%, #007A4D 20%, #FFB612 20%, #FFB612 22%,
+        #000 22%, #000 40%, #DE3831 40%, #DE3831 60%,
+        #002395 60%, #002395 78%, #fff 78%, #fff 80%,
+        #007A4D 80%, #007A4D 100%);
+    }
+
+    /* Background */
+    .auth-bg {
+      position: fixed; inset: 0; z-index: 0;
+      background-image: url('background_image.png');
+      background-size: cover;
+      background-position: center top;
+    }
+    .auth-bg::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg,
+        rgba(10,30,20,.60) 0%,
+        rgba(15,74,155,.45) 50%,
+        rgba(10,30,20,.55) 100%);
+    }
+
+    /* Screen layout */
+    .auth-screen {
+      position: relative; z-index: 1;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 30px 16px;
+    }
+
+    /* Floating card */
+    .auth-card {
+      width: 100%;
+      max-width: 460px;
+      background: rgba(255,255,255,0.93);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-radius: 22px;
+      border: 1px solid rgba(255,255,255,.7);
+      box-shadow: 0 20px 60px rgba(0,0,0,.30), 0 2px 8px rgba(0,0,0,.12),
+                  inset 0 1px 0 rgba(255,255,255,.9);
+      overflow: hidden;
+    }
+
+    /* Card header band */
+    .card-header {
+      background: linear-gradient(135deg, #0F6E56 0%, #1A4A9B 100%);
+      padding: 20px 32px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .card-logo {
+      font-size: 22px; font-weight: 700; color: #fff; letter-spacing: -.5px;
+    }
+    .card-logo span { color: rgba(255,255,255,.7); }
+    .card-tagline {
+      font-size: 11px; color: rgba(255,255,255,.75);
+      text-align: right; line-height: 1.4; font-weight: 400;
+    }
+
+    /* Card body */
+    .card-body { padding: 28px 32px 28px; }
+
+    /* Panel switching */
+    .auth-panel { display: none; }
+    .auth-panel.active { display: block; }
+
+    /* Panel heading */
+    .panel-icon {
+      width: 46px; height: 46px; border-radius: 12px;
+      background: linear-gradient(135deg, #E1F5EE, #EEF2FF);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; color: #0F6E56; margin-bottom: 14px;
+    }
+    .auth-heading {
+      font-size: 21px; font-weight: 700; color: #111; margin-bottom: 3px;
+    }
+    .auth-sub {
+      font-size: 13px; color: #777; margin-bottom: 20px; line-height: 1.5;
+    }
+
+    /* Form elements */
+    .form-group { margin-bottom: 13px; }
+    .form-label {
+      display: block; font-size: 12px; font-weight: 600;
+      color: #444; margin-bottom: 5px; letter-spacing: .02em;
+    }
+    .input-wrap { position: relative; }
+    .input-icon-l {
+      position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+      font-size: 15px; color: #aaa; pointer-events: none;
+    }
+    .f-inp {
+      width: 100%; padding: 11px 12px 11px 38px;
+      border: 1.5px solid #e0e0e0; border-radius: 11px;
+      font-family: inherit; font-size: 14px; color: #111;
+      background: rgba(255,255,255,.9);
+      transition: border-color .15s, box-shadow .15s; outline: none;
+    }
+    .f-inp:focus {
+      border-color: #0F6E56;
+      box-shadow: 0 0 0 3px rgba(15,110,86,.12);
+      background: #fff;
+    }
+    .f-inp::placeholder { color: #c0c0c0; }
+    .f-inp.no-icon { padding-left: 12px; }
+
+    .f-sel {
+      width: 100%; padding: 11px 32px 11px 12px;
+      border: 1.5px solid #e0e0e0; border-radius: 11px;
+      font-family: inherit; font-size: 14px; color: #111;
+      background: rgba(255,255,255,.9);
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23aaa' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 10px center;
+      outline: none; transition: border-color .15s;
+    }
+    .f-sel:focus { border-color: #0F6E56; }
+
+    .eye-btn {
+      position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+      cursor: pointer; color: #aaa; font-size: 16px; background: none; border: none;
+    }
+    .eye-btn:hover { color: #555; }
+
+    /* Primary button — !important to override components.css .btn */
+    .btn-main {
+      display: flex !important; align-items: center !important;
+      justify-content: center !important; gap: 8px !important;
+      width: 100% !important; padding: 13px !important;
+      background: linear-gradient(135deg, #0F6E56 0%, #1A4A9B 100%) !important;
+      color: #fff !important; border: none !important; border-radius: 50px !important;
+      font-family: inherit !important; font-size: 15px !important; font-weight: 600 !important;
+      cursor: pointer !important; letter-spacing: .03em !important;
+      box-shadow: 0 4px 18px rgba(15,110,86,.35) !important;
+      transition: transform .15s, box-shadow .15s, opacity .15s;
+      margin-bottom: 14px !important;
+    }
+    .btn-main:hover:not(:disabled) {
+      transform: translateY(-2px) !important;
+      box-shadow: 0 8px 28px rgba(15,110,86,.40) !important;
+    }
+    .btn-main:active { transform: scale(.98); }
+    .btn-main:disabled { opacity: .6 !important; cursor: not-allowed !important; }
+
+    /* Secondary button */
+    .btn-sec {
+      display: flex; align-items: center; gap: 6px;
+      padding: 10px 18px;
+      border: 1.5px solid #ddd; border-radius: 50px;
+      background: transparent; color: #555;
+      font-family: inherit; font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: all .15s;
+    }
+    .btn-sec:hover { background: #f5f5f5; border-color: #ccc; }
+
+    /* Ghost link */
+    .btn-ghost {
+      background: none; border: none; color: #0F6E56;
+      font-family: inherit; font-size: 13px; font-weight: 500;
+      cursor: pointer; padding: 0;
+    }
+    .btn-ghost:hover { text-decoration: underline; }
+
+    /* Alerts */
+    .alert {
+      padding: 10px 13px; border-radius: 10px;
+      font-size: 13px; line-height: 1.5;
+      display: flex; gap: 8px; align-items: flex-start;
+      margin-bottom: 14px;
+    }
+    .alert.hidden { display: none !important; }
+    .alert-err { background: #FCEBEB; color: #A32D2D; border-left: 3px solid #E24B4A; }
+    .alert-ok  { background: #E1F5EE; color: #0F6E56; border-left: 3px solid #1D9E75; }
+
+    /* Divider */
+    .divider {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 12px; color: #bbb; margin: 16px 0;
+    }
+    .divider::before, .divider::after {
+      content: ''; flex: 1; height: 1px; background: #e8e8e8;
+    }
+
+    /* Switch line */
+    .auth-switch {
+      text-align: center; font-size: 13px; color: #888; margin-top: 8px;
+    }
+
+    /* Password rules */
+    .pwd-rules { display: flex; flex-direction: column; gap: 3px; margin: 6px 0 10px; }
+    .rule { font-size: 12px; color: #ccc; display: flex; align-items: center; gap: 5px; transition: color .2s; }
+    .rule.ok { color: #0F6E56; }
+    .rule.ok i::before { content: '\ea5e'; }
+
+    /* Checkbox */
+    .chk-label {
+      display: flex; align-items: flex-start; gap: 8px;
+      font-size: 13px; color: #555; cursor: pointer; line-height: 1.5;
+    }
+    .chk-label input { margin-top: 2px; accent-color: #0F6E56; flex-shrink: 0; }
+
+    /* Two cols */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    /* Registration tabs */
+    .reg-tabs {
+      display: flex; gap: 3px; margin-bottom: 18px;
+      background: rgba(0,0,0,.05); border-radius: 12px; padding: 4px;
+    }
+    .reg-tab-btn {
+      flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+      padding: 7px 3px; border: none; border-radius: 9px; background: transparent;
+      color: #aaa; font-size: 9px; font-weight: 500; cursor: pointer;
+      transition: all .15s; font-family: inherit;
+    }
+    .reg-tab-btn i { font-size: 15px; }
+    .reg-tab-btn.active { background: #fff; color: #0F6E56; box-shadow: 0 1px 4px rgba(0,0,0,.1); font-weight: 600; }
+    .reg-tab-btn.done   { color: #1D9E75; }
+    .tab-title {
+      font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+      color: #aaa; margin-bottom: 10px;
+    }
+    .field-hint { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 11px; color: #bbb; }
+
+    /* OTP */
+    .otp-inp {
+      text-align: center; font-size: 26px; font-family: 'DM Mono', monospace;
+      letter-spacing: 10px; font-weight: 600; padding-left: 12px !important;
+    }
+
+    /* Spinner */
+    .spin {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,.3); border-top-color: #fff;
+      border-radius: 50%; animation: spin .6s linear infinite; display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Progress dots */
+    .step-dots {
+      display: flex; justify-content: center; gap: 6px; margin-bottom: 20px;
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #e0e0e0;
+      transition: all .3s;
+    }
+    .dot.active { background: #0F6E56; transform: scale(1.3); }
+    .dot.done   { background: #1D9E75; }
+
+    /* Responsive */
+    @media (max-width: 500px) {
+      .card-body { padding: 22px 20px; }
+      .card-header { padding: 16px 20px; }
+      .two-col { grid-template-columns: 1fr; }
+      .reg-tab-btn span { display: none; }
+      .card-tagline { display: none; }
+    }
+
+    /* Hide app shell on auth page — app.js overrides these on login */
+    #app { display: none; }
+    #toast { display: none; }
+
+    /* Auth screen fixed full-page overlay */
+    .auth-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 30px 16px;
+      overflow-y: auto;
+    }
+
+    /* Background fixed full screen */
+    .auth-bg {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+
+    /* Card always on top */
+    .auth-card {
+      position: relative;
+      z-index: 60;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Background -->
+<div class="auth-bg"></div>
+
+<div class="auth-screen">
+  <div class="auth-card">
+
+    <!-- Card header -->
+    <div class="card-header">
+      <div class="card-logo">NI<span>HMS</span></div>
+      <div class="card-tagline">South African National<br>Healthcare Management</div>
+    </div>
+
+    <!-- Card body -->
+    <div class="card-body">
+
+      <!-- ══════════ LOGIN PANEL ══════════ -->
+      <div class="auth-panel active" id="panel-login">
+        <div class="panel-icon"><i class="ti ti-stethoscope"></i></div>
+        <div class="auth-heading">Welcome back</div>
+        <div class="auth-sub">Sign in to your NIHMS account</div>
+        <div id="login-alert" class="alert alert-err hidden"></div>
+
+        <div class="form-group">
+          <label class="form-label">Email address or ID number</label>
+          <div class="input-wrap">
+            <i class="ti ti-user input-icon-l"></i>
+            <input class="f-inp" type="text" id="login-email" placeholder="name@facility.gov.za or 8203041234083" autocomplete="username" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <div class="input-wrap">
+            <i class="ti ti-lock input-icon-l"></i>
+            <input class="f-inp" type="password" id="login-password" placeholder="Enter your password" autocomplete="current-password" />
+            <button class="eye-btn" type="button" onclick="togglePwd('login-password',this)"><i class="ti ti-eye"></i></button>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;margin-bottom:18px">
+          <button class="btn-ghost" onclick="showPanel('reset')">Forgot password?</button>
+        </div>
+
+        <button class="btn-main" id="login-btn" onclick="doLogin()">
+          <i class="ti ti-login"></i><span>Sign in</span>
+        </button>
+
+        <div class="auth-switch">
+          Don't have an account? <button class="btn-ghost" onclick="showPanel('register')">Register</button>
+        </div>
+      </div>
+
+      <!-- ══════════ REGISTER PANEL ══════════ -->
+      <div class="auth-panel" id="panel-register">
+        <button class="btn-back" onclick="showPanel('login')"><i class="ti ti-arrow-left"></i> Back to sign in</button>
+        <div class="panel-icon"><i class="ti ti-user-plus"></i></div>
+        <div class="auth-heading">Create account</div>
+        <div class="auth-sub">Register for NIHMS access</div>
+        <div id="register-alert" class="alert alert-err hidden"></div>
+
+        <!-- Progress dots -->
+        <div class="step-dots">
+          <div class="dot active" id="dot-1"></div>
+          <div class="dot" id="dot-2"></div>
+          <div class="dot" id="dot-3"></div>
+          <div class="dot" id="dot-4"></div>
+          <div class="dot" id="dot-5"></div>
+        </div>
+
+        <!-- Tab nav -->
+        <div class="reg-tabs">
+          <button class="reg-tab-btn active" id="reg-tab-btn-1" onclick="_showRegTab(1)">
+            <i class="ti ti-user"></i><span>Personal</span>
+          </button>
+          <button class="reg-tab-btn" id="reg-tab-btn-2" onclick="_showRegTab(2)">
+            <i class="ti ti-phone"></i><span>Contact</span>
+          </button>
+          <button class="reg-tab-btn" id="reg-tab-btn-3" onclick="_showRegTab(3)">
+            <i class="ti ti-map-pin"></i><span>Address</span>
+          </button>
+          <button class="reg-tab-btn" id="reg-tab-btn-4" onclick="_showRegTab(4)">
+            <i class="ti ti-heart-handshake"></i><span>Kin</span>
+          </button>
+          <button class="reg-tab-btn" id="reg-tab-btn-5" onclick="_showRegTab(5)">
+            <i class="ti ti-lock"></i><span>Password</span>
+          </button>
+        </div>
+
+        <!-- TAB 1: Personal -->
+        <div id="reg-tab-1">
+          <div class="tab-title">Personal information</div>
+          <div class="two-col">
+            <div class="form-group">
+              <label class="form-label">First name *</label>
+              <input class="f-inp no-icon" id="reg-first" placeholder="Nomsa" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Last name *</label>
+              <input class="f-inp no-icon" id="reg-last" placeholder="Dlamini" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Middle name</label>
+            <input class="f-inp no-icon" id="reg-mid" placeholder="(optional)" />
+          </div>
+          <div class="two-col">
+            <div class="form-group">
+              <label class="form-label">Date of birth *</label>
+              <input class="f-inp no-icon" type="date" id="reg-dob" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Gender *</label>
+              <select class="f-sel" id="reg-gender">
+                <option value="">— Select —</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="prefer_not_to_say">Prefer not to say</option>
+              </select>
+            </div>
+          </div>
+          <div class="two-col">
+            <div class="form-group">
+              <label class="form-label">ID type *</label>
+              <select class="f-sel" id="reg-idtype">
+                <option value="sa_id">South African ID</option>
+                <option value="passport">Passport</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">ID / Passport number *</label>
+              <input class="f-inp no-icon" id="reg-idnum" placeholder="8203041234083" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Role *</label>
+            <select class="f-sel" id="reg-role">
+              <option value="">— Select your role —</option>
+              <option value="patient">Patient</option>
+              <option value="doctor">Doctor</option>
+              <option value="nurse">Nurse</option>
+              <option value="pharmacy">Pharmacist</option>
+              <option value="admin">Facility Administrator</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- TAB 2: Contact -->
+        <div id="reg-tab-2" style="display:none">
+          <div class="tab-title">Contact information</div>
+          <div class="form-group">
+            <label class="form-label">Email address *</label>
+            <div class="input-wrap">
+              <i class="ti ti-mail input-icon-l"></i>
+              <input class="f-inp" type="email" id="reg-email" placeholder="name@example.com" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Mobile phone * <span class="field-hint">(+27 added automatically)</span></label>
+            <div class="input-wrap">
+              <i class="ti ti-phone input-icon-l"></i>
+              <input class="f-inp" type="tel" id="reg-phone" placeholder="0821234567 or 821234567" onblur="_autoFormatPhone(this)" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Alternative phone <span class="field-hint">(optional)</span></label>
+            <div class="input-wrap">
+              <i class="ti ti-phone input-icon-l"></i>
+              <input class="f-inp" type="tel" id="reg-phone-alt" placeholder="0821234567" onblur="_autoFormatPhone(this)" />
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: Address -->
+        <div id="reg-tab-3" style="display:none">
+          <div class="tab-title">Physical address <span class="field-hint">(optional)</span></div>
+          <div class="form-group">
+            <label class="form-label">Street address</label>
+            <input class="f-inp no-icon" id="reg-street" placeholder="123 Main Road" />
+          </div>
+          <div class="two-col">
+            <div class="form-group">
+              <label class="form-label">Suburb</label>
+              <input class="f-inp no-icon" id="reg-suburb" placeholder="Soweto" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">City</label>
+              <input class="f-inp no-icon" id="reg-city" placeholder="Johannesburg" />
+            </div>
+          </div>
+          <div class="two-col">
+            <div class="form-group">
+              <label class="form-label">Postal code</label>
+              <input class="f-inp no-icon" id="reg-postal" placeholder="2001" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Province</label>
+              <select class="f-sel" id="reg-province">
+                <option value="">— Select —</option>
+                <option>Gauteng</option><option>KwaZulu-Natal</option><option>Western Cape</option>
+                <option>Eastern Cape</option><option>Limpopo</option><option>Mpumalanga</option>
+                <option>North West</option><option>Free State</option><option>Northern Cape</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 4: Next of kin + Medical aid -->
+        <div id="reg-tab-4" style="display:none">
+          <div class="tab-title">Next of kin <span class="field-hint">(optional)</span></div>
+          <div class="two-col">
+            <div class="form-group">
+              <label class="form-label">Full name</label>
+              <input class="f-inp no-icon" id="reg-kin-name" placeholder="Jane Dlamini" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Relationship</label>
+              <select class="f-sel" id="reg-kin-rel">
+                <option value="">— Select —</option>
+                <option>Spouse</option><option>Parent</option><option>Child</option>
+                <option>Sibling</option><option>Friend</option><option>Guardian</option><option>Other</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Phone</label>
+            <input class="f-inp no-icon" type="tel" id="reg-kin-phone" placeholder="0821234567" onblur="_autoFormatPhone(this)" />
+          </div>
+          <div class="divider">Medical aid</div>
+          <div class="form-group">
+            <label class="chk-label">
+              <input type="checkbox" id="reg-has-aid" onchange="document.getElementById('reg-aid-fields').style.display=this.checked?'block':'none'" />
+              I have medical aid / health insurance
+            </label>
+          </div>
+          <div id="reg-aid-fields" style="display:none">
+            <div class="form-group">
+              <label class="form-label">Provider</label>
+              <select class="f-sel" id="reg-aid-provider">
+                <option value="">— Select provider —</option>
+                <option>Discovery Health</option><option>Momentum Health</option><option>Bonitas</option>
+                <option>Medshield</option><option>Fedhealth</option><option>Bestmed</option>
+                <option>Gems (Government)</option><option>Hosmed</option><option>Other</option>
+              </select>
+            </div>
+            <div class="two-col">
+              <div class="form-group">
+                <label class="form-label">Member number</label>
+                <input class="f-inp no-icon" id="reg-aid-num" placeholder="12345678" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Plan / option</label>
+                <input class="f-inp no-icon" id="reg-aid-plan" placeholder="e.g. Coastal Core" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 5: Password -->
+        <div id="reg-tab-5" style="display:none">
+          <div class="tab-title">Account security</div>
+          <div class="form-group">
+            <label class="form-label">Password *</label>
+            <div class="input-wrap">
+              <i class="ti ti-lock input-icon-l"></i>
+              <input class="f-inp" type="password" id="reg-password" placeholder="Create a strong password" oninput="checkPwd()" />
+              <button class="eye-btn" type="button" onclick="togglePwd('reg-password',this)"><i class="ti ti-eye"></i></button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Confirm password *</label>
+            <div class="input-wrap">
+              <i class="ti ti-lock input-icon-l"></i>
+              <input class="f-inp" type="password" id="reg-confirm" placeholder="Repeat your password" />
+              <button class="eye-btn" type="button" onclick="togglePwd('reg-confirm',this)"><i class="ti ti-eye"></i></button>
+            </div>
+          </div>
+          <div class="pwd-rules">
+            <div class="rule" id="rule-len"><i class="ti ti-circle"></i> At least 8 characters</div>
+            <div class="rule" id="rule-upper"><i class="ti ti-circle"></i> One uppercase letter</div>
+            <div class="rule" id="rule-num"><i class="ti ti-circle"></i> One number</div>
+          </div>
+          <div style="margin:14px 0">
+            <label class="chk-label">
+              <input type="checkbox" id="reg-terms" />
+              I agree to the NIHMS <a href="#" style="color:#0F6E56">Terms of Use</a> and <a href="#" style="color:#0F6E56">POPIA Privacy Policy</a>
+            </label>
+          </div>
+        </div>
+
+        <!-- Navigation buttons -->
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="btn-sec" id="reg-prev" style="display:none" onclick="_prevRegTab()">
+            <i class="ti ti-arrow-left"></i> Back
+          </button>
+          <button class="btn-main" id="reg-next" onclick="_nextRegTab()" style="flex:1;margin-bottom:0">
+            <span>Continue <i class="ti ti-arrow-right"></i></span>
+          </button>
+          <button class="btn-main" id="reg-submit" style="display:none;flex:1;margin-bottom:0" onclick="doRegister()">
+            <i class="ti ti-check"></i><span>Create account</span>
+          </button>
+        </div>
+
+        <div class="auth-switch" style="margin-top:14px">
+          Already registered? <button class="btn-ghost" onclick="showPanel('login')">Sign in</button>
+        </div>
+      </div>
+
+      <!-- ══════════ RESET PASSWORD PANEL ══════════ -->
+      <div class="auth-panel" id="panel-reset">
+        <button class="btn-back" onclick="showPanel('login')"><i class="ti ti-arrow-left"></i> Back to sign in</button>
+        <div class="panel-icon" style="background:linear-gradient(135deg,#EEF2FF,#E1F5EE)"><i class="ti ti-key" style="color:#1A4A9B"></i></div>
+        <div class="auth-heading">Reset password</div>
+        <div class="auth-sub">We'll send a 6-digit OTP to your email and phone</div>
+        <div id="reset-alert" class="alert alert-err hidden"></div>
+
+        <!-- Step 1: Enter email -->
+        <div id="reset-step-1">
+          <div class="form-group">
+            <label class="form-label">Email address</label>
+            <div class="input-wrap">
+              <i class="ti ti-mail input-icon-l"></i>
+              <input class="f-inp" type="email" id="reset-email" placeholder="name@example.com" />
+            </div>
+          </div>
+          <button class="btn-main" onclick="doReset()">
+            <i class="ti ti-send"></i><span>Send OTP</span>
+          </button>
+        </div>
+
+        <!-- Step 2: Enter OTP + new password -->
+        <div id="reset-step-2" style="display:none">
+          <div class="alert alert-ok" style="display:flex;gap:10px;margin-bottom:16px">
+            <i class="ti ti-terminal" style="font-size:20px;flex-shrink:0"></i>
+            <div>
+              <div style="font-weight:600;margin-bottom:2px">OTP sent!</div>
+              <div>Check your email and phone for the 6-digit code. If SMTP is not set up, check the <strong>backend terminal</strong> for the code.</div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">6-digit OTP code</label>
+            <input class="f-inp no-icon otp-inp" type="text" id="reset-otp" placeholder="• • • • • •" maxlength="6" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">New password</label>
+            <div class="input-wrap">
+              <i class="ti ti-lock input-icon-l"></i>
+              <input class="f-inp" type="password" id="reset-newpwd" placeholder="New password" />
+              <button class="eye-btn" type="button" onclick="togglePwd('reset-newpwd',this)"><i class="ti ti-eye"></i></button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Confirm new password</label>
+            <div class="input-wrap">
+              <i class="ti ti-lock input-icon-l"></i>
+              <input class="f-inp" type="password" id="reset-confirmpwd" placeholder="Confirm new password" />
+              <button class="eye-btn" type="button" onclick="togglePwd('reset-confirmpwd',this)"><i class="ti ti-eye"></i></button>
+            </div>
+          </div>
+
+          <button class="btn-main" onclick="doResetConfirm()">
+            <i class="ti ti-shield-check"></i><span>Set new password</span>
+          </button>
+        </div>
+
+
+      </div>
+
+    </div><!-- end .card-body -->
+  </div><!-- end .auth-card -->
+</div><!-- end .auth-screen -->
+
+<!-- Hidden app shell (used after login) -->
+<div id="app" style="display:none">
+  <div class="topbar">
+    <div class="topbar-logo">NI<span>HMS</span></div>
+    <div class="topbar-center" id="topbar-roles"></div>
+    <div class="topbar-right">
+      <div class="conn-badge conn-online" id="conn-badge">
+        <div class="dot dot-green"></div>
+        <span id="conn-text">Online · Johannesburg CHC</span>
+      </div>
+      <div class="user-menu" onclick="toggleDropdown()">
+        <div class="user-avatar" id="topbar-avatar">ND</div>
+        <div>
+          <div class="user-name" id="topbar-name">User</div>
+          <div class="user-role-tag" id="topbar-role">Role</div>
+        </div>
+        <i class="ti ti-chevron-down" style="font-size:14px;color:var(--text-hint)"></i>
+      </div>
+      <div class="profile-dropdown" id="profile-dropdown">
+        <div class="dd-item" onclick="toggleDropdown();Router.setPage('myprofile');setTimeout(()=>_showEpTab&&_showEpTab(0),300)"><i class="ti ti-user"></i> My profile</div>
+        <div class="dd-sep"></div>
+        <div class="dd-item dd-logout" onclick="doLogout()"><i class="ti ti-logout"></i> Sign out</div>
+      </div>
+    </div>
+  </div>
+  <div class="app-body">
+    <div class="sidebar" id="sidebar"></div>
+    <div class="content" id="content"></div>
+  </div>
+</div>
+
+<div id="toast"><i class="ti ti-check"></i><span id="toast-msg"></span></div>
+
+<!-- Scripts -->
+<script>
+  // On login page load, clear any stale session so old logged-in user
+  // doesn't auto-appear behind the login card
+  sessionStorage.clear();
+  // Keep localStorage refresh token so "remember me" still works on next visit
+  // but force re-authentication on this page
+</script>
+<script>
+  // Fix function names that auth.js calls with old class names
+  function showPanel(name) {
+    document.querySelectorAll('.auth-panel').forEach(p => p.classList.remove('active'));
+    const el = document.getElementById('panel-' + name);
+    if (el) el.classList.add('active');
+    // Clear alerts
+    document.querySelectorAll('.alert').forEach(a => { if(!a.id?.includes('toast')) a.classList.add('hidden'); });
+    // Update step dots for register
+    if (name === 'register') _updateDots(1);
+  }
+  function togglePwd(id, btn) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const isText = el.type === 'text';
+    el.type = isText ? 'password' : 'text';
+    btn.innerHTML = `<i class="ti ti-eye${isText ? '' : '-off'}"></i>`;
+  }
+  function _updateDots(n) {
+    for (let i=1;i<=5;i++) {
+      const d = document.getElementById('dot-'+i);
+      if (!d) continue;
+      d.className = 'dot' + (i===n?' active':i<n?' done':'');
+    }
+  }
+  // Override _showRegTab to also update dots
+  const _origShowRegTab = typeof _showRegTab !== 'undefined' ? _showRegTab : null;
+  window._showRegTabWithDots = function(n) {
+    if (typeof _showRegTab === 'function') _showRegTab(n);
+    _updateDots(n);
+  };
+</script>
+<script src="js/api.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/router.js"></script>
+<script src="js/pages/doctor.js"></script>
+<script src="js/pages/nurse.js"></script>
+<script src="js/pages/patient.js"></script>
+<script src="js/pages/pharmacy.js"></script>
+<script src="js/pages/admin.js"></script>
+<script src="js/pages/telemedicine.js"></script>
+<script src="js/pages/chatbot.js"></script>
+<script src="js/pages/queue_dashboard.js"></script>
+<script src="js/app.js"></script>
+<script>
+  // After scripts load, patch _showRegTab to update dots
+  const _origTab = _showRegTab;
+  window._showRegTab = function(n) {
+    _origTab(n);
+    _updateDots(n);
+  };
+  // Enter key
+  document.getElementById('login-email')?.addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('login-password')?.focus(); });
+  document.getElementById('login-password')?.addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+</script>
+</body>
+</html>

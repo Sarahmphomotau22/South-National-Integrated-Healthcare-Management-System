@@ -210,7 +210,7 @@ const BASE_URL = _metaBackend || 'http://localhost:5000/api/v1';
       } catch {
         _refreshPromise = null;
         Tokens.clear();
-        window.location.replace('login.html');
+        window.location.replace('/');
         return;
       }
     }

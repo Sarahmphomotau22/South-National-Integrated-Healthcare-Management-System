@@ -113,7 +113,7 @@ exports.register = async (req, res, next) => {
     const origins   = (process.env.CLIENT_ORIGIN || 'http://localhost:5500').split(',').map(s=>s.trim()).filter(s=>s&&s!=='null');
     // Prefer network IP so phones can open the activation link
     const clientUrl = origins.find(o => !o.includes('localhost') && !o.includes('127.0.0.1')) || origins[0];
-    const verifyUrl  = `${clientUrl}/verify-email?token=${verifyToken}&email=${encodeURIComponent(email)}`;
+    const verifyUrl  = `${clientUrl}/verify-email.html?token=${verifyToken}&email=${encodeURIComponent(email)}`;
     await sendWelcomeEmail({ to: email, firstName, role, verifyUrl }).catch(e =>
       logger.warn('Welcome email failed:', e.message)
     );

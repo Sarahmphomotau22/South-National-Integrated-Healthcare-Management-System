@@ -94,7 +94,7 @@ router.post('/change-password', protect, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/v1/auth/verify-email?token=&email=
+// GET /api/v1/auth/verify-email.html?token=&email=
 router.get('/verify-email', async (req, res, next) => {
   try {
     const { token, email } = req.query;
@@ -150,7 +150,7 @@ router.post('/resend-verification', async (req, res, next) => {
 
     const origins   = (process.env.CLIENT_ORIGIN || 'http://localhost:5500').split(',').map(s=>s.trim()).filter(s=>s&&s!=='null');
     const clientUrl = origins.find(o => !o.includes('localhost') && !o.includes('127.0.0.1')) || origins[0];
-    const verifyUrl = `${clientUrl}/verify-email?token=${verifyToken}&email=${encodeURIComponent(email)}`;
+    const verifyUrl = `${clientUrl}/verify-email.html?token=${verifyToken}&email=${encodeURIComponent(email)}`;
     await sendWelcomeEmail({ to: user.email, firstName: user.firstName, role: user.role, verifyUrl });
 
     logger.info(`Verification email resent to ${email}`);

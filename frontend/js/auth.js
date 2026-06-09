@@ -269,7 +269,7 @@ async function doResetConfirm() {
 async function doLogout() {
   try { await API.auth.logout(); } catch (_) {}
   API.clearSession();
-  window.location.replace('login.html');
+  window.location.replace('/');
 }
 
 /* ── Enter key shortcut on login ── */
