@@ -1,0 +1,76 @@
+/* ═══════════════════════════════════════════════
+   css/pages.css
+   Page-specific styles (minor overrides only —
+   most styling lives in components.css)
+═══════════════════════════════════════════════ */
+
+/* ── Consult page ── */
+.consult-allergy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+/* ── Telemedicine ── */
+.tele-session-wrap {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+}
+.tele-sidebar {
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tele-controls {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+/* ── Patient health overview ── */
+.patient-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* ── Admin flow ── */
+.flow-stage {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.flow-stage:last-child { border: none; }
+.flow-stage-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+/* ── Facility table ── */
+.facility-conn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ── Role breakdown ── */
+.role-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.role-row:last-child { border: none; }
+
+/* ── Stock table ── */
+.stock-pct-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 30px;
+  text-align: right;
+}

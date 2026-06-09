@@ -1,0 +1,257 @@
+/* ═══════════════════════════════════════════════
+   css/components.css
+   Reusable UI components: cards, tables, badges,
+   buttons, form controls, alerts, vitals, queue, etc.
+═══════════════════════════════════════════════ */
+
+/* ── Cards ── */
+.card {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  padding: 18px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+.card-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+.card-title i { font-size:16px; color:var(--green); }
+
+/* ── Metric cards ── */
+.metric-grid   { display:grid; gap:12px; margin-bottom:18px; }
+.metric-grid-3 { grid-template-columns: repeat(3, 1fr); }
+.metric-grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+.metric-card {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+.metric-label { font-size:11px; font-weight:500; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase; letter-spacing:.04em; }
+.metric-value { font-size:24px; font-weight:600; letter-spacing:-0.5px; }
+.metric-delta { font-size:12px; margin-top:4px; }
+.delta-up { color: var(--green); }
+.delta-dn { color: var(--coral); }
+
+/* ── Tables ── */
+.table-wrap { overflow-x: auto; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 0 12px 10px 0;
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+td {
+  padding: 11px 12px 11px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  vertical-align: middle;
+}
+tr:last-child td { border-bottom: none; }
+
+/* ── Badges ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+.badge-green { background:var(--green-light); color:var(--green-dark); }
+.badge-amber { background:var(--amber-light); color:var(--amber); }
+.badge-red   { background:var(--red-light);   color:var(--red); }
+.badge-blue  { background:var(--blue-light);  color:var(--blue); }
+.badge-gray  { background:var(--bg-surface);  color:var(--text-muted); border:1px solid var(--border); }
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-md);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .12s;
+  white-space: nowrap;
+}
+.btn:hover    { background: var(--bg-surface); }
+.btn-green    { background:var(--green); border-color:var(--green); color:#fff; }
+.btn-green:hover { background:var(--green-dark); border-color:var(--green-dark); }
+.btn-sm       { padding:5px 10px; font-size:12px; }
+.btn-xs       { padding:3px 8px;  font-size:11px; }
+.btn i        { font-size:15px; }
+
+/* ── Form controls (in-page) ── */
+.f-input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border-md);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-card);
+  outline: none;
+  transition: border-color .15s;
+  margin-bottom: 10px;
+}
+.f-input:focus { border-color: var(--green); }
+
+.f-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  display: block;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.f-group { margin-bottom: 14px; }
+
+.f-select {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border-md);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-card);
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+.f-select:focus { border-color: var(--green); }
+
+.f-textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border-md);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-card);
+  outline: none;
+  resize: vertical;
+  margin-bottom: 10px;
+}
+.f-textarea:focus { border-color: var(--green); }
+
+.checkbox-label { display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; }
+.checkbox-label input[type=checkbox] { accent-color:var(--green); width:14px; height:14px; }
+
+/* ── Alert boxes ── */
+.alert-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.alert-box i { font-size:16px; flex-shrink:0; margin-top:1px; }
+.alert-warn   { background:var(--amber-light); color:var(--amber); border-left:3px solid var(--amber-mid); }
+.alert-info   { background:var(--blue-light);  color:var(--blue);  border-left:3px solid #378ADD; }
+.alert-danger { background:var(--red-light);   color:var(--red);   border-left:3px solid var(--red-mid); }
+.alert-ok     { background:var(--green-light); color:var(--green-dark); border-left:3px solid var(--green-mid); }
+
+/* ── Layout grids ── */
+.two-col   { display:grid; grid-template-columns:1fr 1fr;       gap:16px; }
+.three-col { display:grid; grid-template-columns:1fr 1fr 1fr;   gap:14px; }
+
+/* ── Avatar ── */
+.avatar {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* ── Vitals grid ── */
+.vitals-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.vital-box   { background:var(--bg-surface); border-radius:var(--radius); padding:10px; text-align:center; }
+.vital-val   { font-size:18px; font-weight:600; }
+.vital-lbl   { font-size:11px; color:var(--text-muted); margin-top:2px; }
+
+/* ── Queue rows ── */
+.queue-row { display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid var(--border); }
+.queue-row:last-child { border:none; }
+.queue-num { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:600; flex-shrink:0; }
+.q-priority { background:var(--red-light);  color:var(--red); }
+.q-normal   { background:var(--blue-light); color:var(--blue); }
+.q-info     { flex:1; }
+.q-name     { font-size:13px; font-weight:500; }
+.q-sub      { font-size:12px; color:var(--text-muted); }
+
+/* ── Progress bar ── */
+.progress-wrap { height:6px; background:var(--bg-surface); border-radius:3px; overflow:hidden; margin-top:5px; }
+.progress-fill { height:100%; border-radius:3px; transition:width .3s; }
+
+/* ── Stock bar ── */
+.stock-bar-wrap { display:flex; align-items:center; gap:8px; }
+.stock-bar      { flex:1; height:5px; background:var(--bg-surface); border-radius:3px; overflow:hidden; }
+.stock-fill     { height:100%; border-radius:3px; }
+
+/* ── Video / Telemedicine ── */
+.video-area {
+  flex:1;
+  background:#1a1a1a;
+  border-radius:var(--radius-lg);
+  min-height:180px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  position:relative;
+}
+.video-pip {
+  position:absolute; bottom:10px; right:10px;
+  width:72px; height:52px;
+  background:#333;
+  border-radius:8px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:10px; color:#888;
+}
+.ctrl-btn {
+  width:38px; height:38px;
+  border-radius:50%;
+  border:1px solid var(--border-md);
+  background:var(--bg-card);
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; font-size:16px; color:var(--text);
+  transition:all .12s;
+}
+.ctrl-btn:hover  { background:var(--bg-surface); }
+.ctrl-btn.danger { background:var(--red-light); border-color:#F09595; color:var(--red); }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .metric-grid-4 { grid-template-columns: repeat(2,1fr); }
+  .two-col       { grid-template-columns: 1fr; }
+}
