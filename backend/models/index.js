@@ -63,7 +63,10 @@ const appointmentSchema = new mongoose.Schema({
   checkedInAt:    { type: Date },
   calledAt:       { type: Date },
   priorityReason: { type: String },
-  isWalkIn:       { type: Boolean, default: false }
+  isWalkIn:          { type: Boolean, default: false },
+  rescheduleReason:  { type: String, trim: true },
+  rescheduledAt:     { type: Date },
+  rescheduledBy:     { type: String }
 }, { timestamps: true });
 
 appointmentSchema.index({ patient: 1, scheduledAt: -1 });

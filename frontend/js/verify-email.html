@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NIHMS — Verify your email</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="css/variables.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg, #F2F2EF);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 40px 36px;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 4px 24px rgba(0,0,0,.08);
+    }
+    .logo { font-size: 22px; font-weight: 700; color: #1a1a1a; margin-bottom: 28px; }
+    .logo span { color: #0F6E56; }
+    .icon-circle {
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px;
+      margin: 0 auto 20px;
+    }
+    .icon-loading { background: #EEF2FF; color: #4A6CF7; animation: spin .8s linear infinite; }
+    .icon-success { background: #E1F5EE; color: #0F6E56; }
+    .icon-error   { background: #FCEBEB; color: #A32D2D; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h2 { font-size: 22px; font-weight: 700; color: #1a1a1a; margin-bottom: 10px; }
+    p  { font-size: 14px; color: #666; line-height: 1.7; margin-bottom: 20px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 13px 28px;
+      border-radius: 50px;
+      border: none;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all .2s;
+    }
+    .btn-green  { background: #0F6E56; color: #fff; }
+    .btn-green:hover { background: #0a5a45; }
+    .btn-outline { background: transparent; color: #0F6E56; border: 1.5px solid #0F6E56; margin-top: 10px; }
+    .btn-outline:hover { background: #E1F5EE; }
+    .divider { height: 1px; background: #eee; margin: 20px 0; }
+    .resend-form { display: none; }
+    .form-input {
+      width: 100%; padding: 12px 14px; border: 1.5px solid #ddd; border-radius: 10px;
+      font-family: 'DM Sans', sans-serif; font-size: 14px; margin-bottom: 10px;
+      outline: none; transition: border-color .15s;
+    }
+    .form-input:focus { border-color: #0F6E56; }
+    .alert { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; display:none; }
+    .alert-ok  { background: #E1F5EE; color: #0F6E56; }
+    .alert-err { background: #FCEBEB; color: #A32D2D; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">NI<span>HMS</span></div>
+
+    <!-- Loading state -->
+    <div id="state-loading">
+      <div class="icon-circle icon-loading"><i class="ti ti-loader-2"></i></div>
+      <h2>Verifying your email…</h2>
+      <p>Please wait while we activate your account.</p>
+    </div>
+
+    <!-- Success state -->
+    <div id="state-success" style="display:none">
+      <div class="icon-circle icon-success"><i class="ti ti-circle-check"></i></div>
+      <h2>Email verified!</h2>
+      <p id="success-msg">Your NIHMS account has been activated successfully. You can now sign in and access all features.</p>
+      <a href="login.html" class="btn btn-green"><i class="ti ti-login"></i>Sign in to NIHMS</a>
+    </div>
+
+    <!-- Error state -->
+    <div id="state-error" style="display:none">
+      <div class="icon-circle icon-error"><i class="ti ti-alert-circle"></i></div>
+      <h2>Verification failed</h2>
+      <p id="error-msg">This link is invalid or has expired. Links expire after 24 hours.</p>
+      <a href="login.html" class="btn btn-outline"><i class="ti ti-arrow-left"></i>Back to sign in</a>
+
+      <div class="divider"></div>
+      <p style="font-size:13px;color:#888">Didn't receive the email or link expired?</p>
+      <button class="btn btn-outline" onclick="document.getElementById('resend-form').style.display='block';this.style.display='none'">
+        <i class="ti ti-mail"></i>Resend activation email
+      </button>
+      <div class="resend-form" id="resend-form" style="margin-top:14px;text-align:left">
+        <input class="form-input" type="email" id="resend-email" placeholder="Enter your email address">
+        <div id="resend-alert" class="alert"></div>
+        <button class="btn btn-green" style="width:100%;justify-content:center" onclick="_resendVerification()">
+          <i class="ti ti-send"></i>Send new activation link
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:5000/api/v1';
+
+    function show(state) {
+      ['loading','success','error'].forEach(s => {
+        document.getElementById(`state-${s}`).style.display = s === state ? 'block' : 'none';
+      });
+    }
+
+    async function verifyEmail() {
+      const params = new URLSearchParams(window.location.search);
+      const token  = params.get('token');
+      const email  = params.get('email');
+
+      if (!token || !email) {
+        document.getElementById('error-msg').textContent = 'Invalid verification link — missing token or email.';
+        show('error');
+        return;
+      }
+
+      // Pre-fill resend email
+      const resendInput = document.getElementById('resend-email');
+      if (resendInput) resendInput.value = email;
+
+      try {
+        const res  = await fetch(`${API_URL}/auth/verify-email?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`);
+        const data = await res.json();
+
+        if (data.success) {
+          document.getElementById('success-msg').textContent = data.message || 'Your account has been activated. You can now sign in.';
+          show('success');
+          // Auto-redirect after 4 seconds
+          setTimeout(() => { window.location.href = 'login.html'; }, 4000);
+        } else {
+          document.getElementById('error-msg').textContent = data.message || 'Verification failed. Please try again.';
+          show('error');
+        }
+      } catch (err) {
+        document.getElementById('error-msg').textContent = 'Could not connect to the server. Make sure the backend is running.';
+        show('error');
+      }
+    }
+
+    async function _resendVerification() {
+      const email   = document.getElementById('resend-email').value.trim();
+      const alertEl = document.getElementById('resend-alert');
+
+      if (!email) { alertEl.textContent='Please enter your email.'; alertEl.className='alert alert-err'; alertEl.style.display='block'; return; }
+
+      try {
+        const res  = await fetch(`${API_URL}/auth/resend-verification`, {
+          method:  'POST',
+          headers: { 'Content-Type':'application/json' },
+          body:    JSON.stringify({ email })
+        });
+        const data = await res.json();
+        alertEl.textContent = data.message || (data.success ? 'New link sent!' : 'Failed. Please try again.');
+        alertEl.className   = 'alert ' + (data.success ? 'alert-ok' : 'alert-err');
+        alertEl.style.display = 'block';
+      } catch {
+        alertEl.textContent = 'Could not connect to server.';
+        alertEl.className   = 'alert alert-err';
+        alertEl.style.display = 'block';
+      }
+    }
+
+    // Run on page load
+    verifyEmail();
+  </script>
+</body>
+</html>

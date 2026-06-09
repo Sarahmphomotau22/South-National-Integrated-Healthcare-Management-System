@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NIHMS — Welcome</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      font-family: 'DM Sans', sans-serif;
+      overflow: hidden;
+    }
+
+    /* ── Background ── */
+    .bg {
+      position: fixed; inset: 0;
+      background-image: url('background_image.png');
+      background-size: cover;
+      background-position: center top;
+      background-repeat: no-repeat;
+      background-attachment: fixed;
+    }
+
+    /* Semi-transparent overlay so text is readable */
+    .bg::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(
+        180deg,
+        rgba(255,255,255,0.10) 0%,
+        rgba(255,255,255,0.30) 50%,
+        rgba(255,255,255,0.20) 100%
+      );
+    }
+
+    /* ── Main container ── */
+    .container {
+      position: relative; z-index: 2;
+      width: 100%; min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      text-align: center;
+    }
+
+    /* ── Text lines ── */
+    .line {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+    .line.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .welcome-to {
+      font-size: clamp(22px, 3vw, 34px);
+      font-weight: 600;
+      color: #0A2A7A;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      text-shadow: 0 2px 12px rgba(255,255,255,0.9), 0 0 30px rgba(255,255,255,0.8);
+      background: rgba(255,255,255,0.55);
+      display: inline-block;
+      padding: 4px 20px;
+      border-radius: 30px;
+    }
+
+    .sa-national {
+      font-size: clamp(32px, 5.5vw, 62px);
+      font-weight: 700;
+      color: #B01010;
+      line-height: 1.1;
+      margin-bottom: 4px;
+      text-shadow: 0 2px 20px rgba(255,255,255,0.9), 0 4px 8px rgba(176,16,16,0.3);
+    }
+
+    .hospital-mgmt {
+      font-size: clamp(28px, 4.5vw, 52px);
+      font-weight: 700;
+      color: #0F5C30;
+      line-height: 1.15;
+      margin-bottom: 18px;
+      text-shadow: 0 2px 20px rgba(255,255,255,0.9), 0 4px 8px rgba(15,92,48,0.25);
+    }
+
+    /* Animated underline */
+    .hospital-mgmt .underline-bar {
+      display: block;
+      height: 4px;
+      border-radius: 2px;
+      background: linear-gradient(90deg, #1A6B3C, #1A4A9B, #C0271A);
+      width: 0%;
+      margin: 8px auto 0;
+      transition: width 1s ease 0.3s;
+    }
+    .hospital-mgmt.visible .underline-bar {
+      width: 80%;
+    }
+
+    .tagline {
+      font-size: clamp(15px, 1.8vw, 20px);
+      font-weight: 600;
+      color: #0A2A7A;
+      letter-spacing: 0.03em;
+      margin-bottom: 40px;
+      max-width: 560px;
+      text-shadow: 0 1px 12px rgba(255,255,255,0.95);
+      background: rgba(255,255,255,0.5);
+      padding: 6px 24px;
+      border-radius: 30px;
+      display: inline-block;
+    }
+
+    /* ── Stats row ── */
+    .stats {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 44px;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.7s ease 1.6s, transform 0.7s ease 1.6s;
+    }
+    .stats.visible { opacity: 1; transform: translateY(0); }
+
+    .stat-pill {
+      background: rgba(255,255,255,0.82);
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(26,74,155,0.18);
+      border-radius: 30px;
+      padding: 8px 18px;
+      font-size: 13px;
+      color: #1A4A9B;
+      font-weight: 500;
+    }
+    .stat-pill strong { color: #1A6B3C; font-weight: 700; }
+
+    /* ── Get Started button ── */
+    .btn-wrap {
+      opacity: 0;
+      transform: translateY(20px) scale(0.95);
+      transition: opacity 0.7s ease 2s, transform 0.7s ease 2s;
+    }
+    .btn-wrap.visible { opacity: 1; transform: translateY(0) scale(1); }
+
+    .btn-get-started {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 44px;
+      background: linear-gradient(135deg, #1A4A9B 0%, #1A6B3C 100%);
+      color: #fff;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      text-decoration: none;
+      box-shadow: 0 8px 32px rgba(26,74,155,0.35);
+      transition: transform 0.2s, box-shadow 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn-get-started::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, #1A6B3C 0%, #1A4A9B 100%);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .btn-get-started:hover::before { opacity: 1; }
+    .btn-get-started:hover { transform: translateY(-3px); box-shadow: 0 14px 40px rgba(26,74,155,0.45); }
+    .btn-get-started:active { transform: translateY(0) scale(0.98); }
+
+    .btn-get-started span, .btn-get-started svg { position: relative; z-index: 1; }
+
+    /* Pulse ring on button */
+    .pulse-ring {
+      position: absolute;
+      inset: -4px;
+      border-radius: 50px;
+      border: 2px solid rgba(26,74,155,0.4);
+      animation: ringPulse 2.5s ease-out infinite;
+    }
+    @keyframes ringPulse {
+      0%   { transform: scale(1);   opacity: 0.6; }
+      70%  { transform: scale(1.06); opacity: 0; }
+      100% { transform: scale(1.06); opacity: 0; }
+    }
+
+    /* Arrow icon */
+    .arrow {
+      width: 22px; height: 22px;
+      animation: arrowBounce 1.5s ease-in-out infinite;
+    }
+    @keyframes arrowBounce {
+      0%, 100% { transform: translateX(0); }
+      50%       { transform: translateX(5px); }
+    }
+
+    /* ── Floating particles ── */
+    .particles { position: fixed; inset: 0; z-index: 1; pointer-events: none; }
+    .particle {
+      position: absolute;
+      border-radius: 50%;
+      animation: float linear infinite;
+      opacity: 0;
+    }
+    @keyframes float {
+      0%   { transform: translateY(100vh) scale(0); opacity: 0; }
+      10%  { opacity: 0.4; }
+      90%  { opacity: 0.2; }
+      100% { transform: translateY(-10vh) scale(1); opacity: 0; }
+    }
+
+    /* ── SA flag stripe at top ── */
+    .flag-stripe {
+      position: fixed; top: 0; left: 0; right: 0;
+      height: 6px;
+      background: linear-gradient(90deg,
+        #007A4D 0%, #007A4D 20%,
+        #FFB612 20%, #FFB612 22%,
+        #000 22%, #000 40%,
+        #DE3831 40%, #DE3831 60%,
+        #002395 60%, #002395 78%,
+        #fff 78%, #fff 80%,
+        #007A4D 80%, #007A4D 100%
+      );
+      z-index: 100;
+    }
+
+    /* Responsive */
+    @media (max-width: 480px) {
+      .stats { gap: 10px; }
+      .stat-pill { font-size: 12px; padding: 6px 13px; }
+      .btn-get-started { padding: 14px 32px; font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- SA Flag stripe -->
+  <div class="flag-stripe"></div>
+
+  <!-- Background image -->
+  <div class="bg"></div>
+
+  <!-- Floating particles -->
+  <div class="particles" id="particles"></div>
+
+  <!-- Main content -->
+  <div class="container">
+
+    <div class="line welcome-to" id="l1">Welcome to the</div>
+
+    <div class="line sa-national" id="l2">South African National</div>
+
+    <div class="line hospital-mgmt" id="l3">
+      Hospital Management System
+      <span class="underline-bar"></span>
+    </div>
+
+    <div class="line tagline" id="l4">
+      Streamlining Healthcare for Better Patient Care
+    </div>
+
+
+
+    <!-- Get Started button -->
+    <div class="btn-wrap" id="btnWrap">
+      <a class="btn-get-started" href="login.html">
+        <div class="pulse-ring"></div>
+        <span>Get Started</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="5" y1="12" x2="19" y2="12"/>
+          <polyline points="12 5 19 12 12 19"/>
+        </svg>
+      </a>
+    </div>
+
+  </div>
+
+  <script>
+    // Staggered text animations
+    const delays = [100, 300, 500, 700];
+    ['l1','l2','l3','l4'].forEach((id, i) => {
+      setTimeout(() => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('visible');
+      }, delays[i]);
+    });
+
+    // Stats + button
+    setTimeout(() => document.getElementById('stats')?.classList.add('visible'), 900);
+    setTimeout(() => document.getElementById('btnWrap')?.classList.add('visible'), 1100);
+
+    // Floating particles
+    const colors = ['#1A4A9B','#1A6B3C','#C0271A','#FFB612','#007A4D'];
+    const container = document.getElementById('particles');
+    for (let i = 0; i < 18; i++) {
+      const p = document.createElement('div');
+      p.className = 'particle';
+      const size = Math.random() * 8 + 4;
+      p.style.cssText = [
+        `left:${Math.random()*100}%`,
+        `width:${size}px`,
+        `height:${size}px`,
+        `background:${colors[Math.floor(Math.random()*colors.length)]}`,
+        `animation-duration:${Math.random()*12+8}s`,
+        `animation-delay:${Math.random()*8}s`,
+        `opacity:0`
+      ].join(';');
+      container.appendChild(p);
+    }
+  </script>
+</body>
+</html>

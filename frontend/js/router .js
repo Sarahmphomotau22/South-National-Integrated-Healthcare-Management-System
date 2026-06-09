@@ -55,12 +55,13 @@ const Router = (() => {
       nav: [
         { section: 'My health' },
         { id: 'myhealth',     icon: 'ti-heart-rate-monitor', label: 'Overview' },
-        { id: 'myprofile',    icon: 'ti-user-edit',          label: 'Edit profile' },
+        { id: 'myrecords',    icon: 'ti-folder-open',        label: 'My records' },
         { id: 'appointments', icon: 'ti-calendar',            label: 'Appointments' },
         { id: 'telemedicine',  icon: 'ti-video',              label: 'Telemedicine' },
         { id: 'myrx',         icon: 'ti-pill',               label: 'Prescriptions' },
-        { section: 'Services' },
-        { id: 'book',         icon: 'ti-plus',               label: 'Book visit' },
+        { id: 'billing',      icon: 'ti-credit-card',        label: 'Billing' },
+        { id: 'assistant',    icon: 'ti-robot',              label: 'AI Assistant' },
+
       ]
     },
     pharmacy: {

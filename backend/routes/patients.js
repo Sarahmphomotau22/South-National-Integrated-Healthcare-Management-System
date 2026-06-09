@@ -63,13 +63,34 @@ router.get('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/v1/patients/me — patient gets their own record
+// GET /api/v1/patients/me — patient gets their own record (auto-creates if missing)
 router.get('/me', async (req, res, next) => {
   try {
-    const patient = await Patient.findOne({ user: req.user._id })
+    let patient = await Patient.findOne({ user: req.user._id })
       .populate('primaryFacility','name')
       .populate('registeredBy','firstName lastName');
-    if (!patient) return res.status(404).json({ success: false, message: 'No patient record found. Please visit your clinic to register.' });
+
+    if (!patient) {
+      // Auto-create a basic record so the app works immediately after registration
+      const count = await Patient.countDocuments();
+      const mrn   = 'MRN-' + String(count + 1).padStart(6, '0');
+      const user  = req.user;
+      patient = await Patient.create({
+        user:        user._id,
+        firstName:   user.firstName   || '',
+        lastName:    user.lastName    || '',
+        nationalId:  user.nationalId  || `AUTO-${String(user._id)}`,
+        dateOfBirth: user.dateOfBirth || new Date('1990-01-01'),
+        gender:      user.gender      || 'prefer_not_to_say',
+        phone:       user.phone       || '',
+        email:       user.email       || '',
+        mrn,
+        isVerified:  false,
+        allergies:   [],
+        conditions:  []
+      });
+    }
+
     res.json({ success: true, data: patient });
   } catch (err) { next(err); }
 });
@@ -105,20 +126,75 @@ router.put('/:id', authorize('nurse','doctor','admin'), async (req, res, next) =
   } catch (err) { next(err); }
 });
 
+// Phone normalisation helper
+function normalisePhone(phone) {
+  if (!phone) return phone;
+  const digits = phone.replace(/[^0-9]/g, '');
+  if (digits.startsWith('27') && digits.length >= 11) return '+' + digits;
+  if (digits.startsWith('0') && digits.length === 10) return '+27' + digits.slice(1);
+  if (digits.length === 9) return '+27' + digits;
+  return phone;
+}
+
 // PATCH /api/v1/patients/me/profile — patient edits their own allowed fields
 router.patch('/me/profile', async (req, res, next) => {
   try {
-    const allowed = ['phone','phoneAlt','email','address','nextOfKin'];
+    const allowed = ['phone','phoneAlt','email','address','nextOfKin','medicalAid','profilePicture',
+                     'firstName','lastName','dateOfBirth','gender','nationalId','idType','bloodType','allergies'];
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
 
-    const patient = await Patient.findOneAndUpdate(
+    // Normalise phone numbers
+    if (updates.phone)              updates.phone              = normalisePhone(updates.phone);
+    if (updates.phoneAlt)           updates.phoneAlt           = normalisePhone(updates.phoneAlt);
+    if (updates.nextOfKin?.phone)   updates.nextOfKin.phone   = normalisePhone(updates.nextOfKin.phone);
+
+    // Auto-create patient record if missing (handles users who registered before this feature)
+    let patient = await Patient.findOne({ user: req.user._id });
+
+    if (!patient) {
+      const count = await Patient.countDocuments();
+      const mrn   = 'MRN-' + String(count + 1).padStart(6, '0');
+      const user  = req.user;
+      patient = await Patient.create({
+        user:        user._id,
+        firstName:   user.firstName,
+        lastName:    user.lastName,
+        nationalId:  user.nationalId || `AUTO-${String(user._id)}`,
+        dateOfBirth: user.dateOfBirth || new Date('1990-01-01'),
+        gender:      user.gender || 'prefer_not_to_say',
+        phone:       user.phone || '',
+        email:       user.email || '',
+        mrn,
+        isVerified:  false,
+        allergies:   [],
+        conditions:  [],
+        ...updates
+      });
+      return res.json({ success: true, data: patient, created: true });
+    }
+
+    const updated = await Patient.findOneAndUpdate(
       { user: req.user._id },
       { $set: updates },
       { new: true, runValidators: true }
     );
-    if (!patient) return res.status(404).json({ success: false, message: 'No patient record found.' });
-    res.json({ success: true, data: patient });
+    res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+});
+
+// POST /api/v1/patients/me/upload-profile — patient uploads profile picture
+router.post('/me/upload-profile', upload.single('profilePicture'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded.' });
+    const url = `/uploads/id-docs/${req.file.filename}`;
+    const patient = await Patient.findOneAndUpdate(
+      { user: req.user._id },
+      { profilePicture: { filename: req.file.originalname, url, uploadedAt: new Date() } },
+      { new: true }
+    );
+    if (!patient) return res.status(404).json({ success: false, message: 'Patient record not found.' });
+    res.json({ success: true, data: { url, filename: req.file.originalname } });
   } catch (err) { next(err); }
 });
 

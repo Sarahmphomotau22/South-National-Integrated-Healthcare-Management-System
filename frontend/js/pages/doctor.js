@@ -6,24 +6,172 @@ if (typeof Pages === 'undefined') window.Pages = {};
 
 /* ── Doctor cancel/join helpers ── */
 window._docCancelAppt = async (id) => {
-  const reason = prompt('Reason for cancellation (optional):');
-  if (reason === null) return;
+  _showDocCancel(id);
+};
+
+window._docReschedule = async (id, currentType, currentDatetime) => {
+  _showDocReschedule(id, currentType, currentDatetime);
+};
+
+/* ── Doctor reschedule modal ── */
+let _docRsId = null;
+let _docCancelId = null;
+
+window._showDocReschedule = (id, currentType, currentDatetime) => {
+  _docRsId = id;
+  // Inject modal if not present
+  if (!document.getElementById('doc-rs-modal')) {
+    const m = document.createElement('div');
+    m.id = 'doc-rs-modal';
+    m.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:500;align-items:center;justify-content:center';
+    m.innerHTML = `
+      <div style="background:var(--bg-card);border-radius:var(--radius-xl);padding:24px;width:460px;max-width:95vw;box-shadow:var(--shadow-md)">
+        <div style="font-size:16px;font-weight:600;margin-bottom:4px">Reschedule appointment</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Change the date, time, or appointment type. Patient will be notified.</div>
+        <div class="f-group"><label class="f-label">New date & time *</label>
+          <input type="datetime-local" class="f-input" id="doc-rs-dt" style="margin:0"></div>
+        <div class="f-group" style="margin-top:12px"><label class="f-label">Appointment type</label>
+          <select class="f-select" id="doc-rs-type" style="margin:0">
+            <option value="consultation">In-person consultation</option>
+            <option value="telemedicine">Telemedicine (video)</option>
+            <option value="lab">Lab / blood draw</option>
+            <option value="immunisation">Immunisation</option>
+            <option value="mental_health">Mental health</option>
+          </select>
+        </div>
+        <div class="f-group" style="margin-top:12px"><label class="f-label">Reason for rescheduling *</label>
+          <select class="f-select" id="doc-rs-reason-sel" style="margin:0" onchange="document.getElementById('doc-rs-reason-other').style.display=this.value==='other'?'block':'none'">
+            <option value="">— Select reason —</option>
+            <option value="Doctor unavailable">Doctor unavailable</option>
+            <option value="Emergency patient">Emergency patient priority</option>
+            <option value="Clinical requirement">Clinical requirement</option>
+            <option value="Facility issue">Facility issue</option>
+            <option value="Patient request">Patient requested change</option>
+            <option value="other">Other (specify)</option>
+          </select>
+          <input class="f-input" id="doc-rs-reason-other" placeholder="Specify reason…" style="margin-top:8px;display:none">
+        </div>
+        <div id="doc-rs-alert" class="alert hidden" style="margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-green" id="doc-rs-btn" onclick="_submitDocReschedule()"><i class="ti ti-calendar-check"></i>Confirm reschedule</button>
+          <button class="btn" onclick="document.getElementById('doc-rs-modal').style.display='none'">Close</button>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+  }
+  const dtEl   = document.getElementById('doc-rs-dt');
+  const typeEl = document.getElementById('doc-rs-type');
+  if (dtEl && currentDatetime) dtEl.value = currentDatetime;
+  if (dtEl) dtEl.min = new Date(new Date().getTime() + 60000 - new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
+  if (typeEl && currentType) typeEl.value = currentType;
+  const alertEl = document.getElementById('doc-rs-alert');
+  if (alertEl) alertEl.classList.add('hidden');
+  document.getElementById('doc-rs-modal').style.display = 'flex';
+};
+
+window._submitDocReschedule = async () => {
+  const datetime  = document.getElementById('doc-rs-dt')?.value;
+  const type      = document.getElementById('doc-rs-type')?.value;
+  const reasonSel = document.getElementById('doc-rs-reason-sel')?.value;
+  const reasonOth = document.getElementById('doc-rs-reason-other')?.value?.trim();
+  const reason    = reasonSel === 'other' ? reasonOth : reasonSel;
+  const alertEl   = document.getElementById('doc-rs-alert');
+  const btn       = document.getElementById('doc-rs-btn');
+
+  const showAlert = (msg) => { if (alertEl) { alertEl.className='alert alert-error'; alertEl.innerHTML=`<i class="ti ti-alert-circle"></i> ${msg}`; alertEl.classList.remove('hidden'); } };
+
+  if (!datetime) { showAlert('Please select a new date and time.'); return; }
+  if (new Date(datetime) <= new Date()) { showAlert('New date must be in the future.'); return; }
+  if (!reason) { showAlert('Please select a reason.'); return; }
+
+  if (btn) { btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Saving…'; }
   try {
-    await API._fetchDirect(`/appointments/${id}/cancel`, { method:'PATCH', body: JSON.stringify({ reason }) });
-    UI.showToast('Appointment cancelled — patient notified','ok');
+    await API.appointments.reschedule(_docRsId, {
+      scheduledAt: new Date(datetime).toISOString(),
+      visitType: type,
+      rescheduleReason: reason
+    });
+    document.getElementById('doc-rs-modal').style.display = 'none';
+    UI.showToast('Appointment rescheduled — patient notified', 'ok');
     Router.setPage(Router.current.page);
-  } catch(e) { UI.showToast(e.message||'Could not cancel','err'); }
+  } catch(e) {
+    showAlert(e.message || 'Failed to reschedule.');
+    if (btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-calendar-check"></i>Confirm reschedule'; }
+  }
+};
+
+window._showDocCancel = (id) => {
+  _docCancelId = id;
+  if (!document.getElementById('doc-cancel-modal')) {
+    const m = document.createElement('div');
+    m.id = 'doc-cancel-modal';
+    m.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:500;align-items:center;justify-content:center';
+    m.innerHTML = `
+      <div style="background:var(--bg-card);border-radius:var(--radius-xl);padding:24px;width:420px;max-width:95vw;box-shadow:var(--shadow-md)">
+        <div style="font-size:16px;font-weight:600;margin-bottom:4px">Cancel appointment</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Patient will be notified by SMS and email.</div>
+        <div class="f-group"><label class="f-label">Reason *</label>
+          <select class="f-select" id="doc-cancel-sel" style="margin:0" onchange="document.getElementById('doc-cancel-other').style.display=this.value==='other'?'block':'none'">
+            <option value="">— Select reason —</option>
+            <option value="Doctor unavailable">Doctor unavailable</option>
+            <option value="Emergency">Emergency — please rebook</option>
+            <option value="Facility closed">Facility closed</option>
+            <option value="Patient no-show">Patient no-show</option>
+            <option value="Clinical decision">Clinical decision</option>
+            <option value="other">Other</option>
+          </select>
+          <input class="f-input" id="doc-cancel-other" placeholder="Specify reason…" style="margin-top:8px;display:none">
+        </div>
+        <div class="alert-box alert-warn" style="margin-bottom:12px"><i class="ti ti-alert-triangle"></i>This will notify the patient immediately.</div>
+        <div id="doc-cancel-alert" class="alert hidden" style="margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" style="background:var(--red);border-color:var(--red);color:#fff" id="doc-cancel-btn" onclick="_submitDocCancel()">
+            <i class="ti ti-x"></i>Cancel appointment
+          </button>
+          <button class="btn" onclick="document.getElementById('doc-cancel-modal').style.display='none'">Keep it</button>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+  }
+  const alertEl = document.getElementById('doc-cancel-alert');
+  if (alertEl) alertEl.classList.add('hidden');
+  document.getElementById('doc-cancel-modal').style.display = 'flex';
+};
+
+window._submitDocCancel = async () => {
+  const sel   = document.getElementById('doc-cancel-sel')?.value;
+  const other = document.getElementById('doc-cancel-other')?.value?.trim();
+  const reason= sel === 'other' ? other : sel;
+  const alertEl = document.getElementById('doc-cancel-alert');
+  const btn   = document.getElementById('doc-cancel-btn');
+  if (!reason) { if(alertEl){alertEl.className='alert alert-error';alertEl.innerHTML='<i class="ti ti-alert-circle"></i> Please select a reason.';alertEl.classList.remove('hidden');} return; }
+  if (btn) { btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Cancelling…'; }
+  try {
+    await API.appointments.cancel(_docCancelId, reason);
+    document.getElementById('doc-cancel-modal').style.display = 'none';
+    UI.showToast('Appointment cancelled — patient notified', 'ok');
+    Router.setPage(Router.current.page);
+  } catch(e) {
+    if(alertEl){alertEl.className='alert alert-error';alertEl.innerHTML=`<i class="ti ti-alert-circle"></i> ${e.message}`;alertEl.classList.remove('hidden');}
+    if (btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-x"></i>Cancel appointment'; }
+  }
 };
 
 window._docJoinTele = async (id) => {
+  const btn = event?.target?.closest('button');
+  if (btn) { btn.disabled=true; btn.innerHTML='<i class="ti ti-loader-2"></i> Joining…'; }
   try {
     const res = await API._fetchDirect(`/appointments/${id}/join`, { method:'GET' });
-    if (res.data?.roomUrl && window._openDailyCall) {
-      _openDailyCall(res.data);
+    if (res.data && window._openJitsiRoom) {
+      _openJitsiRoom(res.data);
     } else {
       Router.setPage('telemedicine');
     }
-  } catch(e) { UI.showToast(e.message||'Cannot join session','err'); }
+  } catch(e) {
+    UI.showToast(e.message||'Cannot join session','err');
+  } finally {
+    if (btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-video"></i>Start'; }
+  }
 };
 
 function _badge(status) {
@@ -607,6 +755,9 @@ Pages['telemedicine'] = () => {
               <span class="badge ${badge}">${a.status}</span>
               ${canJoin?`<button class="btn btn-sm btn-green" onclick="_docJoinTele('${a._id}')">
                 <i class="ti ti-video"></i>${isLive?'Rejoin':isSoon?'Join now':'Start'}
+              </button>`:''}
+              ${canCancel?`<button class="btn btn-sm" onclick="_docReschedule('${a._id}','${a.visitType}','${new Date(a.scheduledAt).toISOString().slice(0,16)}')">
+                <i class="ti ti-calendar-event"></i>Reschedule
               </button>`:''}
               ${canCancel?`<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-mid)" onclick="_docCancelAppt('${a._id}')">
                 <i class="ti ti-x"></i>Cancel

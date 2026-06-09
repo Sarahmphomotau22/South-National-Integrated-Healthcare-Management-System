@@ -135,4 +135,91 @@ async function sendOtp({ email, phone, otp }) {
   return results;
 }
 
-module.exports = { sendEmail, sendSms, sendOtp };
+
+/**
+ * sendWelcomeEmail({ to, firstName, role, verifyUrl })
+ * Sends registration welcome email with activation link.
+ */
+async function sendWelcomeEmail({ to, firstName, role, verifyUrl }) {
+  const roleLabel = {
+    patient:  'Patient',
+    doctor:   'Doctor',
+    nurse:    'Nurse',
+    pharmacy: 'Pharmacist',
+    admin:    'Facility Administrator'
+  }[role] || role;
+
+  logger.info('─────────────────────────────────────────');
+  logger.info(`📧  Welcome email → ${to}`);
+  logger.info(`    Activation link: ${verifyUrl}`);
+  logger.info('─────────────────────────────────────────');
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto">
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);padding:28px 24px;text-align:center;border-radius:10px 10px 0 0">
+        <h1 style="color:#fff;margin:0;font-size:24px;letter-spacing:.05em">NIHMS</h1>
+        <div style="color:rgba(255,255,255,.8);font-size:12px;margin-top:4px">National Integrated Healthcare Management System</div>
+      </div>
+
+      <!-- Body -->
+      <div style="background:#f9f9f9;padding:28px 24px;border-radius:0 0 10px 10px;border:1px solid #eee">
+        <h2 style="margin:0 0 8px;font-size:20px;color:#1a1a1a">Welcome to NIHMS, ${firstName}!</h2>
+        <p style="color:#555;margin:0 0 20px;line-height:1.7">
+          Your <strong>${roleLabel}</strong> account has been created successfully.
+          Please activate your account by clicking the button below — the link expires in <strong>24 hours</strong>.
+        </p>
+
+        <!-- CTA Button -->
+        <div style="text-align:center;margin:24px 0">
+          <a href="${verifyUrl}"
+            style="display:inline-block;background:linear-gradient(135deg,#0F6E56,#1A4A9B);color:#fff;padding:14px 36px;border-radius:50px;text-decoration:none;font-size:16px;font-weight:600;letter-spacing:.04em">
+            ✅ Activate my account
+          </a>
+        </div>
+
+        <!-- Details box -->
+        <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:16px;margin-bottom:20px">
+          <table style="width:100%;font-size:14px;border-collapse:collapse">
+            <tr><td style="color:#888;padding:4px 0;width:40%">Account type</td><td style="font-weight:500">${roleLabel}</td></tr>
+            <tr><td style="color:#888;padding:4px 0">Email</td><td style="font-weight:500">${to}</td></tr>
+          </table>
+        </div>
+
+        <p style="color:#999;font-size:12px;line-height:1.6">
+          If the button doesn't work, copy and paste this link into your browser:<br>
+          <a href="${verifyUrl}" style="color:#0F6E56;word-break:break-all">${verifyUrl}</a>
+        </p>
+        <p style="color:#bbb;font-size:11px;margin-top:16px">
+          If you did not create this account, please ignore this email.<br>
+          This link expires in 24 hours for security.
+        </p>
+      </div>
+
+      <div style="text-align:center;padding:16px;font-size:11px;color:#bbb">
+        NIHMS · South African National Hospital Management System · POPIA Compliant
+      </div>
+    </div>`;
+
+  if (!isEmailConfigured()) {
+    logger.warn('[EMAIL] SMTP not configured — activation link printed to terminal above.');
+    logger.warn('[EMAIL] User can still activate by visiting the link above.');
+    return { sent: false, reason: 'not_configured' };
+  }
+
+  try {
+    const info = await getTransporter().sendMail({
+      from:    `"${process.env.EMAIL_FROM_NAME || 'NIHMS System'}" <${process.env.EMAIL_FROM || process.env.SMTP_USER}>`,
+      to,
+      subject: 'NIHMS — Activate your account',
+      html
+    });
+    logger.info(`[EMAIL] Welcome email sent: ${info.messageId} → ${to}`);
+    return { sent: true };
+  } catch (err) {
+    logger.error(`[EMAIL] Welcome email failed: ${err.message}`);
+    return { sent: false, reason: err.message };
+  }
+}
+
+module.exports = { sendEmail, sendSms, sendOtp, sendWelcomeEmail };

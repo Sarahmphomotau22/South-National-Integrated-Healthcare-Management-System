@@ -7,38 +7,59 @@ const App = (() => {
     try {
       const role = (user.role && user.role in Router.roleConfig) ? user.role : 'patient';
 
-      // Hide auth screen, show app
-      const authScreen = document.getElementById('auth-screen');
-      const appEl      = document.getElementById('app');
+      // ── Hide auth elements completely ──
+      document.querySelectorAll('.auth-bg, .auth-screen, #auth-screen').forEach(el => {
+        el.style.cssText = 'display:none!important;visibility:hidden!important;pointer-events:none';
+      });
 
-      if (authScreen) authScreen.style.display = 'none';
+      // ── Remove any login-page body styles ──
+      document.body.style.cssText = '';
+      document.body.classList.remove('auth-page');
+
+      // ── Remove the login-page <style> block that hides #app ──
+      // The inline style in login.html adds display:none!important to #app
+      // We override it by setting a higher-specificity inline style
+      const appEl = document.getElementById('app');
       if (appEl) {
-        appEl.style.display       = 'flex';
+        appEl.removeAttribute('style');
+        appEl.style.setProperty('display', 'flex', 'important');
         appEl.style.flexDirection = 'column';
-        appEl.style.minHeight     = '100vh';
+        appEl.style.minHeight = '100vh';
+        appEl.style.position = 'relative';
+        appEl.style.zIndex = '1';
       }
 
-      // Update topbar name/avatar/role
+      // ── Ensure sidebar and content are visible ──
+      ['sidebar','content','topbar'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.removeAttribute('style');
+          el.style.removeProperty('display');
+        }
+      });
+
+      // ── Show toast ──
+      const toastEl = document.getElementById('toast');
+      if (toastEl) {
+        toastEl.removeAttribute('style');
+        toastEl.style.display = '';
+      }
+
+      // ── Render dashboard ──
       UI.updateTopbar({ ...user, role });
-
-      // Render sidebar + default page for this role
       Router.setRole(role);
-
-      UI.showToast(`Welcome back, ${user.firstName}!`, 'ok');
+      UI.showToast(`Welcome, ${user.firstName}!`, 'ok');
 
     } catch (err) {
       console.error('App.launch error:', err);
-      // Show error in content area so it's visible
       const content = document.getElementById('content');
-      if (content) {
-        content.innerHTML = `
-          <div style="padding:24px">
-            <div style="background:#FCEBEB;color:#A32D2D;padding:14px;border-radius:10px;border-left:3px solid #E24B4A;font-size:13px">
-              <strong>App launch error:</strong> ${err.message}<br>
-              <small>Check browser console (F12) for details.</small>
-            </div>
-          </div>`;
-      }
+      if (content) content.innerHTML = `
+        <div style="padding:24px">
+          <div style="background:#FCEBEB;color:#A32D2D;padding:14px 18px;border-radius:10px;border-left:3px solid #E24B4A;font-size:14px">
+            <strong>Launch error:</strong> ${err.message}<br>
+            <small style="color:#888">Press F12 → Console for details</small>
+          </div>
+        </div>`;
     }
   }
 
@@ -50,34 +71,36 @@ const App = (() => {
       if (storedUser && token) {
         try {
           const res = await API.auth.me();
-          if (res && res.data) {
+          if (res?.data) {
             launch(res.data);
           } else {
             API.clearSession();
+            _showAuth();
           }
         } catch (err) {
-          console.warn('Session expired or invalid:', err.message);
+          console.warn('Session check failed:', err.message);
           API.clearSession();
-          // Make sure auth screen is visible
-          const authScreen = document.getElementById('auth-screen');
-          if (authScreen) authScreen.style.display = 'flex';
-          const appEl = document.getElementById('app');
-          if (appEl) appEl.style.display = 'none';
+          _showAuth();
         }
       } else {
-        // No session — make sure auth screen shows
-        const authScreen = document.getElementById('auth-screen');
-        if (authScreen) authScreen.style.display = 'flex';
-        const appEl = document.getElementById('app');
-        if (appEl) appEl.style.display = 'none';
+        _showAuth();
       }
     } catch (err) {
       console.error('App.init error:', err);
+      _showAuth();
     }
+  }
+
+  function _showAuth() {
+    const appEl   = document.getElementById('app');
+    const authBg  = document.querySelector('.auth-bg');
+    const authScr = document.querySelector('.auth-screen');
+    if (appEl)   appEl.style.cssText   = 'display:none!important';
+    if (authBg)  authBg.style.display  = 'block';
+    if (authScr) authScr.style.display = 'flex';
   }
 
   return { launch, init };
 })();
 
-// Start the app
 App.init();

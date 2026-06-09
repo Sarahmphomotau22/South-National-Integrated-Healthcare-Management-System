@@ -4,8 +4,18 @@ const jwt        = require('jsonwebtoken');
 const crypto     = require('crypto');
 const bcrypt     = require('bcryptjs');
 const User       = require('../models/User');
-const { sendEmail } = require('../utils/mailer');
+const { sendEmail, sendSms, sendOtp, sendWelcomeEmail } = require('../utils/mailer');
 const logger     = require('../utils/logger');
+
+/* Normalise SA phone: 0821234567 or 821234567 → +27821234567 */
+function normalisePhone(phone) {
+  if (!phone) return phone;
+  const digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('27') && digits.length >= 11) return '+' + digits;
+  if (digits.startsWith('0') && digits.length === 10) return '+27' + digits.slice(1);
+  if (digits.length === 9) return '+27' + digits;
+  return phone; // return as-is if can't normalise
+}
 
 // ── Token helpers ──
 
@@ -58,7 +68,8 @@ exports.register = async (req, res, next) => {
 
     const user = await User.create({
       firstName, lastName, email, password,
-      role, facility: facilityId, facilityName, phone
+      role, facility: facilityId, facilityName,
+      phone: normalisePhone(phone)
     });
 
     // Auto-create a Patient record for patient role registrations
@@ -91,7 +102,24 @@ exports.register = async (req, res, next) => {
       }
     }
 
+    // Generate email verification token
+    const verifyToken         = crypto.randomBytes(32).toString('hex');
+    user.emailVerifyToken   = crypto.createHash('sha256').update(verifyToken).digest('hex');
+    user.emailVerifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    await user.save({ validateBeforeSave: false });
+
+    // Send welcome + activation email
+    // Use network-accessible URL so activation links work on phones/other devices
+    const origins   = (process.env.CLIENT_ORIGIN || 'http://localhost:5500').split(',').map(s=>s.trim()).filter(s=>s&&s!=='null');
+    // Prefer network IP so phones can open the activation link
+    const clientUrl = origins.find(o => !o.includes('localhost') && !o.includes('127.0.0.1')) || origins[0];
+    const verifyUrl  = `${clientUrl}/verify-email?token=${verifyToken}&email=${encodeURIComponent(email)}`;
+    await sendWelcomeEmail({ to: email, firstName, role, verifyUrl }).catch(e =>
+      logger.warn('Welcome email failed:', e.message)
+    );
+
     logger.info(`New user registered: ${email} (${role})`);
+    // Don't block registration if email fails — user can still log in
     await sendTokens(user, 201, res);
   } catch (err) {
     next(err);
@@ -104,10 +132,28 @@ exports.register = async (req, res, next) => {
 exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
+    const identifier = (email || '').trim();
 
-    const user = await User.findOne({ email }).select('+password +refreshToken +lockUntil');
+    // Support login with email OR SA ID number / passport number
+    const isIdNumber = /^[0-9]{7,13}$/.test(identifier);
+    let user;
+    if (isIdNumber) {
+      // Check User.nationalId first
+      user = await User.findOne({ nationalId: identifier }).select('+password +refreshToken +lockUntil');
+      if (!user) {
+        // Fall back to Patient.nationalId → User
+        const Patient = require('../models/Patient');
+        const patient = await Patient.findOne({ nationalId: identifier });
+        if (patient?.user) {
+          user = await User.findById(patient.user).select('+password +refreshToken +lockUntil');
+        }
+      }
+    } else {
+      user = await User.findOne({ email: identifier.toLowerCase() }).select('+password +refreshToken +lockUntil');
+    }
+
     if (!user) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+      return res.status(401).json({ success: false, message: 'Invalid email, ID number, or password.' });
     }
 
     if (user.isLocked()) {

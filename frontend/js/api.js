@@ -5,7 +5,11 @@
 
 const API = (() => {
 
-  const BASE_URL = 'http://localhost:5000/api/v1';
+  // Auto-detect backend URL:
+// - On Railway/cloud: uses BACKEND_URL meta tag injected at build
+// - Locally: uses localhost:5000
+const _metaBackend = document.querySelector('meta[name="backend-url"]')?.content;
+const BASE_URL = _metaBackend || 'http://localhost:5000/api/v1';
 
   /* ── Token management ── */
   const Tokens = {
@@ -96,11 +100,13 @@ const API = (() => {
 
   /* ── Appointments ── */
   const appointments = {
-    list:      (params)        => get('/appointments', params),
-    queue:     (facility,date) => get('/appointments/queue', { facility, date }),
-    get:       (id)            => get(`/appointments/${id}`),
-    create:    (body)          => post('/appointments', body),
-    setStatus: (id, body)      => patch(`/appointments/${id}/status`, body)
+    list:       (params)        => get('/appointments', params),
+    queue:      (facility,date) => get('/appointments/queue', { facility, date }),
+    get:        (id)            => get(`/appointments/${id}`),
+    create:     (body)          => post('/appointments', body),
+    setStatus:  (id, body)      => patch(`/appointments/${id}/status`, body),
+    reschedule: (id, body)      => patch(`/appointments/${id}/reschedule`, body),
+    cancel:     (id, reason)    => _fetchDirect(`/appointments/${id}/cancel`, { method:'PATCH', body: JSON.stringify({ reason }) })
   };
 
   /* ── Prescriptions ── */
@@ -186,12 +192,29 @@ const API = (() => {
       </div>`;
   }
 
-  // Direct fetch for custom endpoints
-  async function _fetchDirect(path, options = {}) {
-    const headers = { 'Content-Type': 'application/json' };
+  // Direct fetch — same as _fetch but for custom paths, includes auto-refresh
+  async function _fetchDirect(path, options = {}, retry = true) {
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
     const token   = Tokens.getAccess();
     if (token) headers['Authorization'] = 'Bearer ' + token;
+
     const res  = await fetch(BASE_URL + path, { ...options, headers });
+
+    // Auto-refresh on 401 Token expired
+    if (res.status === 401 && retry) {
+      try {
+        if (!_refreshPromise) _refreshPromise = _silentRefresh();
+        await _refreshPromise;
+        _refreshPromise = null;
+        return _fetchDirect(path, options, false); // retry once
+      } catch {
+        _refreshPromise = null;
+        Tokens.clear();
+        window.location.replace('login.html');
+        return;
+      }
+    }
+
     const data = await res.json();
     if (!data.success && res.status >= 400) throw new Error(data.message || 'Request failed');
     return data;

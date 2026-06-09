@@ -57,6 +57,23 @@ const patientSchema = new mongoose.Schema({
     phoneAlt:     { type: String, trim: true, default: '' }
   },
 
+  // ── Medical aid ──
+  medicalAid: {
+    hasAid:       { type: Boolean, default: false },
+    provider:     { type: String, trim: true, default: '' },
+    memberNumber: { type: String, trim: true, default: '' },
+    plan:         { type: String, trim: true, default: '' },
+    dependantCode:{ type: String, trim: true, default: '' },
+    mainMember:   { type: String, trim: true, default: '' }
+  },
+
+  // ── Profile picture ──
+  profilePicture: {
+    filename: { type: String, default: '' },
+    url:      { type: String, default: '' },
+    uploadedAt: { type: Date }
+  },
+
   // ── ID document upload ──
   idDocument: {
     filename:   { type: String, default: '' },
@@ -87,7 +104,7 @@ const patientSchema = new mongoose.Schema({
 patientSchema.index({ nationalId: 1 }, { unique: true });
 patientSchema.index({ lastName: 1, firstName: 1 });
 patientSchema.index({ phone: 1 });
-patientSchema.index({ mrn: 1 }, { unique: true, sparse: true });
+// mrn index defined inline on field
 
 // ── Auto-generate MRN before first save ──
 patientSchema.pre('save', async function (next) {

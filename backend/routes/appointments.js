@@ -183,92 +183,61 @@ router.patch('/:id/cancel', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/v1/appointments/:id/join — create Daily.co room and return join URL + token
+// GET /api/v1/appointments/:id/join — get Jitsi room details (no API key needed)
 router.get('/:id/join', async (req, res, next) => {
   try {
     const appt = await Appointment.findById(req.params.id)
       .populate('patient','firstName lastName')
-      .populate('doctor','firstName lastName')
+      .populate('doctor', 'firstName lastName')
       .populate('facility','name');
 
     if (!appt) return res.status(404).json({ success:false, message:'Appointment not found.' });
-    if (appt.visitType !== 'telemedicine')
-      return res.status(400).json({ success:false, message:'This is not a telemedicine appointment.' });
-    if (['cancelled','completed'].includes(appt.status))
-      return res.status(400).json({ success:false, message:`Cannot join a ${appt.status} appointment.` });
+
+    // Allow joining consultation OR telemedicine (doctor may change type mid-session)
+    const vType = (appt.visitType || '').toLowerCase().trim();
+    const allowedTypes = ['telemedicine','video','consultation','consult'];
+    if (!allowedTypes.includes(vType))
+      return res.status(400).json({ success:false, message:`Appointment type '${appt.visitType}' does not support video.` });
+
+    if (['cancelled'].includes(appt.status))
+      return res.status(400).json({ success:false, message:'Cannot join a cancelled appointment.' });
 
     // Verify access
     let isDoctor = false;
     if (req.user.role === 'patient') {
       const p = await Patient.findOne({ user: req.user._id });
-      if (!p || String(appt.patient._id || appt.patient) !== String(p._id))
+      if (!p || String(appt.patient?._id || appt.patient) !== String(p._id))
         return res.status(403).json({ success:false, message:'Access denied.' });
     } else {
       isDoctor = true;
     }
 
-    // Check if Daily.co is configured
-    const dailyConfigured = !!process.env.DAILY_API_KEY;
+    // Build participant display name
+    const displayName = isDoctor
+      ? `Dr. ${appt.doctor?.firstName || ''} ${appt.doctor?.lastName || ''}`.trim()
+      : `${appt.patient?.firstName || ''} ${appt.patient?.lastName || ''}`.trim();
 
-    if (dailyConfigured) {
-      try {
-        const { createRoom, createToken } = require('../utils/daily');
-        const { url: roomUrl, name: roomName } = await createRoom(String(appt._id), appt.scheduledAt);
+    // Generate Jitsi room (no API call needed — rooms are auto-created on Jitsi)
+    const { getRoomName, getRoomUrl, getIframeUrl } = require('../utils/jitsi');
+    const roomName   = getRoomName(String(appt._id));
+    const roomUrl    = getRoomUrl(String(appt._id));
+    const iframeUrl  = getIframeUrl(String(appt._id), displayName, isDoctor);
 
-        const participant = isDoctor
-          ? `Dr. ${appt.doctor?.firstName || ''} ${appt.doctor?.lastName || ''}`.trim()
-          : `${appt.patient?.firstName || ''} ${appt.patient?.lastName || ''}`.trim();
-
-        const meetingToken = await createToken(roomName, participant, isDoctor);
-
-        // Update status to in_progress when doctor joins
-        if (isDoctor && appt.status !== 'in_progress') {
-          appt.status = 'in_progress';
-          await appt.save();
-        }
-
-        return res.json({
-          success: true,
-          provider: 'daily',
-          data: {
-            roomUrl,
-            meetingToken,
-            roomId:      roomName,
-            queueToken:  appt.queueToken,
-            patient:     appt.patient,
-            doctor:      appt.doctor,
-            facility:    appt.facility,
-            scheduledAt: appt.scheduledAt,
-            isDoctor
-          }
-        });
-      } catch (dailyErr) {
-        logger.error(`Daily.co error for appointment ${appt._id}: ${dailyErr.message}`);
-        // Fall through to no-provider response with helpful message
-        return res.json({
-          success: true,
-          provider: 'daily_error',
-          message: `Daily.co error: ${dailyErr.message}. Check your DAILY_API_KEY in .env`,
-          data: {
-            roomId:      String(appt._id),
-            queueToken:  appt.queueToken,
-            patient:     appt.patient,
-            doctor:      appt.doctor,
-            facility:    appt.facility,
-            scheduledAt: appt.scheduledAt,
-            isDoctor
-          }
-        });
-      }
+    // Update appointment to in_progress when doctor joins
+    if (isDoctor && !['in_progress','completed'].includes(appt.status)) {
+      await Appointment.findByIdAndUpdate(req.params.id, { status: 'in_progress' });
     }
 
-    // Fallback — no Daily.co configured, return basic info
+    logger.info(`${displayName} joining Jitsi room: ${roomName}`);
+
     return res.json({
-      success: true,
-      provider: 'none',
-      message: 'DAILY_API_KEY not configured. Add it to .env to enable video calls.',
+      success:  true,
+      provider: 'jitsi',
       data: {
-        roomId:      String(appt._id),
+        roomName,
+        roomUrl,
+        iframeUrl,
+        displayName,
         queueToken:  appt.queueToken,
         patient:     appt.patient,
         doctor:      appt.doctor,
