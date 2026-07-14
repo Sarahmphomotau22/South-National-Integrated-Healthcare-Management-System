@@ -1,7 +1,7 @@
 /**
  * js/pages/chatbot.js
- * AI Virtual Assistant + Health Tips for patient portal
- * Uses Claude claude-sonnet-4-20250514 via Anthropic API
+ * AI Virtual Assistant + Health Tips — NIHMS Patient Portal
+ * AI calls routed through backend (/auth/chat) to avoid CORS
  */
 if (typeof Pages === 'undefined') window.Pages = {};
 
@@ -16,7 +16,7 @@ Pages['assistant'] = () => {
       <!-- LEFT: Chat panel -->
       <div style="display:flex;flex-direction:column;background:var(--bg-card);border-radius:var(--radius-xl);border:1px solid var(--border);overflow:hidden">
 
-        <!-- Chat header -->
+        <!-- Header -->
         <div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);padding:16px 20px;display:flex;align-items:center;gap:12px;flex-shrink:0">
           <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center">
             <i class="ti ti-robot" style="font-size:20px;color:#fff"></i>
@@ -25,14 +25,14 @@ Pages['assistant'] = () => {
             <div style="font-weight:700;color:#fff;font-size:15px">NIHMS Virtual Assistant</div>
             <div style="font-size:11px;color:rgba(255,255,255,.75);display:flex;align-items:center;gap:5px">
               <div style="width:7px;height:7px;border-radius:50%;background:#4ade80;animation:pulse 2s infinite"></div>
-              Online · Powered by Claude AI
+              Online · Powered by Groq AI
             </div>
           </div>
           <div style="display:flex;gap:8px">
-            <button onclick="_clearChat()" title="Clear chat" style="background:rgba(255,255,255,.15);border:none;border-radius:8px;padding:6px 10px;cursor:pointer;color:#fff;font-size:12px">
+            <button onclick="_clearChat()" style="background:rgba(255,255,255,.15);border:none;border-radius:8px;padding:6px 10px;cursor:pointer;color:#fff;font-size:12px">
               <i class="ti ti-trash"></i> Clear
             </button>
-            <button onclick="_toggleVoice()" id="voice-btn" title="Voice input" style="background:rgba(255,255,255,.15);border:none;border-radius:8px;padding:6px 10px;cursor:pointer;color:#fff;font-size:12px">
+            <button onclick="_toggleVoice()" id="voice-btn" style="background:rgba(255,255,255,.15);border:none;border-radius:8px;padding:6px 10px;cursor:pointer;color:#fff;font-size:12px">
               <i class="ti ti-microphone"></i> Speak
             </button>
           </div>
@@ -40,7 +40,6 @@ Pages['assistant'] = () => {
 
         <!-- Messages -->
         <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:#fafafa">
-          <!-- Welcome message -->
           <div style="display:flex;gap:10px;align-items:flex-start">
             <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#0F6E56,#1A4A9B);display:flex;align-items:center;justify-content:center;flex-shrink:0">
               <i class="ti ti-robot" style="font-size:14px;color:#fff"></i>
@@ -107,7 +106,7 @@ Pages['assistant'] = () => {
         </div>
       </div>
 
-      <!-- RIGHT: Health tips + Knowledge panel -->
+      <!-- RIGHT: Knowledge + Health tips -->
       <div style="display:flex;flex-direction:column;gap:12px;overflow-y:auto">
 
         <!-- Knowledge Search -->
@@ -146,7 +145,6 @@ Pages['assistant'] = () => {
             <div id="current-tip" style="animation:fadeIn .4s ease"></div>
           </div>
         </div>
-
       </div>
     </div>
 
@@ -163,46 +161,44 @@ Pages['assistant'] = () => {
 /* ── Knowledge base topics ── */
 function _getKbTopics() {
   return [
-    { icon:'ti-virus',          label:'HIV & AIDS',                    q:'Explain HIV, AIDS, symptoms, CD4 count, and ARV treatment in South Africa' },
-    { icon:'ti-lungs',          label:'Tuberculosis (TB)',              q:'What is TB, how is it spread, what are symptoms, and how is it treated with DOTS?' },
-    { icon:'ti-droplet-half-2', label:'Diabetes explained',            q:'Explain type 1 and type 2 diabetes, blood sugar levels, symptoms, and management' },
-    { icon:'ti-heart-rate',     label:'High blood pressure',           q:'What causes hypertension, what are the symptoms and complications, and how is it treated?' },
-    { icon:'ti-pill',           label:'Understanding medications',      q:'How do I know if my medication is working and what are common side effects to watch for?' },
-    { icon:'ti-flask',          label:'Reading lab results',           q:'How do I read and understand blood test results like FBC, LFT, urea and cholesterol?' },
-    { icon:'ti-brain',          label:'Mental health in SA',           q:'What mental health conditions are common in South Africa and how can I get help?' },
-    { icon:'ti-gender-bigender',label:'Sexual & reproductive health',  q:'What should I know about sexual health, STIs, contraception, and reproductive care?' },
-    { icon:'ti-baby-carriage',  label:'Pregnancy & maternal health',   q:'What do I need to know about pregnancy, antenatal care, and safe delivery in South Africa?' },
-    { icon:'ti-leaf',           label:'Traditional & modern medicine', q:'Can I use traditional medicine alongside modern medicine and what are the risks?' },
-    { icon:'ti-shield-check',   label:'Vaccinations & immunisation',   q:'What vaccines do adults and children need in South Africa and why are they important?' },
-    { icon:'ti-heart',          label:'Heart disease & stroke',        q:'What are the warning signs of a heart attack and stroke, and what should I do?' },
+    { icon:'ti-virus',          label:'HIV & AIDS',                   q:'Explain HIV, AIDS, symptoms, CD4 count, and ARV treatment in South Africa' },
+    { icon:'ti-lungs',          label:'Tuberculosis (TB)',             q:'What is TB, how is it spread, what are symptoms, and how is it treated with DOTS?' },
+    { icon:'ti-droplet-half-2', label:'Diabetes explained',           q:'Explain type 1 and type 2 diabetes, blood sugar levels, symptoms, and management' },
+    { icon:'ti-heart-rate',     label:'High blood pressure',          q:'What causes hypertension, what are the symptoms and complications, and how is it treated?' },
+    { icon:'ti-pill',           label:'Understanding medications',     q:'How do I know if my medication is working and what are common side effects to watch for?' },
+    { icon:'ti-flask',          label:'Reading lab results',          q:'How do I read and understand blood test results like FBC, LFT, urea and cholesterol?' },
+    { icon:'ti-brain',          label:'Mental health in SA',          q:'What mental health conditions are common in South Africa and how can I get help?' },
+    { icon:'ti-gender-bigender',label:'Sexual & reproductive health', q:'What should I know about sexual health, STIs, contraception, and reproductive care?' },
+    { icon:'ti-baby-carriage',  label:'Pregnancy & maternal health',  q:'What do I need to know about pregnancy, antenatal care, and safe delivery in South Africa?' },
+    { icon:'ti-leaf',           label:'Traditional & modern medicine',q:'Can I use traditional medicine alongside modern medicine and what are the risks?' },
+    { icon:'ti-shield-check',   label:'Vaccinations & immunisation',  q:'What vaccines do adults and children need in South Africa and why are they important?' },
+    { icon:'ti-heart',          label:'Heart disease & stroke',       q:'What are the warning signs of a heart attack and stroke, and what should I do?' },
   ];
 }
 
 /* ── Health tips bank ── */
 const _healthTips = [
-  { icon:'💧', color:'#1A4A9B', bg:'#EEF2FF', title:'Stay Hydrated', body:'Drink 6–8 glasses of water daily. Proper hydration supports kidney function, energy levels, and skin health. Keep a water bottle nearby as a reminder.', category:'Wellness' },
-  { icon:'🚶', color:'#0F6E56', bg:'#E1F5EE', title:'Move Every Day', body:'Even 30 minutes of brisk walking daily reduces the risk of heart disease, diabetes, and depression. You don\'t need a gym — a walk in your neighbourhood counts!', category:'Exercise' },
-  { icon:'🍎', color:'#E05D2A', bg:'#FEF3EC', title:'Eat the Rainbow', body:'Include fruits and vegetables of different colours in your meals. They provide essential vitamins, minerals, and antioxidants that protect against disease.', category:'Nutrition' },
-  { icon:'😴', color:'#7C3AED', bg:'#F5F3FF', title:'Prioritise Sleep', body:'Adults need 7–9 hours of quality sleep. Poor sleep is linked to weight gain, weakened immunity, and mental health problems. Keep a consistent sleep schedule.', category:'Sleep' },
-  { icon:'🧘', color:'#D97706', bg:'#FFFBEB', title:'Manage Stress', body:'Chronic stress raises blood pressure and weakens immunity. Try deep breathing: inhale for 4 counts, hold for 4, exhale for 6. Practice for 5 minutes daily.', category:'Mental Health' },
-  { icon:'🩺', color:'#DC2626', bg:'#FEF2F2', title:'Regular Check-ups', body:'Annual health screenings catch problems early. Blood pressure, cholesterol, blood sugar, and cancer screenings save lives. Book your next check-up today.', category:'Prevention' },
-  { icon:'🚭', color:'#65A30D', bg:'#F7FEE7', title:'Avoid Smoking', body:'Smoking causes 7 out of 10 lung cancer cases. Within just 20 minutes of quitting, your heart rate drops. Your clinic can provide free stop-smoking support.', category:'Lifestyle' },
-  { icon:'🤲', color:'#0F6E56', bg:'#E1F5EE', title:'Hand Hygiene', body:'Washing hands with soap for 20 seconds prevents 80% of common infections. Do it after using the toilet, before eating, and after coughing or sneezing.', category:'Hygiene' },
-  { icon:'☀️', color:'#D97706', bg:'#FFFBEB', title:'Sunscreen Matters', body:'Even on cloudy days, UV rays damage skin. Apply SPF 30+ sunscreen when outdoors. Skin cancer is one of the most preventable cancers with proper sun protection.', category:'Prevention' },
-  { icon:'🦷', color:'#1A4A9B', bg:'#EEF2FF', title:'Oral Health = Body Health', body:'Gum disease is linked to heart disease and diabetes. Brush twice a day, floss daily, and visit a dentist every 6 months for a check-up.', category:'Dental' },
+  { icon:'💧', color:'#1A4A9B', bg:'#EEF2FF', title:'Stay Hydrated',       body:'Drink 6–8 glasses of water daily. Proper hydration supports kidney function, energy levels, and skin health.',          category:'Wellness' },
+  { icon:'🚶', color:'#0F6E56', bg:'#E1F5EE', title:'Move Every Day',       body:'Even 30 minutes of brisk walking daily reduces the risk of heart disease, diabetes, and depression.',                    category:'Exercise' },
+  { icon:'🍎', color:'#E05D2A', bg:'#FEF3EC', title:'Eat the Rainbow',      body:'Include fruits and vegetables of different colours in your meals for essential vitamins and antioxidants.',               category:'Nutrition' },
+  { icon:'😴', color:'#7C3AED', bg:'#F5F3FF', title:'Prioritise Sleep',     body:'Adults need 7–9 hours of quality sleep. Poor sleep is linked to weight gain, weakened immunity, and mental health issues.',category:'Sleep' },
+  { icon:'🧘', color:'#D97706', bg:'#FFFBEB', title:'Manage Stress',        body:'Chronic stress raises blood pressure. Try deep breathing: inhale 4 counts, hold 4, exhale 6. Practice 5 minutes daily.', category:'Mental Health' },
+  { icon:'🩺', color:'#DC2626', bg:'#FEF2F2', title:'Regular Check-ups',    body:'Annual screenings catch problems early. Blood pressure, cholesterol, blood sugar, and cancer screenings save lives.',     category:'Prevention' },
+  { icon:'🚭', color:'#65A30D', bg:'#F7FEE7', title:'Avoid Smoking',        body:'Smoking causes 7 out of 10 lung cancer cases. Your clinic can provide free stop-smoking support.',                        category:'Lifestyle' },
+  { icon:'🤲', color:'#0F6E56', bg:'#E1F5EE', title:'Hand Hygiene',         body:'Washing hands with soap for 20 seconds prevents 80% of common infections.',                                               category:'Hygiene' },
+  { icon:'☀️', color:'#D97706', bg:'#FFFBEB', title:'Sunscreen Matters',    body:'Apply SPF 30+ sunscreen when outdoors. Skin cancer is one of the most preventable cancers.',                              category:'Prevention' },
+  { icon:'🦷', color:'#1A4A9B', bg:'#EEF2FF', title:'Oral Health Matters',  body:'Gum disease is linked to heart disease. Brush twice daily, floss, and visit a dentist every 6 months.',                  category:'Dental' },
 ];
 
-let _tipIndex = 0;
+let _tipIndex    = 0;
 let _chatHistory = [];
 let _isListening = false;
 
-/* ── Initialise chatbot ── */
 function _initChatbot() {
   _tipIndex = Math.floor(Math.random() * _healthTips.length);
   _renderTip();
 }
 
-/* ── Render health tip ── */
 function _renderTip() {
   const tip = _healthTips[_tipIndex % _healthTips.length];
   const el  = document.getElementById('current-tip');
@@ -230,10 +226,9 @@ window._refreshTip = () => {
 
 window._askAboutTip = (title) => {
   const input = document.getElementById('chat-input');
-  if (input) { input.value = `Tell me more about: ${title}`; _sendMessage(); }
+  if (input) { input.value = 'Tell me more about: ' + title; _sendMessage(); }
 };
 
-/* ── Knowledge search ── */
 window._searchKnowledge = (query) => {
   const input = document.getElementById('kb-search');
   if (input) input.value = query;
@@ -241,91 +236,56 @@ window._searchKnowledge = (query) => {
   if (chatInput) { chatInput.value = query; _sendMessage(); }
 };
 
-/* ── Quick question ── */
 window._sendQuickQ = (q) => {
   const input = document.getElementById('chat-input');
   if (input) { input.value = q; _sendMessage(); }
 };
 
-/* ── Send message to AI ── */
+/* ══════════════════════════════
+   SEND MESSAGE — routes through backend
+══════════════════════════════ */
 window._sendMessage = async () => {
-  const input  = document.getElementById('chat-input');
-  const text   = input?.value?.trim();
+  const input = document.getElementById('chat-input');
+  const text  = input?.value?.trim();
   if (!text) return;
 
   input.value = '';
   input.style.height = 'auto';
 
-  // Hide quick questions after first message
   const qq = document.getElementById('quick-questions');
   if (qq) qq.style.display = 'none';
 
-  // Add user message
   _addMessage('user', text);
   _chatHistory.push({ role:'user', content: text });
 
-  // Show typing indicator
   const typingId = _addTypingIndicator();
-
-  // Disable send button
   const btn = document.getElementById('send-btn');
   if (btn) btn.disabled = true;
 
   try {
     const user = API.getStoredUser();
+
     const systemPrompt = `You are a knowledgeable and compassionate medical health assistant for NIHMS (National Integrated Healthcare Management System) in South Africa. You help patients understand any medical question they have — no topic is off limits.
 
 Patient: ${user?.firstName || 'Patient'} ${user?.lastName || ''}
 
-You can help with ALL medical questions including:
-- Symptoms, causes, and what conditions feel like
-- How diseases and medical conditions work
-- Medications — what they do, side effects, interactions, dosages
-- Lab results — what values mean, normal ranges, what high/low results indicate
-- Medical procedures — what to expect, how to prepare, recovery
-- Mental health — depression, anxiety, trauma, addiction
-- Sexual and reproductive health — completely openly and without judgment
-- Chronic disease management — diabetes, hypertension, HIV, TB, asthma
-- Child health — paediatrics, vaccinations, development
-- Women's health — pregnancy, menstruation, menopause, contraception
-- Men's health — prostate, testosterone, sexual function
-- Emergency signs — when to go to hospital immediately
-- Nutrition, supplements, vitamins, herbal remedies
-- Surgery — types, risks, anaesthesia, recovery
-- Cancer — types, staging, treatment, side effects
-- Genetics and hereditary conditions
-- Traditional medicine and its interaction with modern medicine
-- South African-specific health concerns (HIV/AIDS, TB, malaria, cholera, load shedding health impacts)
-- NHI and public healthcare navigation in South Africa
-- Any other medical or health topic the patient asks about
+You can help with ALL medical questions including symptoms, medications, lab results, mental health, sexual health, HIV, TB, diabetes, hypertension, pregnancy, surgery, cancer, traditional medicine, and anything else the patient asks.
 
 Response style:
-- Be thorough, clear, and compassionate — patients deserve complete information
-- Use plain language but don't oversimplify — patients can handle real medical information
-- Give specific, actionable information not vague platitudes
-- For emergency symptoms always include: "Call 10177 or go to your nearest emergency room immediately"
-- Mention when professional consultation is important but never refuse to answer
-- Reference South African context: public clinics, ARV programmes, DOTS therapy, NHI, traditional healers
-- Format responses clearly with short paragraphs; use plain text, avoid markdown symbols`;
+- Be thorough, clear, and compassionate
+- Use plain language
+- For emergency symptoms always say: "Call 10177 or go to your nearest emergency room immediately"
+- Reference South African context: public clinics, ARV programmes, DOTS therapy, NHI
+- Short paragraphs, plain text, avoid markdown symbols`;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    // ── Call backend proxy — avoids CORS ──
+    const res   = await API._fetchDirect('/auth/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: _chatHistory.slice(-10) // keep last 10 messages for context
-      })
+      body:   JSON.stringify({ messages: _chatHistory.slice(-10), systemPrompt })
     });
+    const reply = res?.reply || 'I\'m sorry, I couldn\'t process your question. Please try again.';
 
-    const data = await response.json();
-    const reply = data.content?.[0]?.text || 'I\'m sorry, I couldn\'t process your question. Please try again.';
-
-    // Remove typing indicator
     _removeTypingIndicator(typingId);
-
-    // Add AI response
     _addMessage('assistant', reply);
     _chatHistory.push({ role:'assistant', content: reply });
 
@@ -338,15 +298,11 @@ Response style:
   }
 };
 
-/* ── Add message to chat ── */
 function _addMessage(role, text) {
   const wrap = document.getElementById('chat-messages');
   if (!wrap) return;
-
   const isUser = role === 'user';
   const time   = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-
-  // Convert simple markdown to HTML
   const formatted = text
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
@@ -354,9 +310,9 @@ function _addMessage(role, text) {
     .replace(/\n/g, '<br>');
 
   const div = document.createElement('div');
-  div.style.cssText = `display:flex;gap:10px;align-items:flex-start;${isUser?'flex-direction:row-reverse':''}`;
+  div.style.cssText = 'display:flex;gap:10px;align-items:flex-start;' + (isUser ? 'flex-direction:row-reverse' : '');
   div.innerHTML = `
-    <div style="width:32px;height:32px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;${isUser?'background:linear-gradient(135deg,#0F6E56,#1A4A9B)':'background:linear-gradient(135deg,#1A4A9B,#0F6E56)'}">
+    <div style="width:32px;height:32px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,${isUser?'#0F6E56,#1A4A9B':'#1A4A9B,#0F6E56'})">
       <i class="ti ti-${isUser?'user':'robot'}" style="font-size:14px;color:#fff"></i>
     </div>
     <div style="max-width:75%">
@@ -367,12 +323,10 @@ function _addMessage(role, text) {
       </div>
       <div style="font-size:11px;color:#aaa;margin-top:4px;${isUser?'text-align:right':''}padding:0 4px">${time}</div>
     </div>`;
-
   wrap.appendChild(div);
   wrap.scrollTop = wrap.scrollHeight;
 }
 
-/* ── Typing indicator ── */
 function _addTypingIndicator() {
   const wrap = document.getElementById('chat-messages');
   if (!wrap) return null;
@@ -398,7 +352,6 @@ function _removeTypingIndicator(id) {
   if (el) el.remove();
 }
 
-/* ── Clear chat ── */
 window._clearChat = () => {
   _chatHistory = [];
   const wrap = document.getElementById('chat-messages');
@@ -408,35 +361,64 @@ window._clearChat = () => {
   _addMessage('assistant', 'Chat cleared. How can I help you today?');
 };
 
-/* ── Voice input ── */
+/* ══════════════════════════════
+   VOICE INPUT — FIXED
+══════════════════════════════ */
 window._toggleVoice = () => {
-  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-    UI.showToast('Voice input not supported in this browser. Try Chrome.', 'err');
+  const SRClass = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  if (!SRClass) {
+    UI.showToast('Voice input not supported. Please use Chrome or Edge.', 'err');
     return;
   }
   const btn = document.getElementById('voice-btn');
+
+  // Stop if already listening
   if (_isListening) {
-    window._recognition?.stop();
-    _isListening = false;
-    if (btn) { btn.innerHTML='<i class="ti ti-microphone"></i> Speak'; btn.style.background='rgba(255,255,255,.15)'; }
+    if (window._recognition) window._recognition.stop();
     return;
   }
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  window._recognition = new SR();
-  window._recognition.lang = 'en-ZA';
-  window._recognition.continuous = false;
-  window._recognition.interimResults = false;
-  window._recognition.onresult = (e) => {
-    const text = e.results[0][0].transcript;
-    const input = document.getElementById('chat-input');
-    if (input) { input.value = text; _sendMessage(); }
-  };
-  window._recognition.onerror = () => UI.showToast('Voice input failed. Please type instead.', 'err');
-  window._recognition.onend = () => {
-    _isListening = false;
-    if (btn) { btn.innerHTML='<i class="ti ti-microphone"></i> Speak'; btn.style.background='rgba(255,255,255,.15)'; }
-  };
-  window._recognition.start();
-  _isListening = true;
-  if (btn) { btn.innerHTML='<i class="ti ti-microphone" style="animation:pulse 1s infinite"></i> Listening…'; btn.style.background='rgba(231,76,60,.7)'; }
+
+  try {
+    window._recognition = new SRClass();
+    window._recognition.lang            = 'en-ZA';
+    window._recognition.continuous      = false;
+    window._recognition.interimResults  = false;
+    window._recognition.maxAlternatives = 1;
+
+    window._recognition.onstart = () => {
+      _isListening = true;
+      if (btn) {
+        btn.innerHTML = '<i class="ti ti-microphone" style="animation:pulse 1s infinite"></i> Listening…';
+        btn.style.background = 'rgba(231,76,60,.7)';
+      }
+    };
+
+    window._recognition.onresult = (e) => {
+      const text = Array.from(e.results).map(r => r[0].transcript).join(' ').trim();
+      if (text) {
+        const input = document.getElementById('chat-input');
+        if (input) { input.value = text; _sendMessage(); }
+      }
+    };
+
+    window._recognition.onerror = (e) => {
+      const msg = e.error === 'not-allowed'
+        ? 'Microphone access denied — please allow microphone in browser settings.'
+        : 'Voice input failed (' + (e.error || 'unknown') + '). Please type instead.';
+      UI.showToast(msg, 'err');
+    };
+
+    window._recognition.onend = () => {
+      _isListening = false;
+      if (btn) {
+        btn.innerHTML = '<i class="ti ti-microphone"></i> Speak';
+        btn.style.background = 'rgba(255,255,255,.15)';
+      }
+    };
+
+    window._recognition.start();
+
+  } catch(e) {
+    UI.showToast('Could not start microphone: ' + e.message, 'err');
+  }
 };

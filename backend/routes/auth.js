@@ -226,7 +226,7 @@ router.post('/chat', async (req, res, next) => {
     // ── 2. Try Groq (free cloud, no credit card, Llama models) ──
     if (process.env.GROQ_API_KEY) {
       try {
-        const groqModel = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
+        const groqModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
         const groqBody  = JSON.stringify({
           model:       groqModel,
           max_tokens:  800,

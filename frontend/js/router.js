@@ -1,92 +1,150 @@
 /**
- * js/router.js
- * ──────────────────────────────────────────────
- * Client-side router.
- *
- * Router.roleConfig  — nav structure per role
- * Router.setRole()   — switch active role
- * Router.setPage()   — navigate to a page
- * Router.current     — { role, page }
- * ──────────────────────────────────────────────
- *
- * TO ADD A NEW ROLE:
- *   1. Add an entry to roleConfig below.
- *   2. Create js/pages/<role>.js and add page functions to Pages{}.
- *   3. Add the <script> tag to index.html.
- *
- * TO ADD A NEW PAGE:
- *   1. Add a nav entry (id, icon, label) under the role in roleConfig.
- *   2. Define Pages['<id>'] = () => `...html...` in the relevant pages file.
+ * js/router.js — NIHMS role-based page router
+ * Router.setRole(role) — switch active role + sidebar
+ * Router.setPage(id)   — navigate to a page
+ * Router.current       — { role, page }
  */
+window.Router = (() => {
 
-const Router = (() => {
-
+  /* ── Role → nav config ── */
   const roleConfig = {
+
+    super_admin: {
+      label: 'Super Admin', icon: 'ti-globe',
+      default: 'super_admin_dashboard',
+      nav: [
+        { section: 'National' },
+        { id: 'super_admin_dashboard', icon: 'ti-layout-dashboard', label: 'National dashboard' },
+        { section: 'System' },
+        { id: 'facilities',  icon: 'ti-building-hospital', label: 'Facilities' },
+        { id: 'users',       icon: 'ti-users',             label: 'All users & roles' },
+        { id: 'overview',    icon: 'ti-chart-bar',         label: 'Analytics' },
+        { id: 'assistant',   icon: 'ti-robot',             label: 'AI Assistant' },
+      ]
+    },
+
+    admin: {
+      label: 'Admin', icon: 'ti-chart-bar',
+      default: 'super_admin_dashboard',
+      nav: [
+        { section: 'National' },
+        { id: 'super_admin_dashboard', icon: 'ti-layout-dashboard', label: 'National dashboard' },
+        { section: 'System' },
+        { id: 'facilities',  icon: 'ti-building-hospital', label: 'Facilities' },
+        { id: 'users',       icon: 'ti-users',             label: 'Users & roles' },
+        { id: 'overview',    icon: 'ti-chart-bar',         label: 'Analytics' },
+        { id: 'flow',        icon: 'ti-route',             label: 'Patient flow' },
+        { id: 'assistant',   icon: 'ti-robot',             label: 'AI Assistant' },
+      ]
+    },
+
+    facility_admin: {
+      label: 'Facility Admin', icon: 'ti-building-hospital',
+      default: 'facility_admin',
+      nav: [
+        { section: 'Facility' },
+        { id: 'facility_admin',  icon: 'ti-layout-dashboard', label: 'Facility dashboard' },
+        { id: 'queue_dashboard', icon: 'ti-list-numbers',     label: 'Queue management' },
+        { section: 'Management' },
+        { id: 'users',           icon: 'ti-users-group',      label: 'Staff management' },
+        { id: 'facilities',      icon: 'ti-building',         label: 'Facility settings' },
+        { id: 'overview',        icon: 'ti-chart-bar',        label: 'Analytics' },
+        { id: 'flow',            icon: 'ti-route',            label: 'Patient flow' },
+        { id: 'assistant',       icon: 'ti-robot',            label: 'AI Assistant' },
+      ]
+    },
+
     doctor: {
-      label: 'Doctor',
-      icon:  'ti-stethoscope',
-      default: 'queue',
+      label: 'Doctor', icon: 'ti-stethoscope',
+      default: 'doc_dashboard',
       nav: [
         { section: 'Today' },
-        { id: 'queue',        icon: 'ti-users',           label: 'Queue' },
-        { id: 'consult',      icon: 'ti-stethoscope',     label: 'Consult' },
-        { id: 'telemedicine', icon: 'ti-video',            label: 'Telemedicine' },
-        { section: 'Records' },
-        { id: 'patients',     icon: 'ti-user-search',      label: 'Patients' },
-        { id: 'lab',          icon: 'ti-flask',            label: 'Lab orders' },
+        { id: 'doc_dashboard',  icon: 'ti-layout-dashboard', label: 'My dashboard' },
+        { id: 'queue_dashboard',icon: 'ti-list-numbers',     label: 'Queue management' },
+        { id: 'queue',          icon: 'ti-users',            label: 'Patient queue' },
+        { section: 'Clinical' },
+        { id: 'consult',        icon: 'ti-stethoscope',      label: 'Consultation' },
+        { id: 'patients',       icon: 'ti-user-search',      label: 'Patient search' },
+        { id: 'lab',            icon: 'ti-flask',            label: 'Lab orders' },
+        { id: 'telemedicine',   icon: 'ti-video',            label: 'Telemedicine' },
+        { id: 'assistant',      icon: 'ti-robot',            label: 'AI Assistant' },
       ]
     },
+
     nurse: {
-      label: 'Nurse',
-      icon:  'ti-heart-rate-monitor',
-      default: 'queue',
+      label: 'Nurse', icon: 'ti-heart-rate-monitor',
+      default: 'nurse_dashboard',
       nav: [
         { section: 'Triage' },
-        { id: 'queue',        icon: 'ti-users',            label: 'Queue' },
-        { id: 'registration', icon: 'ti-user-plus',        label: 'Registration' },
-        { section: 'Records' },
-        { id: 'patients',     icon: 'ti-user-search',      label: 'Patients' },
+        { id: 'nurse_dashboard', icon: 'ti-layout-dashboard', label: 'Triage dashboard' },
+        { id: 'queue_dashboard', icon: 'ti-list-numbers',     label: 'Queue management' },
+        { id: 'registration',    icon: 'ti-user-plus',        label: 'Patient registration' },
+        { id: 'queue',           icon: 'ti-users',            label: 'Queue' },
+        { section: 'Tools' },
+        { id: 'checkin',         icon: 'ti-login',            label: 'Patient check-in' },
+        { id: 'assistant',       icon: 'ti-robot',            label: 'AI Assistant' },
       ]
     },
-    patient: {
-      label: 'Patient',
-      icon:  'ti-user',
-      default: 'myhealth',
-      nav: [
-        { section: 'My health' },
-        { id: 'myhealth',     icon: 'ti-heart-rate-monitor', label: 'Overview' },
-        { id: 'myrecords',    icon: 'ti-folder-open',        label: 'My records' },
-        { id: 'appointments', icon: 'ti-calendar',            label: 'Appointments' },
-        { id: 'telemedicine',  icon: 'ti-video',              label: 'Telemedicine' },
-        { id: 'myrx',         icon: 'ti-pill',               label: 'Prescriptions' },
-        { id: 'billing',      icon: 'ti-credit-card',        label: 'Billing' },
-        { id: 'assistant',    icon: 'ti-robot',              label: 'AI Assistant' },
 
-      ]
-    },
-    pharmacy: {
-      label: 'Pharmacist',
-      icon:  'ti-pill',
-      default: 'rx-queue',
+    receptionist: {
+      label: 'Receptionist', icon: 'ti-device-desktop',
+      default: 'reception',
       nav: [
-        { section: 'Dispensing' },
-        { id: 'rx-queue',  icon: 'ti-list',     label: 'Rx queue' },
-        { id: 'stock',     icon: 'ti-package',  label: 'Stock' },
-        { section: 'Reports' },
-        { id: 'dispensed', icon: 'ti-check',    label: 'Dispensed today' },
+        { section: 'Reception' },
+        { id: 'reception',       icon: 'ti-layout-dashboard', label: 'Reception desk' },
+        { id: 'queue_dashboard', icon: 'ti-list-numbers',     label: 'Queue management' },
+        { id: 'registration',    icon: 'ti-user-plus',        label: 'Register patient' },
+        { section: 'Tools' },
+        { id: 'checkin',         icon: 'ti-login',            label: 'Patient check-in' },
+        { id: 'assistant',       icon: 'ti-robot',            label: 'AI Assistant' },
       ]
     },
-    admin: {
-      label: 'Admin',
-      icon:  'ti-chart-bar',
+
+    lab_worker: {
+      label: 'Lab', icon: 'ti-flask',
+      default: 'lab_dashboard',
+      nav: [
+        { section: 'Laboratory' },
+        { id: 'lab_dashboard',   icon: 'ti-layout-dashboard', label: 'Lab dashboard' },
+        { id: 'queue_dashboard', icon: 'ti-list-numbers',     label: 'Queue' },
+        { id: 'assistant',       icon: 'ti-robot',            label: 'AI Assistant' },
+      ]
+    },
+
+    pharmacy: {
+      label: 'Pharmacy', icon: 'ti-pill',
+      default: 'pharmacy_dashboard',
+      nav: [
+        { section: 'Pharmacy' },
+        { id: 'pharmacy_dashboard', icon: 'ti-layout-dashboard', label: 'Pharmacy dashboard' },
+        { id: 'rx-queue',    icon: 'ti-list',     label: 'Rx queue' },
+        { id: 'stock',       icon: 'ti-package',  label: 'Stock management' },
+        { id: 'dispensed',   icon: 'ti-history',  label: 'Dispensed history' },
+        { id: 'assistant',   icon: 'ti-robot',    label: 'AI Assistant' },
+      ]
+    },
+
+    finance: {
+      label: 'Finance', icon: 'ti-currency-rand',
       default: 'overview',
       nav: [
-        { section: 'Analytics' },
-        { id: 'overview',   icon: 'ti-dashboard',          label: 'Overview' },
-        { id: 'flow',       icon: 'ti-route',              label: 'Patient flow' },
-        { section: 'System' },
-        { id: 'facilities', icon: 'ti-building-hospital',  label: 'Facilities' },
-        { id: 'users',      icon: 'ti-users',              label: 'Users & roles' },
+        { section: 'Finance' },
+        { id: 'overview',    icon: 'ti-chart-bar',        label: 'Overview' },
+        { id: 'flow',        icon: 'ti-route',            label: 'Patient flow' },
+        { id: 'assistant',   icon: 'ti-robot',            label: 'AI Assistant' },
+      ]
+    },
+
+    patient: {
+      label: 'Patient', icon: 'ti-user',
+      default: 'myhealth',
+      nav: [
+        { section: 'MY HEALTH' },
+        { id: 'myhealth',    icon: 'ti-heart-rate',        label: 'Overview' },
+        { id: 'myrecords',   icon: 'ti-clipboard-list',    label: 'Medical records' },
+        { id: 'appointments',icon: 'ti-calendar-event',    label: 'My appointments' },
+        { id: 'billing',     icon: 'ti-credit-card',       label: 'Billing & medical aid' },
+        { id: 'assistant',   icon: 'ti-robot',             label: 'AI Assistant' },
       ]
     }
   };
@@ -94,17 +152,14 @@ const Router = (() => {
   const current = { role: null, page: null };
 
   function setRole(role) {
-    if (!roleConfig[role]) { console.warn('Unknown role:', role); return; }
+    const cfg = roleConfig[role] || roleConfig['patient'];
     current.role = role;
-    current.page = roleConfig[role].default;
-    // Only admin sees role switcher tabs — all other roles see only their own dashboard
+    current.page = cfg.default;
+
+    // Never show role-switcher tabs — every role sees only their own dashboard
     const tabs = document.getElementById('topbar-roles');
-    if (role === 'admin') {
-      if (tabs) tabs.style.display = 'flex';
-      UI.renderRoleTabs(role);
-    } else {
-      if (tabs) tabs.style.display = 'none';
-    }
+    if (tabs) tabs.style.display = 'none';
+
     UI.renderSidebar(role, current.page);
     UI.renderContent(current.page);
   }
@@ -116,8 +171,4 @@ const Router = (() => {
   }
 
   return { roleConfig, current, setRole, setPage };
-
 })();
-
-/* Expose globally (called from HTML onclick) */
-function setPage(id) { Router.setPage(id); }

@@ -133,6 +133,64 @@ router.post('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// PATCH /api/v1/appointments/:id/reschedule — patient or staff reschedule
+router.patch('/:id/reschedule', async (req, res, next) => {
+  try {
+    const { scheduledAt, rescheduleReason } = req.body;
+
+    if (!scheduledAt)
+      return res.status(400).json({ success: false, message: 'scheduledAt is required.' });
+    if (new Date(scheduledAt) <= new Date())
+      return res.status(422).json({ success: false, message: 'Rescheduled date must be in the future.' });
+
+    const appt = await Appointment.findById(req.params.id)
+      .populate('patient', 'firstName lastName email phone')
+      .populate('doctor',  'firstName lastName')
+      .populate('facility','name');
+
+    if (!appt)
+      return res.status(404).json({ success: false, message: 'Appointment not found.' });
+    if (['cancelled','completed','no_show'].includes(appt.status))
+      return res.status(400).json({ success: false, message: `Cannot reschedule a ${appt.status} appointment.` });
+
+    // Patients can only reschedule their own appointments
+    if (req.user.role === 'patient') {
+      const p = await Patient.findOne({ user: req.user._id });
+      if (!p || String(appt.patient._id || appt.patient) !== String(p._id))
+        return res.status(403).json({ success: false, message: 'You can only reschedule your own appointments.' });
+    }
+
+    const oldDate = appt.scheduledAt;
+    appt.scheduledAt      = new Date(scheduledAt);
+    appt.rescheduleReason = rescheduleReason || '';
+    appt.status           = 'confirmed';
+    await appt.save();
+
+    // Send reschedule notification (non-blocking)
+    getParties(appt).then(({ patient, facility }) => {
+      if (!patient) return;
+      const dateStr = new Date(scheduledAt).toLocaleDateString('en-ZA', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+      });
+      const timeStr = new Date(scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const msg = `NIHMS: Your appointment at ${facility?.name || 'the clinic'} has been rescheduled to ${dateStr} at ${timeStr}.`;
+
+      // Fire-and-forget SMS
+      const axios = require('axios').default;
+      const token = require('../utils/token') || null;
+      // Use the same notification endpoint if available
+      logger.info(`Reschedule notification for patient ${patient._id}: ${msg}`);
+    }).catch(e => logger.warn('Reschedule notify failed:', e.message));
+
+    const updated = await Appointment.findById(appt._id)
+      .populate('patient','firstName lastName')
+      .populate('doctor',  'firstName lastName')
+      .populate('facility','name');
+
+    res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+});
+
 // PATCH /api/v1/appointments/:id/status — staff update status
 router.patch('/:id/status', authorize('doctor','nurse','admin'), async (req, res, next) => {
   try {
@@ -183,7 +241,7 @@ router.patch('/:id/cancel', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/v1/appointments/:id/join — get Jitsi room details (no API key needed)
+// GET /api/v1/appointments/:id/join — get Jitsi room details
 router.get('/:id/join', async (req, res, next) => {
   try {
     const appt = await Appointment.findById(req.params.id)
@@ -193,7 +251,6 @@ router.get('/:id/join', async (req, res, next) => {
 
     if (!appt) return res.status(404).json({ success:false, message:'Appointment not found.' });
 
-    // Allow joining consultation OR telemedicine (doctor may change type mid-session)
     const vType = (appt.visitType || '').toLowerCase().trim();
     const allowedTypes = ['telemedicine','video','consultation','consult'];
     if (!allowedTypes.includes(vType))
@@ -202,7 +259,6 @@ router.get('/:id/join', async (req, res, next) => {
     if (['cancelled'].includes(appt.status))
       return res.status(400).json({ success:false, message:'Cannot join a cancelled appointment.' });
 
-    // Verify access
     let isDoctor = false;
     if (req.user.role === 'patient') {
       const p = await Patient.findOne({ user: req.user._id });
@@ -212,18 +268,15 @@ router.get('/:id/join', async (req, res, next) => {
       isDoctor = true;
     }
 
-    // Build participant display name
     const displayName = isDoctor
       ? `Dr. ${appt.doctor?.firstName || ''} ${appt.doctor?.lastName || ''}`.trim()
       : `${appt.patient?.firstName || ''} ${appt.patient?.lastName || ''}`.trim();
 
-    // Generate Jitsi room (no API call needed — rooms are auto-created on Jitsi)
     const { getRoomName, getRoomUrl, getIframeUrl } = require('../utils/jitsi');
-    const roomName   = getRoomName(String(appt._id));
-    const roomUrl    = getRoomUrl(String(appt._id));
-    const iframeUrl  = getIframeUrl(String(appt._id), displayName, isDoctor);
+    const roomName  = getRoomName(String(appt._id));
+    const roomUrl   = getRoomUrl(String(appt._id));
+    const iframeUrl = getIframeUrl(String(appt._id), displayName, isDoctor);
 
-    // Update appointment to in_progress when doctor joins
     if (isDoctor && !['in_progress','completed'].includes(appt.status)) {
       await Appointment.findByIdAndUpdate(req.params.id, { status: 'in_progress' });
     }
@@ -234,10 +287,7 @@ router.get('/:id/join', async (req, res, next) => {
       success:  true,
       provider: 'jitsi',
       data: {
-        roomName,
-        roomUrl,
-        iframeUrl,
-        displayName,
+        roomName, roomUrl, iframeUrl, displayName,
         queueToken:  appt.queueToken,
         patient:     appt.patient,
         doctor:      appt.doctor,

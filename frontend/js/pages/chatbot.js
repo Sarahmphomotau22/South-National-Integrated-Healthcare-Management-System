@@ -409,33 +409,39 @@ window._clearChat = () => {
 
 /* ── Voice input ── */
 window._toggleVoice = () => {
-  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-    UI.showToast('Voice input not supported in this browser. Try Chrome.', 'err');
+  const SRClass = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  if (!SRClass) {
+    UI.showToast('Voice input not supported. Please use Chrome or Edge.', 'err');
     return;
   }
   const btn = document.getElementById('voice-btn');
-  if (_isListening) {
-    window._recognition?.stop();
-    _isListening = false;
-    if (btn) { btn.innerHTML='<i class="ti ti-microphone"></i> Speak'; btn.style.background='rgba(255,255,255,.15)'; }
-    return;
+  if (_isListening && window._recognition) {
+    window._recognition.stop();
+    return; // onend handles the rest
   }
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  window._recognition = new SR();
-  window._recognition.lang = 'en-ZA';
-  window._recognition.continuous = false;
-  window._recognition.interimResults = false;
-  window._recognition.onresult = (e) => {
-    const text = e.results[0][0].transcript;
-    const input = document.getElementById('chat-input');
-    if (input) { input.value = text; _sendMessage(); }
-  };
-  window._recognition.onerror = () => UI.showToast('Voice input failed. Please type instead.', 'err');
-  window._recognition.onend = () => {
-    _isListening = false;
-    if (btn) { btn.innerHTML='<i class="ti ti-microphone"></i> Speak'; btn.style.background='rgba(255,255,255,.15)'; }
-  };
-  window._recognition.start();
-  _isListening = true;
-  if (btn) { btn.innerHTML='<i class="ti ti-microphone" style="animation:pulse 1s infinite"></i> Listening…'; btn.style.background='rgba(231,76,60,.7)'; }
+  try {
+    window._recognition = new SRClass();
+    window._recognition.lang = 'en-ZA';
+    window._recognition.continuous = false;
+    window._recognition.interimResults = false;
+    window._recognition.maxAlternatives = 1;
+    window._recognition.onstart = () => {
+      _isListening = true;
+      if (btn) { btn.innerHTML='<i class="ti ti-microphone" style="animation:pulse 1s infinite"></i> Listening…'; btn.style.background='rgba(231,76,60,.7)'; }
+    };
+    window._recognition.onresult = (e) => {
+      const text = Array.from(e.results).map(r=>r[0].transcript).join(' ').trim();
+      if (text) { const input=document.getElementById('chat-input'); if(input){ input.value=text; _sendMessage(); } }
+    };
+    window._recognition.onerror = (e) => {
+      UI.showToast('Voice error: '+(e.error||'unknown')+'. Please type instead.', 'err');
+    };
+    window._recognition.onend = () => {
+      _isListening = false;
+      if (btn) { btn.innerHTML='<i class="ti ti-microphone"></i> Speak'; btn.style.background='rgba(255,255,255,.15)'; }
+    };
+    window._recognition.start();
+  } catch(e) {
+    UI.showToast('Voice input failed: '+e.message, 'err');
+  }
 };

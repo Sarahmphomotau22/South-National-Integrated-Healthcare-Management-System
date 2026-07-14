@@ -27,11 +27,20 @@ const appointmentSchema = new mongoose.Schema({
   patient:      { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true },
   doctor:       { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   facility:     { type: mongoose.Schema.Types.ObjectId, ref: 'Facility', required: true },
-  visitType:    {
-    type: String,
-    enum: ['consultation','telemedicine','lab','immunisation','specialist','mental_health'],
-    required: true
-  },
+  
+  visitType: {
+  type: String,
+  enum: [
+    'consultation', 'telemedicine', 'follow_up', 'lab',
+    'immunisation', 'mental_health',
+    'maternal_child_health',   
+    'pharmacy_pickup',          
+    'specialist_referral',      
+    'wellness',                 
+    'emergency'
+  ],
+  default:'consultation'
+},
   scheduledAt:  { type: Date, required: true },
   duration:     { type: Number, default: 20 },          // minutes
   status:       { type: String, enum: ['pending','confirmed','in_progress','completed','cancelled','no_show'], default: 'pending' },

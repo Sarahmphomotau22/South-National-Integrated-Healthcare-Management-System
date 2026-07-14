@@ -38,7 +38,10 @@ app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
-    // Auto-allow any private network IP on port 5500 (LAN access)
+    // Auto-allow Railway, Vercel, Netlify deployment URLs
+    const isCloud = /\.(railway\.app|up\.railway\.app|vercel\.app|netlify\.app|onrender\.com)$/.test(origin);
+    if (isCloud) return cb(null, true);
+    // Auto-allow any private network IP (LAN access)
     const localNet = /^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(origin);
     if (localNet) return cb(null, true);
     logger.error(`CORS blocked: ${origin} — add to CLIENT_ORIGIN in .env`);
@@ -64,7 +67,7 @@ app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(mongoSanitize());
 app.use(morgan('dev'));
-
+app.use('/api/v1/queue2', require('./routes/queue2'));
 // ── Health check (works even without DB) ──
 app.get('/health', (_req, res) => {
   const dbState = ['disconnected','connected','connecting','disconnecting'];
@@ -84,6 +87,7 @@ app.use('/api/v1/appointments',  appointmentRoutes);
 app.use('/api/v1/prescriptions', prescriptionRoutes);
 app.use('/api/v1/medications',   medicationRoutes);
 app.use('/api/v1/labs',          labRoutes);
+app.use('/api/v1/queue2',         require('./routes/queue2'));
 app.use('/api/v1/facilities',    facilityRoutes);
 app.use('/api/v1/analytics',     analyticsRoutes);
 app.use('/api/v1/queue',         queueRoutes);

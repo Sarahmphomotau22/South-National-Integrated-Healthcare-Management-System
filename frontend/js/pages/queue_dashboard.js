@@ -124,7 +124,7 @@ async function _loadDoctorQueue() {
 
     const [queueRes, statsRes, labRes] = await Promise.all([
       API._fetchDirect(`/queue?facility=${facilityId}&date=${today}`, { method:'GET' }),
-      API._fetchDirect(`/queue/stats?facility=${facilityId}&date=${today}`, { method:'GET' }),
+      API._fetchDirect(`/queue2/stats?facility=${facilityId}&date=${today}`, { method:'GET' }),
       API.labs.list({ facility: facilityId, status:'ordered', limit:50 })
     ]);
 
@@ -273,7 +273,7 @@ async function _selectPatient(apptId) {
 async function _callPatient(apptId) {
   const room = prompt('Which room? (e.g. Consulting Room 3)') || 'the consultation room';
   try {
-    await API._fetchDirect(`/queue/${apptId}/call`, { method:'PATCH', body: JSON.stringify({ room }) });
+    await API._fetchDirect(`/queue2/${apptId}/call`, { method:'PATCH', body: JSON.stringify({ room }) });
     UI.showToast(`Patient called to ${room} — SMS sent`, 'ok');
     _loadDoctorQueue();
   } catch(e) { UI.showToast(e.message||'Could not call patient','err'); }
@@ -298,7 +298,7 @@ async function _submitTriage() {
   const notes     = document.getElementById('triage-notes')?.value?.trim();
   if (!level) { UI.showToast('Please select a triage level','err'); return; }
   try {
-    await API._fetchDirect('/queue/triage', {
+    await API._fetchDirect('/queue2/walkin', {
       method: 'POST',
       body: JSON.stringify({ appointmentId: _triageApptId, triageLevel: +level, chiefComplaint: complaint, notes })
     });
