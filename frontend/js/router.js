@@ -115,12 +115,15 @@ window.Router = (() => {
       label: 'Pharmacy', icon: 'ti-pill',
       default: 'pharmacy_dashboard',
       nav: [
-        { section: 'Pharmacy' },
-        { id: 'pharmacy_dashboard', icon: 'ti-layout-dashboard', label: 'Pharmacy dashboard' },
-        { id: 'rx-queue',    icon: 'ti-list',     label: 'Rx queue' },
-        { id: 'stock',       icon: 'ti-package',  label: 'Stock management' },
-        { id: 'dispensed',   icon: 'ti-history',  label: 'Dispensed history' },
-        { id: 'assistant',   icon: 'ti-robot',    label: 'AI Assistant' },
+        { section: 'DISPENSING' },
+  { id: 'rx-queue',      icon: 'ti-list-check',     label: 'Rx Queue'        },
+  { id: 'dispensed',     icon: 'ti-clipboard-check', label: 'Dispensed Today' },
+  { section: 'INVENTORY' },
+  { id: 'stock',         icon: 'ti-package',         label: 'Stock'           },
+  { section: 'PATIENTS'  },
+  { id: 'ph-history',    icon: 'ti-history',         label: 'Med History'     },
+  { section: 'REPORTS'   },
+  { id: 'ph-analytics',  icon: 'ti-chart-bar',       label: 'Analytics'       },
       ]
     },
 

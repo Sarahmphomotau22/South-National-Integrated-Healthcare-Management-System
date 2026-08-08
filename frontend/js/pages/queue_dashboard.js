@@ -124,7 +124,7 @@ async function _loadDoctorQueue() {
 
     const [queueRes, statsRes, labRes] = await Promise.all([
       API._fetchDirect(`/queue?facility=${facilityId}&date=${today}`, { method:'GET' }),
-      API._fetchDirect(`/queue2/stats?facility=${facilityId}&date=${today}`, { method:'GET' }),
+      API._fetchDirect(`/queue/stats?facility=${facilityId}&date=${today}`, { method:'GET' }),
       API.labs.list({ facility: facilityId, status:'ordered', limit:50 })
     ]);
 
@@ -273,7 +273,7 @@ async function _selectPatient(apptId) {
 async function _callPatient(apptId) {
   const room = prompt('Which room? (e.g. Consulting Room 3)') || 'the consultation room';
   try {
-    await API._fetchDirect(`/queue2/${apptId}/call`, { method:'PATCH', body: JSON.stringify({ room }) });
+    await API._fetchDirect(`/queue/${apptId}/call`, { method:'PATCH', body: JSON.stringify({ room }) });
     UI.showToast(`Patient called to ${room} — SMS sent`, 'ok');
     _loadDoctorQueue();
   } catch(e) { UI.showToast(e.message||'Could not call patient','err'); }
@@ -298,7 +298,7 @@ async function _submitTriage() {
   const notes     = document.getElementById('triage-notes')?.value?.trim();
   if (!level) { UI.showToast('Please select a triage level','err'); return; }
   try {
-    await API._fetchDirect('/queue2/walkin', {
+    await API._fetchDirect('/queue/triage', {
       method: 'POST',
       body: JSON.stringify({ appointmentId: _triageApptId, triageLevel: +level, chiefComplaint: complaint, notes })
     });
@@ -351,10 +351,10 @@ Pages['myhealth'] = () => {
           <button onclick="Router.setPage('telemedicine')" style="padding:12px 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--green-light);color:var(--green-dark);cursor:pointer;font-size:13px;font-weight:500;display:flex;flex-direction:column;align-items:center;gap:6px">
             <i class="ti ti-video" style="font-size:20px"></i>See doctor
           </button>
-          <button onclick="Router.setPage('myrx')" style="padding:12px 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-surface);cursor:pointer;font-size:13px;font-weight:500;display:flex;flex-direction:column;align-items:center;gap:6px">
+          <button onclick="Router.setPage('myrecords');setTimeout(function(){window._mrTab&&_mrTab(3);},400)" style="padding:12px 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-surface);cursor:pointer;font-size:13px;font-weight:500;display:flex;flex-direction:column;align-items:center;gap:6px">
             <i class="ti ti-pill" style="font-size:20px;color:var(--coral)"></i>Medications
           </button>
-          <button onclick="Router.setPage('myprofile')" style="padding:12px 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-surface);cursor:pointer;font-size:13px;font-weight:500;display:flex;flex-direction:column;align-items:center;gap:6px">
+          <button onclick="Router.setPage('myrecords')" style="padding:12px 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-surface);cursor:pointer;font-size:13px;font-weight:500;display:flex;flex-direction:column;align-items:center;gap:6px">
             <i class="ti ti-clipboard-list" style="font-size:20px;color:var(--blue)"></i>My records
           </button>
         </div>

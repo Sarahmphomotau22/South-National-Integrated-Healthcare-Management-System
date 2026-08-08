@@ -140,18 +140,22 @@ async function _mhLoad() {
               '<div style="font-size:12px;color:var(--text-muted)">'+tokenStatusMsg+'</div>' +
             '</div>' +
             (['lab','pharmacy'].includes(qTok&&qTok.status) ? '<div class="alert-box alert-info" style="margin-top:8px"><i class="ti ti-'+(qTok.status==='lab'?'flask':'pill')+'"></i> Please go to the <strong>'+(qTok.status==='lab'?'Laboratory':'Pharmacy')+'</strong></div>' : '') +
-            (qTok&&qTok.status==='completed' ? '<div style="text-align:center;margin-top:8px"><div style="font-size:13px;color:var(--text-muted);margin-bottom:8px">How was your experience?</div><div style="display:flex;justify-content:center;gap:4px" id="mh-stars">' + [1,2,3,4,5].map(function(n){ return '<button onclick="_mhRate(\''+qTok._id+'\','+n+')" style="font-size:24px;background:none;border:none;cursor:pointer">⭐</button>'; }).join('') + '</div></div>' : '')
+            (qTok&&qTok.status==='completed' ? '<div style="text-align:center;margin-top:12px">' +
+              '<div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Your visit is complete — share your experience</div>' +
+              '<button class="btn btn-green" style="width:100%;padding:10px" onclick="_launchSurvey(\''+qTok._id+'\',null)"><i class="ti ti-star"></i>Patient Experience Survey</button>' +
+              '</div>' : '')
           :
             '<div style="text-align:center;padding:16px;color:var(--text-muted)"><i class="ti ti-checks" style="font-size:32px;opacity:.25;display:block;margin-bottom:8px"></i>Not in queue today</div>' +
             '<button class="btn btn-green" style="width:100%" onclick="Router.setPage(\'checkin\')"><i class="ti ti-login"></i>Check in to queue</button>'
           ) +
         '</div>' +
-        '<div class="card">' +
+        '<div class="card" id="mh-next-appt-card">' +
           '<div class="card-title"><i class="ti ti-calendar-event"></i>Next appointment</div>' +
+          '<div id="mh-next-appt-body">' +
           (nextAppt ?
-            '<div style="padding:12px;background:'+(new Date(nextAppt.scheduledAt).toDateString()===now.toDateString()?'var(--green-light)':'var(--bg-surface)')+';border-radius:10px;border:1.5px solid '+(new Date(nextAppt.scheduledAt).toDateString()===now.toDateString()?'var(--green)':'var(--border)')+';">' +
+            '<div style="padding:12px;background:'+(new Date(nextAppt.scheduledAt).toDateString()===now.toDateString()?'var(--green-light)':'var(--bg-surface)')+';border-radius:10px;border:1.5px solid '+(new Date(nextAppt.scheduledAt).toDateString()===now.toDateString()?'var(--green)':'var(--border)')+';margin-bottom:10px">' +
               (new Date(nextAppt.scheduledAt).toDateString()===now.toDateString() ? '<div style="font-size:11px;font-weight:700;color:var(--green-dark);margin-bottom:6px">📅 TODAY</div>' : '') +
-              '<div style="font-weight:600;font-size:14px;text-transform:capitalize;margin-bottom:4px"><i class="ti ti-'+(nextAppt.visitType==='telemedicine'?'video':'stethoscope')+'" style="font-size:13px;margin-right:4px"></i>'+(nextAppt.visitType||'').replace('_',' ')+'</div>' +
+              '<div style="font-weight:600;font-size:14px;text-transform:capitalize;margin-bottom:4px"><i class="ti ti-'+(nextAppt.visitType==='telemedicine'?'video':'stethoscope')+'" style="font-size:13px;margin-right:4px"></i>'+(nextAppt.visitType||'').replace(/_/g,' ')+'</div>' +
               '<div style="font-size:12px;color:var(--text-muted)">'+new Date(nextAppt.scheduledAt).toLocaleDateString('en-ZA',{weekday:'short',day:'numeric',month:'short',year:'numeric'})+' at '+new Date(nextAppt.scheduledAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'</div>' +
               '<div style="font-size:12px;color:var(--text-muted)">'+(nextAppt.facility&&nextAppt.facility.name||'')+'</div>' +
               '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">' +
@@ -161,15 +165,76 @@ async function _mhLoad() {
               '</div>' +
             '</div>'
           :
-            '<div style="text-align:center;padding:16px;color:var(--text-muted)"><i class="ti ti-calendar-off" style="font-size:32px;opacity:.25;display:block;margin-bottom:8px"></i>No upcoming appointments</div>' +
+            '<div style="text-align:center;padding:12px;color:var(--text-muted)"><i class="ti ti-calendar-off" style="font-size:28px;opacity:.25;display:block;margin-bottom:6px"></i>No upcoming appointments</div>' +
             '<button class="btn btn-green" style="width:100%" onclick="Router.setPage(\'book\')"><i class="ti ti-plus"></i>Book an appointment</button>'
           ) +
+          '</div>' +
+          '<div id="mh-followup-section"></div>' +
         '</div>' +
       '</div>';
+    /* Load follow-up dates from consultation notes */
+    try {
+      if (p && p._id) {
+        var fuRes = await API._fetchDirect('/consultation-notes?patient='+p._id+'&limit=20', {method:'GET'});
+        var fuNotes = (fuRes.data||[]).filter(function(n){ return n.followUpDate && new Date(n.followUpDate) > now; });
+        fuNotes.sort(function(a,b){ return new Date(a.followUpDate)-new Date(b.followUpDate); });
+        var fuEl = document.getElementById('mh-followup-section');
+        if (fuEl && fuNotes.length) {
+          var fuNext = fuNotes[0];
+          var fuDate = new Date(fuNext.followUpDate);
+          var fuDays = Math.ceil((fuDate-now)/86400000);
+          fuEl.innerHTML =
+            '<div style="margin-top:10px;padding:10px 12px;background:#EEF7FF;border-radius:10px;border:1.5px solid #4A9BD4">' +
+              '<div style="font-size:11px;font-weight:700;color:#1A4A9B;margin-bottom:4px"><i class="ti ti-calendar-repeat"></i> FOLLOW-UP RECOMMENDED</div>' +
+              '<div style="font-size:13px;font-weight:600">' + fuDate.toLocaleDateString('en-ZA',{weekday:'short',day:'numeric',month:'long',year:'numeric'}) + '</div>' +
+              (fuNext.followUpNotes ? '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + fuNext.followUpNotes + '</div>' : '') +
+              '<div style="font-size:11px;color:#4A9BD4;margin-top:4px">' + fuDays + ' day' + (fuDays===1?'':'s') + ' away</div>' +
+              '<button class="btn btn-xs" style="margin-top:8px;border-color:#4A9BD4;color:#1A4A9B" onclick="_mhBookFollowUp(this.dataset.d,this.dataset.n)" data-d="' + fuNext.followUpDate + '" data-n="' + (fuNext.followUpNotes||'Follow-up appointment').replace(/"/g,'&quot;') + '">' +
+                '<i class="ti ti-calendar-plus"></i>Book this follow-up</button>' +
+            '</div>';
+        }
+      }
+    } catch(_) {}
+
   } catch(e) {
     if (wrap) wrap.innerHTML = '<div class="alert-box alert-danger"><i class="ti ti-alert-circle"></i>' + e.message + '</div>';
   }
 }
+
+/* ── Book follow-up from home page ── */
+window._mhBookFollowUp = function(followUpDate, notes) { if (!followUpDate && arguments[0] && arguments[0].dataset) { notes = arguments[0].dataset.n; followUpDate = arguments[0].dataset.d; }
+  /* Pre-fill the booking page with the follow-up date and navigate there */
+  window._mhPreFillFollowUp = { date: followUpDate, notes: notes };
+  Router.setPage('book');
+  /* After page loads, open calendar and show the follow-up date */
+  setTimeout(function() {
+    var typeEl = document.getElementById('bk-type');
+    if (typeEl) typeEl.value = 'follow_up';
+
+    var d = new Date(followUpDate);
+    window._BKC = window._BKC || {};
+    window._BKC.year  = d.getFullYear();
+    window._BKC.month = d.getMonth();
+    window._BKC.selected = d.getFullYear() + '-' +
+      String(d.getMonth()+1).padStart(2,'0') + '-' +
+      String(d.getDate()).padStart(2,'0');
+
+    /* Show the calendar and update the label */
+    var calCard = document.getElementById('bk-cal-card');
+    if (calCard) calCard.style.display = 'block';
+    if (typeof window._bkCalDraw === 'function') window._bkCalDraw();
+    if (typeof window._bkUpdLabel === 'function') window._bkUpdLabel();
+
+    UI.showToast('Follow-up date pre-selected — choose a time and confirm', 'ok');
+  }, 400);
+};
+
+/* ── Launch the patient experience survey ── */
+window._launchSurvey = function(tokenId, apptId) {
+  window._srvTokenId = tokenId || null;
+  window._srvApptId  = apptId  || null;
+  Router.setPage('survey');
+};
 
 window._mhRate = async function(id, rating) {
   try {
@@ -207,53 +272,160 @@ window._uploadAvatarFromTopbar = async function(input) {
    MY RECORDS
 ══════════════════════════════════════════════════ */
 Pages['myrecords'] = () => {
-  setTimeout(async function() {
-    var wrap = document.getElementById('rec-body'); if (!wrap) return;
-    try {
-      var p = await _getMyPatientRecord();
-      if (!p) { wrap.innerHTML='<div class="alert-box alert-warn">Please complete your profile first.</div>'; return; }
-      var results = await Promise.allSettled([API.labs.list({patient:p._id,limit:20}), API.prescriptions.list({patient:p._id,limit:20})]);
-      var labs = results[0].value&&results[0].value.data||[];
-      var rxs  = results[1].value&&results[1].value.data||[];
-      wrap.innerHTML =
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
-          '<div class="card">' +
-            '<div class="card-title"><i class="ti ti-flask"></i>Lab results</div>' +
-            (labs.length ? labs.map(function(l) {
-              var hasCrit = (l.tests||[]).some(function(t){return t.flag==='critical';});
-              return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">' +
-                '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">' +
-                  '<div><div style="font-weight:600;font-size:13px">'+(l.tests||[]).map(function(t){return t.name;}).join(', ')+'</div>' +
-                  '<div style="font-size:11px;color:var(--text-muted)">'+new Date(l.createdAt).toLocaleDateString('en-ZA')+' · '+(l.priority||'routine')+'</div></div>' +
-                  '<span class="badge '+(l.status==='ready'||l.status==='collected'?'badge-green':l.status==='in_lab'||l.status==='processing'?'badge-blue':'badge-amber')+'">'+l.status+'</span>' +
-                '</div>' +
-                (hasCrit?'<div style="padding:4px 8px;background:#FEF2F2;border-radius:6px;font-size:11px;color:var(--red);font-weight:600">⚠️ Critical result — contact your doctor</div>':'') +
-                (l.tests||[]).filter(function(t){return t.result;}).map(function(t){ return '<div style="font-size:12px;color:var(--text-muted)">'+t.name+': <strong>'+t.result+'</strong>'+(t.referenceRange?(' (ref: '+t.referenceRange+')'):'')+(t.flag&&t.flag!=='normal'?' <span style="color:var(--red)">['+t.flag+']</span>':'')+'</div>'; }).join('') +
-              '</div>';
-            }).join('') : '<div style="color:var(--text-muted);font-size:13px">No lab results on record</div>') +
-          '</div>' +
-          '<div class="card">' +
-            '<div class="card-title"><i class="ti ti-pill"></i>Prescriptions</div>' +
-            (rxs.length ? rxs.map(function(r) {
-              return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">' +
-                '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">' +
-                  '<div style="font-weight:600;font-size:13px">'+(r.lines||[]).map(function(l){return l.medicationName;}).join(', ')+'</div>' +
-                  '<span class="badge '+(r.status==='dispensed'?'badge-green':r.status==='pending'?'badge-amber':'badge-gray')+'">'+r.status+'</span>' +
-                '</div>' +
-                '<div style="font-size:12px;color:var(--text-muted)">Dr. '+(r.prescribedBy&&r.prescribedBy.firstName||'—')+' '+(r.prescribedBy&&r.prescribedBy.lastName||'')+' · '+new Date(r.createdAt).toLocaleDateString('en-ZA')+'</div>' +
-                (r.lines||[]).map(function(l){ return '<div style="font-size:12px;color:var(--text-muted)">• '+l.medicationName+' — '+l.dosage+' · '+(l.durationDays||'?')+' days</div>'; }).join('') +
-              '</div>';
-            }).join('') : '<div style="color:var(--text-muted);font-size:13px">No prescriptions on record</div>') +
-          '</div>' +
-        '</div>';
-    } catch(e) { if(wrap) wrap.innerHTML='<div class="alert-box alert-danger"><i class="ti ti-alert-circle"></i>'+e.message+'</div>'; }
-  }, 0);
-  return '<div class="page-title">My medical records</div><div id="rec-body" style="color:var(--text-muted)">Loading...</div>';
+  setTimeout(_mrLoad, 0);
+  return `
+<div class="page-title">My medical records</div>
+
+<div style="display:flex;gap:2px;margin-bottom:16px;background:var(--bg-surface);border-radius:10px;padding:4px;max-width:680px">
+  <button id="mr-tab-btn-1" onclick="_mrTab(1)" style="flex:1;padding:8px 12px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;background:var(--bg-card);color:var(--green-dark);box-shadow:0 1px 3px rgba(0,0,0,.08)"><i class="ti ti-stethoscope"></i> Consultations</button>
+  <button id="mr-tab-btn-2" onclick="_mrTab(2)" style="flex:1;padding:8px 12px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:var(--text-muted)"><i class="ti ti-flask"></i> Lab Results</button>
+  <button id="mr-tab-btn-3" onclick="_mrTab(3)" style="flex:1;padding:8px 12px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:var(--text-muted)"><i class="ti ti-pill"></i> Prescriptions</button>
+  <button id="mr-tab-btn-4" onclick="_mrTab(4)" style="flex:1;padding:8px 12px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:var(--text-muted)"><i class="ti ti-heart-rate-monitor"></i> Vitals</button>
+</div>
+
+<div id="mr-tab-1" style="max-width:820px"><div id="mr-consult-body" style="color:var(--text-muted)">Loading...</div></div>
+<div id="mr-tab-2" style="display:none;max-width:820px"><div id="mr-lab-body" style="color:var(--text-muted)">Loading...</div></div>
+<div id="mr-tab-3" style="display:none;max-width:820px"><div id="mr-rx-body" style="color:var(--text-muted)">Loading...</div></div>
+<div id="mr-tab-4" style="display:none;max-width:820px"><div id="mr-vitals-body" style="color:var(--text-muted)">Loading...</div></div>`;
 };
 
-/* ══════════════════════════════════════════════════
-   APPOINTMENTS
-══════════════════════════════════════════════════ */
+window._mrTab = function(n) {
+  for (var i=1;i<=4;i++){
+    var t=document.getElementById('mr-tab-'+i), b=document.getElementById('mr-tab-btn-'+i);
+    if(t) t.style.display=i===n?'block':'none';
+    if(b){b.style.background=i===n?'var(--bg-card)':'transparent';b.style.color=i===n?'var(--green-dark)':'var(--text-muted)';b.style.boxShadow=i===n?'0 1px 3px rgba(0,0,0,.08)':'none';}
+  }
+  if(n===2&&(document.getElementById('mr-lab-body')||{}).textContent==='Loading...')    _mrLoadLabs();
+  if(n===3&&(document.getElementById('mr-rx-body')||{}).textContent==='Loading...')     _mrLoadRx();
+  if(n===4&&(document.getElementById('mr-vitals-body')||{}).textContent==='Loading...') _mrLoadVitals();
+};
+
+async function _mrLoad() { await _mrLoadConsultNotes(); }
+
+async function _mrLoadConsultNotes() {
+  var wrap = document.getElementById('mr-consult-body'); if(!wrap) return;
+  try {
+    var p = await _getMyPatientRecord();
+    if (!p){ wrap.innerHTML='<div class="alert-box alert-warn">Please complete your profile first.</div>'; return; }
+    var res   = await API._fetchDirect('/consultation-notes?patient='+p._id+'&limit=50',{method:'GET'});
+    var notes = res.data || [];
+    if (!notes.length) {
+      wrap.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-muted)"><i class="ti ti-notes" style="font-size:40px;opacity:.25;display:block;margin-bottom:12px"></i><div style="font-weight:600;margin-bottom:4px">No consultation records yet</div><div style="font-size:13px">Your consultation notes will appear here after a visit</div></div>';
+      return;
+    }
+    wrap.innerHTML = notes.map(function(n){
+      var date=new Date(n.createdAt);
+      var dateStr=date.toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+      var timeStr=date.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      var hfu=n.followUpDate&&new Date(n.followUpDate)>new Date();
+      return '<div class="card" style="margin-bottom:12px">'+
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">'+
+          '<div>'+
+            '<div style="font-weight:700;font-size:15px;margin-bottom:4px">'+dateStr+' at '+timeStr+'</div>'+
+            '<div style="font-size:13px;color:var(--text-muted);margin-bottom:2px"><i class="ti ti-user-circle" style="font-size:13px;margin-right:4px"></i>'+
+              (n.doctorName||('Dr. '+(n.doctor&&n.doctor.firstName||'')+(n.doctor&&n.doctor.lastName?' '+n.doctor.lastName:'')))+
+              (n.practiceNumber&&n.practiceNumber!=='Not registered'?' &middot; Practice No: <strong>'+n.practiceNumber+'</strong>':'')+'</div>'+
+            '<div style="font-size:13px;color:var(--text-muted)"><i class="ti ti-building-hospital" style="font-size:13px;margin-right:4px"></i>'+
+              (n.facilityName||(n.facility&&n.facility.name)||'—')+'</div>'+
+          '</div>'+
+          (n.icd10Code?'<span class="badge badge-blue" style="font-size:11px;flex-shrink:0">'+n.icd10Code+(n.icd10Description?' — '+n.icd10Description:'')+'</span>':'')+
+        '</div>'+
+        (n.chiefComplaint?'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px">Chief complaint</div><div style="font-size:13px;padding:8px 12px;background:var(--bg-surface);border-radius:8px">'+n.chiefComplaint+'</div></div>':'')+
+        (n.clinicalNotes?'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px">Clinical notes</div><div style="font-size:13px;padding:8px 12px;background:var(--bg-surface);border-radius:8px;white-space:pre-line">'+n.clinicalNotes+'</div></div>':'')+
+        (n.treatmentPlan?'<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px">Treatment plan</div><div style="font-size:13px;padding:8px 12px;background:#EEF7FF;border-radius:8px">'+n.treatmentPlan+'</div></div>':'')+
+        (n.followUpDate?'<div style="margin-top:10px;padding:8px 12px;background:'+(hfu?'var(--green-light)':'var(--bg-surface)')+';border-radius:8px;font-size:13px;display:flex;align-items:center;gap:8px"><i class="ti ti-calendar-event" style="color:var(--green-dark)"></i><span>'+(hfu?'<strong>Follow-up:</strong> ':'<strong>Follow-up (past):</strong> ')+new Date(n.followUpDate).toLocaleDateString('en-ZA',{weekday:'short',day:'numeric',month:'long',year:'numeric'})+'</span>'+(n.followUpNotes?'<span style="color:var(--text-muted)"> \u2014 '+n.followUpNotes+'</span>':'')+'</div>':'')+
+      '</div>';
+    }).join('');
+  } catch(e){ if(wrap) wrap.innerHTML='<div class="alert-box alert-danger"><i class="ti ti-alert-circle"></i>'+e.message+'</div>'; }
+}
+
+async function _mrLoadLabs() {
+  var wrap=document.getElementById('mr-lab-body'); if(!wrap) return;
+  try {
+    var p=await _getMyPatientRecord(); if(!p) return;
+    var res=await API.labs.list({patient:p._id,limit:30});
+    var labs=res.data||[];
+    if(!labs.length){wrap.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-muted)"><i class="ti ti-flask" style="font-size:40px;opacity:.25;display:block;margin-bottom:12px"></i>No lab results on record</div>';return;}
+    wrap.innerHTML=labs.map(function(l){
+      var hasCrit=(l.tests||[]).some(function(t){return t.flag==='critical';});
+      return '<div class="card" style="margin-bottom:12px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'+
+          '<div><div style="font-weight:700;font-size:14px">'+(l.tests||[]).map(function(t){return t.name;}).join(', ')+'</div>'+
+          '<div style="font-size:12px;color:var(--text-muted)">'+new Date(l.createdAt).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'})+' \u00b7 '+(l.priority||'routine')+'</div></div>'+
+          '<span class="badge '+(l.status==='collected'||l.status==='ready'?'badge-green':l.status==='processing'?'badge-blue':'badge-amber')+'">'+l.status+'</span>'+
+        '</div>'+
+        (hasCrit?'<div style="padding:6px 10px;background:#FEF2F2;border-radius:6px;font-size:12px;color:var(--red);font-weight:600;margin-bottom:8px">\u26a0\ufe0f Critical result \u2014 contact your doctor</div>':'')+
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+
+        (l.tests||[]).filter(function(t){return t.result;}).map(function(t){
+          return '<div style="padding:8px 10px;background:var(--bg-surface);border-radius:8px;font-size:12px">'+
+            '<div style="color:var(--text-muted);margin-bottom:2px">'+t.name+'</div>'+
+            '<div style="font-weight:700;font-size:14px'+(t.flag&&t.flag!=='normal'?';color:var(--red)':'')+'">'+t.result+'</div>'+
+            (t.referenceRange?'<div style="color:var(--text-hint);font-size:11px">Ref: '+t.referenceRange+'</div>':'')+
+            (t.flag&&t.flag!=='normal'?'<div style="color:var(--red);font-size:11px;font-weight:600">['+t.flag+']</div>':'')+
+          '</div>';
+        }).join('')+'</div></div>';
+    }).join('');
+  } catch(e){if(wrap) wrap.innerHTML='<div class="alert-box alert-danger"><i class="ti ti-alert-circle"></i>'+e.message+'</div>';}
+}
+
+async function _mrLoadRx() {
+  var wrap=document.getElementById('mr-rx-body'); if(!wrap) return;
+  try {
+    var p=await _getMyPatientRecord(); if(!p) return;
+    var res=await API.prescriptions.list({patient:p._id,limit:50});
+    var rxs=res.data||[];
+    if(!rxs.length){wrap.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-muted)"><i class="ti ti-pill" style="font-size:40px;opacity:.25;display:block;margin-bottom:12px"></i>No prescriptions on record</div>';return;}
+    wrap.innerHTML=rxs.map(function(r){
+      return '<div class="card" style="margin-bottom:10px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'+
+          '<div><div style="font-weight:700;font-size:14px">'+(r.lines||[]).map(function(l){return l.medicationName;}).join(', ')+'</div>'+
+          '<div style="font-size:12px;color:var(--text-muted)">Dr. '+(r.prescribedBy&&r.prescribedBy.firstName||'\u2014')+' '+(r.prescribedBy&&r.prescribedBy.lastName||'')+' \u00b7 '+new Date(r.createdAt).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'})+'</div></div>'+
+          '<span class="badge '+(r.status==='dispensed'?'badge-green':r.status==='pending'?'badge-amber':'badge-gray')+'">'+r.status+'</span>'+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">'+
+        (r.lines||[]).map(function(l){
+          return '<div style="padding:8px 10px;background:var(--bg-surface);border-radius:8px;font-size:12px">'+
+            '<div style="font-weight:600;margin-bottom:2px">'+l.medicationName+'</div>'+
+            '<div style="color:var(--text-muted)">'+(l.dosage||'\u2014')+(l.durationDays?' \u00b7 '+l.durationDays+'d':'')+
+            '</div>'+(l.instructions?'<div style="color:var(--text-hint);margin-top:2px">'+l.instructions+'</div>':'')+
+          '</div>';
+        }).join('')+'</div></div>';
+    }).join('');
+  } catch(e){if(wrap) wrap.innerHTML='<div class="alert-box alert-danger"><i class="ti ti-alert-circle"></i>'+e.message+'</div>';}
+}
+
+async function _mrLoadVitals() {
+  var wrap=document.getElementById('mr-vitals-body'); if(!wrap) return;
+  try {
+    var p=await _getMyPatientRecord(); if(!p) return;
+    var v=p.latestVitals||{};
+    var fields=[
+      {label:'Blood Pressure',value:v.bp?v.bp.systolic+'/'+v.bp.diastolic+' mmHg':'\u2014',icon:'ti-heart-rate',alert:v.bp&&v.bp.systolic>140},
+      {label:'Heart Rate',value:v.heartRate?v.heartRate+' bpm':'\u2014',icon:'ti-pulse'},
+      {label:'Temperature',value:v.temperature?v.temperature+'\u00b0C':'\u2014',icon:'ti-temperature'},
+      {label:'SpO2',value:v.spO2?v.spO2+'%':'\u2014',icon:'ti-lungs',alert:v.spO2&&v.spO2<95},
+      {label:'Weight',value:v.weight?v.weight+' kg':'\u2014',icon:'ti-scale'},
+      {label:'BMI',value:v.bmi?v.bmi:'\u2014',icon:'ti-ruler'},
+    ];
+    wrap.innerHTML='<div class="card" style="margin-bottom:12px"><div class="card-title"><i class="ti ti-heart-rate-monitor"></i>Latest vitals</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">'+
+      fields.map(function(f){return '<div style="padding:12px;background:var(--bg-surface);border-radius:10px;border:1.5px solid '+(f.alert?'var(--red)':'var(--border)')+'">'+
+        '<i class="ti '+f.icon+'" style="font-size:18px;color:'+(f.alert?'var(--red)':'var(--green-dark)')+';display:block;margin-bottom:6px"></i>'+
+        '<div style="font-size:20px;font-weight:800;color:'+(f.alert?'var(--red)':'var(--text)')+'">'+f.value+'</div>'+
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">'+f.label+'</div>'+
+        (f.alert?'<div style="font-size:10px;color:var(--red);font-weight:700;margin-top:4px">\u26a0\ufe0f Abnormal</div>':'')+
+      '</div>';}).join('')+'</div>'+
+      (v.recordedAt?'<div style="font-size:11px;color:var(--text-muted);margin-top:10px">Last recorded: '+new Date(v.recordedAt).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'})+'</div>':'')+
+    '</div>'+
+    '<div class="card"><div class="card-title"><i class="ti ti-info-circle"></i>Normal reference ranges</div>'+
+    '<div style="font-size:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px">'+
+    '<div>BP: &lt;120/80 mmHg</div><div>HR: 60\u2013100 bpm</div>'+
+    '<div>Temp: 36.1\u201337.2\u00b0C</div><div>SpO2: &gt;95%</div>'+
+    '<div>BMI: 18.5\u201324.9</div><div></div></div></div>';
+  } catch(e){if(wrap) wrap.innerHTML='<div class="alert-box alert-danger"><i class="ti ti-alert-circle"></i>'+e.message+'</div>';}
+}
+
+
 Pages['appointments'] = () => {
   setTimeout(async function() {
     var wrap = document.getElementById('appt-list'); if (!wrap) return;
@@ -399,7 +571,7 @@ window._ciDirectCheckin = async function(apptId) {
     var res = await API._fetchDirect('/queue2/prebooked-checkin',{method:'POST',body:JSON.stringify({patientId:p._id,facilityId:fid,appointmentId:apptId})});
     if (res.doctorLate) UI.showToast('Note: Doctor running ~'+res.minutesLate+' min late','warn');
     if (res.data && res.data.token) await _ciSendTokenNotification(res.data);
-    UI.showToast('Checked in! Your queue token is '+res.data.token,'ok');
+    UI.showToast('✅ Checked in! Your queue token is '+res.data.token,'ok');
     Router.setPage('checkin');
   } catch(e) {
     UI.showToast(e.message||'Check-in failed','err');
@@ -617,10 +789,12 @@ function _ciRenderToken(tok) {
     '</div>' +
     '<div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-radius:var(--radius);background:'+statusInfo.bg+';color:'+statusInfo.c+';font-weight:500;font-size:13px"><i class="ti '+statusInfo.ic+'"></i>'+statusInfo.msg+'</div>' +
     (tok.status==='completed'?
-      '<div style="margin-top:12px"><div style="font-size:13px;color:var(--text-muted);margin-bottom:8px">How was your experience?</div>' +
-      '<div id="ci-star-row" style="display:flex;justify-content:center;gap:6px">' +
-        [1,2,3,4,5].map(function(n){ return '<button onclick="_ciRate(\''+tok._id+'\','+n+')" style="font-size:30px;background:none;border:none;cursor:pointer;line-height:1">⭐</button>'; }).join('') +
-      '</div><div id="ci-rate-thanks" style="display:none;color:var(--green-dark);font-weight:600">Thank you! ⭐</div></div>' : '') +
+      '<div style="text-align:center;margin-top:12px">' +
+      '<div style="font-size:14px;font-weight:600;color:var(--green-dark);margin-bottom:4px">Your visit is complete!</div>' +
+      '<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Help us improve by completing a short survey about your experience today.</div>' +
+      '<button class="btn btn-green" style="width:100%;padding:12px;font-size:14px;font-weight:700" onclick="_launchSurvey(\''+tok._id+'\',null)"><i class="ti ti-star"></i>Complete Patient Experience Survey</button>' +
+      '<div style="font-size:11px;color:var(--text-hint);margin-top:8px">Takes about 2–3 minutes</div>' +
+      '</div>' : '') +
     '</div>' +
     '<div style="text-align:center"><button class="btn btn-xs" onclick="_ciLoad()"><i class="ti ti-refresh"></i>Refresh</button></div>';
 }
@@ -891,16 +1065,29 @@ Pages['book'] = () => {
     (async function() {
       try {
         var r = await API._fetchDirect('/facilities', { method:'GET' });
-        (r.data||[]).forEach(function(af) {
-          FACS.forEach(function(hf,i) {
-            if (af.name.toLowerCase().includes(hf.name.split(' ')[0].toLowerCase())) FACS[i].id = af._id;
+        var apiFacs = r.data || [];
+        if (apiFacs.length) {
+          /* Use real facilities from API */
+          FACS = apiFacs.map(function(af) {
+            return {
+              id:   af._id,
+              name: af.name,
+              type: af.type || 'clinic'
+            };
           });
-        });
+        } else {
+          /* Fall back to hardcoded — try to match by name substring */
+          FACS.forEach(function(hf, i) {
+            /* ID stays as placeholder; backend will reject — warn user */
+          });
+        }
       } catch(_) {}
       var sel = document.getElementById('bk-facility');
       if (sel) {
         sel.innerHTML = '<option value="">— Select facility —</option>' +
-          FACS.map(function(f){ return '<option value="'+f.id+'" data-name="'+f.name+'" data-type="'+f.type+'">'+f.name+'</option>'; }).join('');
+          FACS.map(function(f){
+            return '<option value="'+f.id+'" data-name="'+f.name+'" data-type="'+f.type+'">'+f.name+'</option>';
+          }).join('');
       }
     })();
     // Calendar drawn only when user clicks date field
@@ -1275,3 +1462,362 @@ document.addEventListener('change', function(e) {
     if (other) other.style.display = e.target.value === 'other' ? 'block' : 'none';
   }
 });
+
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PATIENT EXPERIENCE SURVEY — 5 steps
+   Booking → Check-in → Queue → Consultation → Pharmacy & Overall
+══════════════════════════════════════════════════════════════════════════ */
+Pages['survey'] = () => {
+  window._SRV = {
+    step: 1,
+    totalSteps: 5,
+    answers: {},
+    queueTokenId: window._srvTokenId || null,
+    appointmentId: window._srvApptId || null,
+  };
+  setTimeout(function() { _srvRender(); }, 0);
+  return `
+<div class="page-title">Patient Experience Survey</div>
+<div id="srv-wrap" style="max-width:680px"></div>`;
+};
+
+var _SRV_STEPS = [
+  { num:1, icon:'ti-calendar-check', label:'Booking',           color:'#4A9BD4' },
+  { num:2, icon:'ti-login',          label:'Check-in',          color:'#1D9E75' },
+  { num:3, icon:'ti-list-numbers',   label:'Queue',             color:'#EF9F27' },
+  { num:4, icon:'ti-stethoscope',    label:'Consultation',      color:'#0F6E56' },
+  { num:5, icon:'ti-pill',           label:'Pharmacy & Overall',color:'#7C3AED' },
+];
+
+var _SRV_QUESTIONS = {
+  1: [
+    { id:'q1',  type:'stars',   label:'How easy was it to book your appointment?', na:true, naLabel:'I did not book' },
+    { id:'q2',  type:'stars',   label:'How easy was it to find information about the facility and available services?', na:true },
+    { id:'q3',  type:'stars',   label:'How satisfied were you with your appointment confirmation/reminder?', na:true },
+    { id:'q4',  type:'choice',  label:'Did you receive enough information about your appointment?', options:['Yes','No','Partially'], na:false },
+  ],
+  2: [
+    { id:'q5',  type:'stars',  label:'How easy was the check-in process?' },
+    { id:'q6',  type:'stars',  label:'How helpful and respectful was the staff during check-in?' },
+    { id:'q7',  type:'stars',  label:'How satisfied were you with the time it took to complete check-in?' },
+  ],
+  3: [
+    { id:'q8',  type:'stars',  label:'How satisfied were you with the queue management process?' },
+    { id:'q9',  type:'choice', label:'Was the estimated waiting time clear to you?', options:['Yes','No','I did not receive an estimated waiting time'] },
+    { id:'q10', type:'stars',  label:'How satisfied were you with the amount of time you waited before seeing the healthcare professional?' },
+    { id:'q11', type:'choice', label:'Were you kept informed about delays or changes in the queue?', options:['Always','Sometimes','Never','Not applicable'] },
+  ],
+  4: [
+    { id:'q12', type:'stars',  label:"How would you rate the healthcare professional's friendliness and respect?" },
+    { id:'q13', type:'stars',  label:'How well did the healthcare professional listen to your concerns?' },
+    { id:'q14', type:'stars',  label:'How clearly did the healthcare professional explain your condition, treatment, or next steps?' },
+    { id:'q15', type:'choice', label:'Did you feel comfortable asking questions during your consultation?', options:['Yes','No','Partially'] },
+    { id:'q16', type:'stars',  label:'Did you feel that your privacy and dignity were respected?' },
+    { id:'q17', type:'stars',  label:'Overall, how satisfied were you with your consultation?' },
+  ],
+  5: [
+    { id:'q18', type:'stars',  label:'How easy was it to collect your medication?', na:true, naLabel:'I did not collect medication' },
+    { id:'q19', type:'stars',  label:'How helpful and respectful was the pharmacy staff?', na:true },
+    { id:'q20', type:'choice', label:'Were the instructions about your medication explained clearly?', options:['Yes','No','Partially'], na:true, naLabel:'N/A' },
+    { id:'q21', type:'stars',  label:'How satisfied were you with the waiting time at the pharmacy?', na:true },
+    { id:'q22', type:'stars',  label:'Overall, how satisfied are you with your healthcare experience today?' },
+    { id:'q23', type:'choice', label:'Did the healthcare service meet your expectations?', options:['Yes','No','Partially'] },
+    { id:'q24', type:'choice', label:'How likely are you to use this healthcare facility again?', options:['Very unlikely','Unlikely','Not sure','Likely','Very likely'] },
+    { id:'q25', type:'choice', label:'Would you recommend this healthcare facility to someone else?', options:['Definitely not','Probably not','Not sure','Probably yes','Definitely yes'] },
+    { id:'q26', type:'text',   label:'What did we do well today?' },
+    { id:'q27', type:'text',   label:'What could we improve?' },
+    { id:'q28', type:'choice', label:'Did you experience any problems during your visit?', options:['No','Yes'] },
+    { id:'q28b',type:'text',   label:'If yes, please describe what happened:', optional:true },
+    { id:'q29', type:'text',   label:'Is there anything else you would like us to know?', optional:true },
+  ],
+};
+
+function _srvRender() {
+  var wrap = document.getElementById('srv-wrap');
+  if (!wrap) return;
+  var s    = window._SRV;
+  var step = s.step;
+  var info = _SRV_STEPS[step-1];
+  var qs   = _SRV_QUESTIONS[step] || [];
+
+  /* Progress bar */
+  var pct = Math.round((step-1)/s.totalSteps*100);
+  var progressHTML =
+    '<div style="display:flex;gap:0;margin-bottom:20px">' +
+    _SRV_STEPS.map(function(st) {
+      var done    = step > st.num;
+      var current = step === st.num;
+      return '<div style="flex:1;text-align:center">' +
+        '<div style="height:4px;background:' + (done||current?st.color:'var(--border)') + ';margin-bottom:6px;border-radius:2px;transition:background .3s"></div>' +
+        '<div style="font-size:10px;font-weight:' + (current?'700':'500') + ';color:' + (current?st.color:done?'var(--text-muted)':'var(--text-hint)') + '">' +
+          '<i class="ti ' + st.icon + '" style="display:block;font-size:14px;margin-bottom:2px"></i>' + st.label +
+        '</div>' +
+      '</div>';
+    }).join('') + '</div>';
+
+  /* Step header */
+  var headerHTML =
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding:14px 16px;background:' + info.color + '15;border-radius:12px;border-left:4px solid ' + info.color + '">' +
+      '<i class="ti ' + info.icon + '" style="font-size:24px;color:' + info.color + ';flex-shrink:0"></i>' +
+      '<div>' +
+        '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:' + info.color + '">Step ' + step + ' of ' + s.totalSteps + '</div>' +
+        '<div style="font-weight:700;font-size:17px">' + info.label + '</div>' +
+      '</div>' +
+    '</div>';
+
+  /* Questions */
+  var questionsHTML = qs.map(function(q) {
+    var saved = s.answers[q.id];
+    var html  = '<div style="margin-bottom:22px" id="qwrap-'+q.id+'">';
+    html += '<div style="font-size:14px;font-weight:500;margin-bottom:10px;color:var(--text)">' + q.label + (q.optional?' <span style="color:var(--text-hint);font-size:12px">(optional)</span>':'') + '</div>';
+
+    if (q.type === 'stars') {
+      html += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">';
+      for (var r = 1; r <= 5; r++) {
+        var labels = ['','Very Poor','Poor','Average','Good','Excellent'];
+        var sel = saved === r;
+        html += '<button onclick="_srvStar(\'' + q.id + '\',' + r + ')" ' +
+          'style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 10px;border-radius:10px;border:1.5px solid ' + (sel?info.color:'var(--border)') + ';background:' + (sel?info.color+'15':'transparent') + ';cursor:pointer;min-width:52px;transition:all .15s">' +
+          '<span style="font-size:22px">' + '⭐'.repeat(r) + '</span>' +
+          '<span style="font-size:10px;font-weight:600;color:' + (sel?info.color:'var(--text-muted)') + '">' + r + '</span>' +
+          '<span style="font-size:9px;color:' + (sel?info.color:'var(--text-hint)') + '">' + labels[r] + '</span>' +
+        '</button>';
+      }
+      if (q.na) {
+        var selNA = saved === 'na';
+        html += '<button onclick="_srvStar(\'' + q.id + '\',\'na\')" ' +
+          'style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 10px;border-radius:10px;border:1.5px solid ' + (selNA?'#888':'var(--border)') + ';background:' + (selNA?'#f0f0f0':'transparent') + ';cursor:pointer;min-width:52px;transition:all .15s">' +
+          '<span style="font-size:22px">—</span>' +
+          '<span style="font-size:10px;font-weight:600;color:#888">N/A</span>' +
+          '<span style="font-size:9px;color:var(--text-hint)">' + (q.naLabel||'N/A') + '</span>' +
+        '</button>';
+      }
+      html += '</div>';
+
+    } else if (q.type === 'choice') {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+      q.options.forEach(function(opt) {
+        var sel = saved === opt;
+        html += '<button onclick="_srvChoice(\'' + q.id + '\',this)" data-val="' + opt + '" ' +
+          'style="padding:8px 14px;border-radius:20px;border:1.5px solid ' + (sel?info.color:'var(--border)') + ';background:' + (sel?info.color+'15':'transparent') + ';cursor:pointer;font-size:13px;font-weight:' + (sel?'700':'400') + ';color:' + (sel?info.color:'var(--text)') + ';transition:all .15s">' +
+          opt + '</button>';
+      });
+      if (q.na) {
+        var selNA2 = saved === 'N/A';
+        html += '<button onclick="_srvChoice(\'' + q.id + '\',this)" data-val="N/A" ' +
+          'style="padding:8px 14px;border-radius:20px;border:1.5px solid ' + (selNA2?'#888':'var(--border)') + ';background:' + (selNA2?'#f0f0f0':'transparent') + ';cursor:pointer;font-size:13px;color:#888;font-weight:' + (selNA2?'700':'400') + '">' +
+          (q.naLabel||'N/A') + '</button>';
+      }
+      html += '</div>';
+
+    } else if (q.type === 'text') {
+      html += '<textarea id="ta-' + q.id + '" rows="3" ' +
+        'style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:13px;font-family:inherit;resize:vertical;outline:none" ' +
+        'placeholder="Type your answer here…" oninput="_srvText(\'' + q.id + '\',this.value)">' +
+        (saved||'') + '</textarea>';
+    }
+
+    html += '</div>';
+    return html;
+  }).join('');
+
+  /* Navigation */
+  var isLast = step === s.totalSteps;
+  var navHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:24px;padding-top:16px;border-top:1px solid var(--border)">' +
+      (step > 1 ? '<button class="btn" onclick="_srvBack()"><i class="ti ti-arrow-left"></i>Back</button>' : '<div></div>') +
+      '<div style="font-size:12px;color:var(--text-muted)">' + step + ' / ' + s.totalSteps + '</div>' +
+      (isLast
+        ? '<button class="btn btn-green" id="srv-submit-btn" onclick="_srvSubmit()" style="padding:10px 24px"><i class="ti ti-send"></i>Submit Survey</button>'
+        : '<button class="btn btn-green" onclick="_srvNext()" style="padding:10px 24px">Next <i class="ti ti-arrow-right"></i></button>'
+      ) +
+    '</div>';
+
+  wrap.innerHTML =
+    '<div style="background:var(--bg-card);border-radius:16px;padding:24px;box-shadow:var(--shadow-sm)">' +
+      progressHTML + headerHTML +
+      '<div id="srv-questions">' + questionsHTML + '</div>' +
+      '<div id="srv-error" style="display:none;padding:8px 12px;background:#FEF2F2;border-left:4px solid var(--red);border-radius:8px;font-size:13px;color:#991B1B;margin-top:10px"></div>' +
+      navHTML +
+    '</div>';
+}
+
+window._srvStar = function(qid, val) {
+  window._SRV.answers[qid] = val;
+  _srvRender();
+};
+
+window._srvChoice = function(qid, btn) {
+  window._SRV.answers[qid] = btn.dataset.val;
+  _srvRender();
+};
+
+window._srvText = function(qid, val) {
+  window._SRV.answers[qid] = val;
+};
+
+window._srvNext = function() {
+  /* Save text area values before navigating */
+  var qs = _SRV_QUESTIONS[window._SRV.step] || [];
+  qs.forEach(function(q) {
+    if (q.type === 'text') {
+      var ta = document.getElementById('ta-' + q.id);
+      if (ta) window._SRV.answers[q.id] = ta.value;
+    }
+  });
+
+  /* Validate required questions (non-optional, non-N/A-able star/choice) */
+  var errEl = document.getElementById('srv-error');
+  var missing = qs.filter(function(q) {
+    return !q.optional && window._SRV.answers[q.id] === undefined;
+  });
+  if (missing.length) {
+    if (errEl) { errEl.textContent = 'Please answer all required questions before continuing.'; errEl.style.display='block'; }
+    /* Highlight missing */
+    missing.forEach(function(q) {
+      var el = document.getElementById('qwrap-'+q.id);
+      if (el) el.style.outline = '2px solid var(--red)';
+    });
+    return;
+  }
+
+  window._SRV.step++;
+  _srvRender();
+  window.scrollTo(0,0);
+};
+
+window._srvBack = function() {
+  window._SRV.step--;
+  _srvRender();
+  window.scrollTo(0,0);
+};
+
+window._srvSubmit = async function() {
+  /* Save final text areas */
+  var qs = _SRV_QUESTIONS[5] || [];
+  qs.forEach(function(q) {
+    if (q.type === 'text') {
+      var ta = document.getElementById('ta-' + q.id);
+      if (ta) window._SRV.answers[q.id] = ta.value;
+    }
+  });
+
+  var btn = document.getElementById('srv-submit-btn');
+  if (btn) { btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Submitting…'; }
+
+  try {
+    var p = await _getMyPatientRecord();
+    var u = API.getStoredUser();
+    var a = window._SRV.answers;
+
+    /* Build structured survey result */
+    var payload = {
+      patient:       p?._id,
+      queueToken:    window._SRV.queueTokenId,
+      appointment:   window._SRV.appointmentId,
+      facility:      u?.facilityId || u?.facility,
+      submittedAt:   new Date().toISOString(),
+
+      /* Section scores */
+      booking: {
+        easeOfBooking:     a.q1, facilityInfo: a.q2,
+        confirmationSat:   a.q3, enoughInfo: a.q4,
+        sectionAvg: _srvAvg([a.q1, a.q2, a.q3]),
+      },
+      checkin: {
+        easeOfCheckin:  a.q5, staffHelpfulness: a.q6,
+        checkinTime:    a.q7,
+        sectionAvg: _srvAvg([a.q5, a.q6, a.q7]),
+      },
+      queue: {
+        queueManagement: a.q8, waitTimeClarity: a.q9,
+        waitTimeSat:     a.q10, keptInformed: a.q11,
+        sectionAvg: _srvAvg([a.q8, a.q10]),
+      },
+      consultation: {
+        professionalFriendliness: a.q12, listening: a.q13,
+        explanation: a.q14, comfortAsking: a.q15,
+        privacyDignity: a.q16, overallConsult: a.q17,
+        sectionAvg: _srvAvg([a.q12, a.q13, a.q14, a.q16, a.q17]),
+      },
+      pharmacy: {
+        easeOfCollection: a.q18, staffHelpfulness: a.q19,
+        instructionsClarity: a.q20, waitTimeSat: a.q21,
+        sectionAvg: _srvAvg([a.q18, a.q19, a.q21]),
+      },
+      overall: {
+        overallSatisfaction: a.q22, metExpectations: a.q23,
+        likelyToReturn: a.q24, wouldRecommend: a.q25,
+        sectionAvg: _srvAvg([a.q22]),
+      },
+      openText: {
+        didWell:       a.q26 || '',
+        improve:       a.q27 || '',
+        problemsOccurred: a.q28,
+        problemDesc:   a.q28b || '',
+        other:         a.q29 || '',
+      },
+      /* Overall NPS-style score */
+      overallScore: _srvAvg([a.q1, a.q2, a.q3, a.q5, a.q6, a.q7,
+                              a.q8, a.q10, a.q12, a.q13, a.q14,
+                              a.q16, a.q17, a.q18, a.q19, a.q21, a.q22]),
+    };
+
+    /* Save to backend */
+    await API._fetchDirect('/surveys', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }).catch(function() {
+      /* Fall back to queue feedback if survey endpoint not yet set up */
+      if (window._SRV.queueTokenId && a.q22) {
+        return API._fetchDirect('/queue2/'+window._SRV.queueTokenId+'/feedback', {
+          method: 'POST',
+          body: JSON.stringify({ satisfaction: a.q22, surveyData: payload }),
+        });
+      }
+    });
+
+    /* Show thank you screen */
+    var wrap = document.getElementById('srv-wrap');
+    if (wrap) {
+      wrap.innerHTML =
+        '<div class="card" style="text-align:center;padding:40px 24px">' +
+          '<div style="font-size:60px;margin-bottom:16px">🙏</div>' +
+          '<div style="font-size:22px;font-weight:700;margin-bottom:8px">Thank you, ' + (p?.firstName||'') + '!</div>' +
+          '<div style="font-size:14px;color:var(--text-muted);max-width:400px;margin:0 auto 24px">Your feedback helps us improve the quality of care for all patients. We value your time and honest responses.</div>' +
+          '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:480px;margin:0 auto 24px">' +
+            _srvScoreCard('📅 Booking',      payload.booking.sectionAvg) +
+            _srvScoreCard('🏥 Check-in',     payload.checkin.sectionAvg) +
+            _srvScoreCard('🎫 Queue',         payload.queue.sectionAvg) +
+            _srvScoreCard('👨‍⚕️ Consultation', payload.consultation.sectionAvg) +
+            _srvScoreCard('💊 Pharmacy',      payload.pharmacy.sectionAvg) +
+            _srvScoreCard('⭐ Overall',        payload.overall.sectionAvg) +
+          '</div>' +
+          '<button class="btn btn-green" onclick="Router.setPage(\'myhealth\')" style="padding:12px 28px"><i class="ti ti-home"></i>Back to home</button>' +
+        '</div>';
+    }
+
+  } catch(e) {
+    if (btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-send"></i>Submit Survey'; }
+    var errEl = document.getElementById('srv-error');
+    if (errEl) { errEl.textContent = e.message || 'Submission failed — please try again.'; errEl.style.display='block'; }
+  }
+};
+
+function _srvAvg(vals) {
+  var nums = vals.filter(function(v){ return typeof v === 'number'; });
+  if (!nums.length) return null;
+  return Math.round(nums.reduce(function(a,b){return a+b;},0) / nums.length * 10) / 10;
+}
+
+function _srvScoreCard(label, avg) {
+  if (avg === null || avg === undefined) return '';
+  var color = avg >= 4 ? '#1D9E75' : avg >= 3 ? '#EF9F27' : '#E24B4A';
+  return '<div style="padding:10px;background:var(--bg-surface);border-radius:10px">' +
+    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">' + label + '</div>' +
+    '<div style="font-size:20px;font-weight:800;color:' + color + '">' + avg + '<span style="font-size:12px;color:var(--text-muted)">/5</span></div>' +
+  '</div>';
+}
+

@@ -343,4 +343,38 @@ router.delete('/:id/remove-doc',
   } catch (err) { next(err); }
 });
 
+
+// POST /api/v1/patients/:id/vitals — doctor updates patient vitals
+router.post('/:id/vitals', async (req, res, next) => {
+  try {
+    const Patient = require('../models/Patient');
+    const patient = await Patient.findById(req.params.id);
+    if (!patient) return res.status(404).json({ success: false, message: 'Patient not found' });
+
+    // Merge new vitals with existing
+    const existing = patient.latestVitals || {};
+    const updated  = Object.assign({}, existing, req.body, { recordedAt: new Date() });
+
+    patient.latestVitals = updated;
+    await patient.save();
+
+    res.json({ success: true, data: patient.latestVitals });
+  } catch(err) { next(err); }
+});
+
+// PATCH /api/v1/patients/:id/vitals — same as POST (alias)
+router.patch('/:id/vitals', async (req, res, next) => {
+  try {
+    const Patient = require('../models/Patient');
+    const patient = await Patient.findById(req.params.id);
+    if (!patient) return res.status(404).json({ success: false, message: 'Patient not found' });
+
+    const existing = patient.latestVitals || {};
+    patient.latestVitals = Object.assign({}, existing, req.body, { recordedAt: new Date() });
+    await patient.save();
+
+    res.json({ success: true, data: patient.latestVitals });
+  } catch(err) { next(err); }
+});
+
 module.exports = router;

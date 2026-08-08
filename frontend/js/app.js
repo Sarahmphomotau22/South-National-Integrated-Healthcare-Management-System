@@ -19,6 +19,7 @@ const App = (() => {
       // ── Remove the login-page <style> block that hides #app ──
       // The inline style in login.html adds display:none!important to #app
       // We override it by setting a higher-specificity inline style
+    
       const appEl = document.getElementById('app');
       if (appEl) {
         appEl.removeAttribute('style');

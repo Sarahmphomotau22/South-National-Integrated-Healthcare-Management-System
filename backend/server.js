@@ -62,10 +62,12 @@ app.use(rateLimit({
 app.use(compression());
 
 // Serve uploaded ID documents
+
 app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(mongoSanitize());
+app.use('/api/v1/medications', require('./routes/medications'));
 app.use(morgan('dev'));
 app.use('/api/v1/queue2', require('./routes/queue2'));
 // ── Health check (works even without DB) ──
@@ -80,6 +82,7 @@ app.get('/health', (_req, res) => {
 });
 
 // ── Routes ──
+app.use('/api/v1/consultation-notes', require('./routes/consultationNotes'));
 app.use('/api/v1/auth',          authRoutes);
 app.use('/api/v1/users',         userRoutes);
 app.use('/api/v1/patients',      patientRoutes);
@@ -91,7 +94,9 @@ app.use('/api/v1/queue2',         require('./routes/queue2'));
 app.use('/api/v1/facilities',    facilityRoutes);
 app.use('/api/v1/analytics',     analyticsRoutes);
 app.use('/api/v1/queue',         queueRoutes);
-
+ //ADD TO backend/server.js:
+   app.use('/api/v1/surveys', require('./routes/surveys'));
+   
 app.use(notFound);
 app.use(errorHandler);
 

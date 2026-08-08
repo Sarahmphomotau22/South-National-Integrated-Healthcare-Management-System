@@ -279,13 +279,33 @@ window._loadConsultPatient = async (patientId) => {
                 ${(p.allergies||[]).length?`<span class="badge badge-red" style="margin-top:4px"><i class="ti ti-alert-triangle" style="font-size:11px"></i>Allergy: ${p.allergies.join(', ')}</span>`:''}
               </div>
             </div>
-            <div class="vitals-grid">
+            <!-- Vitals display -->
+            <div class="vitals-grid" id="vitals-display-${p._id}">
               <div class="vital-box"><div class="vital-val ${v.bp?.systolic>140?'style="color:var(--coral)"':''}">${v.bp?`${v.bp.systolic}/${v.bp.diastolic}`:'—'}</div><div class="vital-lbl">BP</div></div>
               <div class="vital-box"><div class="vital-val">${v.heartRate||'—'}</div><div class="vital-lbl">HR</div></div>
               <div class="vital-box"><div class="vital-val">${v.temperature||'—'}°C</div><div class="vital-lbl">Temp</div></div>
               <div class="vital-box"><div class="vital-val">${v.spO2||'—'}%</div><div class="vital-lbl">SpO2</div></div>
               <div class="vital-box"><div class="vital-val">${v.weight||'—'} kg</div><div class="vital-lbl">Weight</div></div>
               <div class="vital-box"><div class="vital-val">${v.bmi||'—'}</div><div class="vital-lbl">BMI</div></div>
+            </div>
+            <button class="btn btn-xs" style="margin-top:8px" onclick="_toggleVitalsEdit('${p._id}')"><i class="ti ti-pencil"></i>Update vitals</button>
+            <!-- Vitals edit form (hidden by default) -->
+            <div id="vitals-edit-${p._id}" style="display:none;margin-top:10px;padding:12px;background:var(--bg-surface);border-radius:10px">
+              <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Update Vitals</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div class="f-group" style="margin:0"><label class="f-label" style="font-size:10px">BP Systolic</label><input class="f-input" id="v-systolic" type="number" placeholder="e.g. 120" value="${v.bp?.systolic||''}" style="margin:0;padding:7px"></div>
+                <div class="f-group" style="margin:0"><label class="f-label" style="font-size:10px">BP Diastolic</label><input class="f-input" id="v-diastolic" type="number" placeholder="e.g. 80" value="${v.bp?.diastolic||''}" style="margin:0;padding:7px"></div>
+                <div class="f-group" style="margin:0"><label class="f-label" style="font-size:10px">Heart Rate (bpm)</label><input class="f-input" id="v-hr" type="number" placeholder="e.g. 72" value="${v.heartRate||''}" style="margin:0;padding:7px"></div>
+                <div class="f-group" style="margin:0"><label class="f-label" style="font-size:10px">Temperature (°C)</label><input class="f-input" id="v-temp" type="number" step="0.1" placeholder="e.g. 36.6" value="${v.temperature||''}" style="margin:0;padding:7px"></div>
+                <div class="f-group" style="margin:0"><label class="f-label" style="font-size:10px">SpO2 (%)</label><input class="f-input" id="v-spo2" type="number" placeholder="e.g. 98" value="${v.spO2||''}" style="margin:0;padding:7px"></div>
+                <div class="f-group" style="margin:0"><label class="f-label" style="font-size:10px">Weight (kg)</label><input class="f-input" id="v-weight" type="number" step="0.1" placeholder="e.g. 70" value="${v.weight||''}" style="margin:0;padding:7px"></div>
+                <div class="f-group" style="margin:0"><label class="f-label" style="font-size:10px">Height (cm)</label><input class="f-input" id="v-height" type="number" placeholder="e.g. 165" value="${v.height||''}" style="margin:0;padding:7px"></div>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:10px">
+                <button class="btn btn-xs btn-green" onclick="_saveVitals('${p._id}')"><i class="ti ti-check"></i>Save vitals</button>
+                <button class="btn btn-xs" onclick="_toggleVitalsEdit('${p._id}')">Cancel</button>
+              </div>
+              <div id="vitals-save-status" style="font-size:12px;margin-top:6px"></div>
             </div>
           </div>
 
@@ -343,11 +363,17 @@ window._loadConsultPatient = async (patientId) => {
             <div class="f-group"><label class="f-label">Chief complaint</label><input class="f-input" id="cc-input" placeholder="Presenting complaint…"></div>
             <div class="f-group"><label class="f-label">Clinical notes</label><textarea class="f-textarea" style="height:80px" id="notes-input" placeholder="Clinical observations…"></textarea></div>
             <div class="f-group"><label class="f-label">ICD-10 diagnosis</label><input class="f-input" id="icd10-input" placeholder="e.g. I10 — Essential hypertension"></div>
+            <div class="f-group"><label class="f-label">Treatment plan</label><input class="f-input" id="treatment-input" placeholder="e.g. Continue current medication, review in 4 weeks"></div>
+            <div class="two-col">
+              <div class="f-group"><label class="f-label">Follow-up date</label><input class="f-input" type="date" id="followup-date"></div>
+              <div class="f-group"><label class="f-label">ICD-10 description</label><input class="f-input" id="icd10-desc" placeholder="e.g. Essential hypertension"></div>
+            </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn btn-sm btn-green" onclick="_saveConsultNotes('${p._id}')"><i class="ti ti-device-floppy"></i>Save notes</button>
               <button class="btn btn-sm" onclick="_openReferral('${p._id}','${p.fullName||p.firstName+' '+p.lastName}')"><i class="ti ti-share"></i>Refer patient</button>
               <button class="btn btn-sm" onclick="Router.setPage('lab')"><i class="ti ti-flask"></i>Order labs</button>
             </div>
+            <div id="consult-saved-note" style="display:none"></div>
           </div>
 
           <!-- Prescribe -->
@@ -355,9 +381,11 @@ window._loadConsultPatient = async (patientId) => {
             <div class="card-title"><i class="ti ti-pill"></i>Prescribe medication</div>
             <div class="f-group"><label class="f-label">Medication</label><input class="f-input" id="rx-med" placeholder="Start typing medication name…"></div>
             <div class="two-col">
-              <div class="f-group"><label class="f-label">Dosage</label><input class="f-input" id="rx-dose" placeholder="e.g. 1 tab twice daily"></div>
+              <div class="f-group"><label class="f-label">Dosage</label><input class="f-input" id="rx-dose" placeholder="e.g. 500mg"></div>
               <div class="f-group"><label class="f-label">Duration (days)</label><input class="f-input" type="number" id="rx-days" value="30" min="1"></div>
             </div>
+            <div class="f-group"><label class="f-label">Instructions</label><input class="f-input" id="rx-instructions" placeholder="e.g. Take 1 tablet twice daily with food"></div>
+            <div id="rx-alert" style="display:none;margin-bottom:8px;padding:8px 12px;background:#FEF2F2;border-left:4px solid var(--red);border-radius:8px;font-size:12px;color:#991B1B"></div>
             <button class="btn btn-sm btn-green" onclick="_sendRx('${p._id}')"><i class="ti ti-send"></i>Send to pharmacy</button>
           </div>
         </div>
@@ -470,30 +498,152 @@ window._saveCondition = async (patientId) => {
 
 /* ── Save consult notes ── */
 window._saveConsultNotes = async (patientId) => {
-  const notes  = document.getElementById('notes-input')?.value;
-  const icd10  = document.getElementById('icd10-input')?.value;
-  UI.showToast('Consultation notes saved','ok');
+  const chiefComplaint = (document.getElementById('cc-input')?.value||'').trim();
+  const notes          = (document.getElementById('notes-input')?.value||'').trim();
+  const icd10          = (document.getElementById('icd10-input')?.value||'').trim();
+  const treatment      = (document.getElementById('treatment-input')?.value||'').trim();
+  const followUp       = (document.getElementById('followup-date')?.value||'');
+
+  if (!notes && !chiefComplaint) { UI.showToast('Please enter at least a chief complaint or clinical notes','err'); return; }
+
+  const btn = event?.target?.closest('button');
+  if (btn) { btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:12px;height:12px"></div> Saving…'; }
+
+  try {
+    const user = API.getStoredUser();
+
+    /* 1. Find today's appointment for context */
+    let apptId = window._dcCurrentApptId;
+    let facilityId = user?.facilityId || user?.facility;
+    if (!apptId) {
+      try {
+        const ar = await API.appointments.list({ patient: patientId, limit: 10 });
+        const today = new Date().toDateString();
+        const todayAppt = (ar.data||[]).find(a =>
+          new Date(a.scheduledAt).toDateString() === today &&
+          ['confirmed','pending','in_progress'].includes(a.status)
+        );
+        if (todayAppt) { apptId = todayAppt._id; facilityId = facilityId || todayAppt.facility?._id || todayAppt.facility; }
+      } catch(_) {}
+    }
+
+    /* 2. POST to /consultation-notes — creates official medical record */
+    const noteRes = await API._fetchDirect('/consultation-notes', {
+      method: 'POST',
+      body: JSON.stringify({
+        patient:          patientId,
+        appointment:      apptId || undefined,
+        facility:         facilityId || undefined,
+        chiefComplaint,
+        clinicalNotes:    notes,
+        icd10Code:        icd10 || undefined,
+        icd10Description: icd10 ? document.getElementById('icd10-desc')?.value?.trim() || icd10 : undefined,
+        treatmentPlan:    treatment || undefined,
+        followUpDate:     followUp ? new Date(followUp).toISOString() : undefined,
+      })
+    });
+
+    /* 3. Also update appointment status to in_progress + save notes there */
+    if (apptId) {
+      await API._fetchDirect('/appointments/'+apptId+'/status', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: 'in_progress',
+          notes: [chiefComplaint?'CC: '+chiefComplaint:'', notes].filter(Boolean).join('\n'),
+          icd10Code: icd10 || undefined,
+        })
+      }).catch(() => {});
+    }
+
+    UI.showToast('✅ Consultation notes saved to patient medical file','ok');
+
+    /* Clear & feedback */
+    if (btn) {
+      btn.innerHTML='<i class="ti ti-check"></i> Saved!';
+      btn.style.background='var(--green-dark)';
+      setTimeout(() => { btn.disabled=false; btn.innerHTML='<i class="ti ti-device-floppy"></i>Save notes'; btn.style.background=''; }, 2500);
+    }
+
+    /* Show saved note inline below the form */
+    const savedEl = document.getElementById('consult-saved-note');
+    if (savedEl && noteRes?.data) {
+      const n = noteRes.data;
+      savedEl.innerHTML =
+        '<div style="padding:12px 14px;background:#EDFBF3;border-radius:10px;border:1.5px solid var(--green);margin-top:10px;font-size:12px">' +
+        '<div style="font-weight:700;color:var(--green-dark);margin-bottom:6px"><i class="ti ti-circle-check"></i> Saved to patient medical file</div>' +
+        '<div style="color:var(--text-muted)">Dr. '+(user?.firstName||'')+(user?.lastName?' '+user.lastName:'')+
+        ' · '+(n.facilityName||'')+ ' · '+new Date().toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'})+'</div>'+
+        '</div>';
+      savedEl.style.display='block';
+    }
+
+  } catch(e) {
+    UI.showToast(e.message||'Failed to save notes','err');
+    if (btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-device-floppy"></i>Save notes'; }
+  }
 };
 
 /* ── Send prescription ── */
 window._sendRx = async (patientId) => {
-  const med  = document.getElementById('rx-med')?.value?.trim();
-  const dose = document.getElementById('rx-dose')?.value?.trim();
-  const days = parseInt(document.getElementById('rx-days')?.value) || 30;
-  const user = API.getStoredUser();
-  if (!med || !dose) { UI.showToast('Fill in medication and dosage','err'); return; }
+  const med   = document.getElementById('rx-med')?.value?.trim();
+  const dose  = document.getElementById('rx-dose')?.value?.trim();
+  const days  = parseInt(document.getElementById('rx-days')?.value) || 30;
+  const instr = document.getElementById('rx-instructions')?.value?.trim() || dose;
+  const user  = API.getStoredUser();
+
+  if (!med)  { UI.showToast('Please enter a medication name', 'err'); return; }
+  if (!dose) { UI.showToast('Please enter the dosage', 'err'); return; }
+
+  const btn = event?.target?.closest('button');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:12px;height:12px"></div> Sending…'; }
+
   try {
-    const medsRes = await API.medications.list({ q: med });
-    const medication = medsRes.data?.[0];
-    if (!medication) { UI.showToast(`"${med}" not found in stock. Add it to the medication catalogue first.`,'err'); return; }
+    /* Try to find medication in stock catalogue (optional — won't block if not found) */
+    let medicationId = null;
+    try {
+      const medsRes = await API._fetchDirect('/medications?search=' + encodeURIComponent(med) + '&facility=' + (user?.facilityId||'') + '&limit=5', { method: 'GET' });
+      const match = (medsRes.data||[]).find(m => m.name.toLowerCase().includes(med.toLowerCase()));
+      if (match) medicationId = match._id;
+    } catch(_) { /* Stock lookup failed — still send prescription */ }
+
+    /* Create prescription regardless of stock match */
     await API.prescriptions.create({
-      patient: patientId, facility: user?.facilityId,
-      lines: [{ medication: medication._id, medicationName: medication.name, dosage: dose, frequency: dose, durationDays: days, quantity: days }]
+      patient:  patientId,
+      facility: user?.facilityId || user?.facility,
+      prescribedBy: user?._id,
+      lines: [{
+        ...(medicationId ? { medication: medicationId } : {}),
+        medicationName: med,
+        dosage:         dose,
+        frequency:      instr,
+        durationDays:   days,
+        quantity:       days,
+        instructions:   instr,
+      }],
+      status: 'pending',
+      notes: 'Prescribed by Dr. ' + (user?.firstName||'') + ' ' + (user?.lastName||''),
     });
-    UI.showToast('Prescription sent to pharmacy','ok');
-    document.getElementById('rx-med').value = '';
-    document.getElementById('rx-dose').value = '';
-  } catch(e) { UI.showToast(e.message,'err'); }
+
+    /* Clear fields */
+    const clear = (id) => { const el = document.getElementById(id); if(el) el.value = id==='rx-days'?'30':''; };
+    ['rx-med','rx-dose','rx-days','rx-instructions'].forEach(clear);
+
+    /* Success feedback */
+    UI.showToast('✅ Prescription sent to pharmacy', 'ok');
+    if (btn) {
+      btn.innerHTML = '<i class="ti ti-check"></i> Sent!';
+      btn.style.background = 'var(--green-dark)';
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="ti ti-send"></i>Send to pharmacy';
+        btn.style.background = '';
+      }, 2000);
+    }
+
+  } catch(e) {
+    UI.showToast(e.message || 'Failed to send prescription', 'err');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-send"></i>Send to pharmacy'; }
+  }
 };
 
 /* ── Upload patient document ── */
@@ -525,16 +675,35 @@ window._uploadPatientDoc = async (patientId, input) => {
 /* ── Download patient record as printable HTML→PDF ── */
 window._downloadPatientRecord = async (patientId, patientName) => {
   try {
-    const [patRes, rxRes, apptRes] = await Promise.all([
+    const [patRes, rxRes, apptRes, notesRes] = await Promise.all([
       API.patients.get(patientId),
-      API.prescriptions.list({ patient: patientId, limit:20 }),
-      API.appointments.list({ patient: patientId, limit:20 })
+      API.prescriptions.list({ patient: patientId, limit: 50 }),
+      API.appointments.list({ patient: patientId, limit: 30 }),
+      API._fetchDirect('/consultation-notes?patient=' + patientId + '&limit=20', { method: 'GET' })
+        .catch(() => ({ data: [] })),
     ]);
     const p     = patRes.data;
     const rxs   = rxRes.data || [];
     const appts = apptRes.data || [];
+    const notes = notesRes.data || [];
     const user  = API.getStoredUser();
     const now   = new Date().toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
+
+    /* Build consultation notes HTML for report */
+    const notesHtml = notes.length
+      ? notes.map(n => `
+          <div style="margin-bottom:14px;padding:10px 12px;border:1px solid #e0e0e0;border-radius:6px;page-break-inside:avoid">
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+              <div style="font-weight:600;font-size:12px">${new Date(n.createdAt).toLocaleDateString('en-ZA',{weekday:'short',day:'numeric',month:'long',year:'numeric'})}</div>
+              <div style="font-size:11px;color:#888">${n.doctorName||''} · ${n.facilityName||''} · Practice: ${n.practiceNumber||'—'}</div>
+            </div>
+            ${n.icd10Code ? `<div style="margin-bottom:4px"><span style="background:#e8f4f0;color:#0F6E56;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">${n.icd10Code}</span>${n.icd10Description?' — '+n.icd10Description:''}</div>` : ''}
+            ${n.chiefComplaint ? `<div style="margin-bottom:3px"><strong style="font-size:11px">Chief complaint:</strong> ${n.chiefComplaint}</div>` : ''}
+            ${n.clinicalNotes  ? `<div style="margin-bottom:3px"><strong style="font-size:11px">Notes:</strong> ${n.clinicalNotes}</div>` : ''}
+            ${n.treatmentPlan  ? `<div style="margin-bottom:3px"><strong style="font-size:11px">Treatment:</strong> ${n.treatmentPlan}</div>` : ''}
+            ${n.followUpDate   ? `<div style="color:#1A4A9B;font-size:11px"><strong>Follow-up:</strong> ${new Date(n.followUpDate).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'})}</div>` : ''}
+          </div>`).join('')
+      : '<p style="color:#888">No consultation notes recorded.</p>';
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
       <title>Patient Record — ${patientName}</title>
@@ -581,19 +750,30 @@ window._downloadPatientRecord = async (patientId, patientName) => {
       </table>` : '<p style="color:#888">No conditions recorded.</p>'}
 
       <h2>Current Prescriptions</h2>
-      ${rxs.filter(r=>r.status==='pending').length ? `<table>
-        <tr><th>Medication</th><th>Dosage</th><th>Duration</th><th>Prescribed</th></tr>
-        ${rxs.filter(r=>r.status==='pending').flatMap(r=>(r.lines||[]).map(l=>`
-          <tr><td>${l.medicationName}</td><td>${l.dosage}</td><td>${l.durationDays} days</td>
-          <td>${new Date(r.createdAt).toLocaleDateString('en-ZA')}</td></tr>`)).join('')}
-      </table>` : '<p style="color:#888">No active prescriptions.</p>'}
+      ${rxs.filter(r=>['pending','dispensed'].includes(r.status)).length ? `<table>
+        <tr><th>Medication</th><th>Dosage</th><th>Instructions</th><th>Duration</th><th>Qty</th><th>Status</th><th>Date</th></tr>
+        ${rxs.filter(r=>['pending','dispensed'].includes(r.status)).flatMap(r=>(r.lines||[]).map(l=>`
+          <tr>
+            <td><strong>${l.medicationName}</strong></td>
+            <td>${l.dosage||'—'}</td>
+            <td style="font-size:11px;color:#555">${l.instructions||l.frequency||'—'}</td>
+            <td>${l.durationDays||'—'} days</td>
+            <td>${l.quantity||'—'}</td>
+            <td><span style="padding:2px 7px;border-radius:10px;font-size:11px;font-weight:600;background:${r.status==='dispensed'?'#d1fae5':'#fef3c7'};color:${r.status==='dispensed'?'#065f46':'#92400e'}">${r.status}</span></td>
+            <td>${new Date(r.createdAt).toLocaleDateString('en-ZA')}</td>
+          </tr>`)).join('')}
+      </table>` : '<p style="color:#888">No prescriptions on record.</p>'}
+
+      <h2>Consultation Notes</h2>
+      ${notesHtml}
 
       <h2>Visit History</h2>
       ${appts.filter(a=>a.status==='completed').length ? `<table>
-        <tr><th>Date</th><th>Type</th><th>Reason</th><th>Doctor</th></tr>
+        <tr><th>Date</th><th>Type</th><th>Reason / ICD-10</th><th>Doctor</th></tr>
         ${appts.filter(a=>a.status==='completed').map(a=>`
           <tr><td>${new Date(a.scheduledAt).toLocaleDateString('en-ZA')}</td>
-          <td>${a.visitType||'consultation'}</td><td>${a.reason||'—'}</td>
+          <td>${a.visitType||'consultation'}</td>
+          <td>${a.reason||a.icd10Code||'—'}</td>
           <td>${a.doctor?'Dr. '+a.doctor.firstName+' '+a.doctor.lastName:'—'}</td></tr>`).join('')}
       </table>` : '<p style="color:#888">No visit history.</p>'}
 
@@ -897,4 +1077,99 @@ window._submitLabOrder = async () => {
     UI.showToast('Lab order submitted','ok');
     Router.setPage('lab');
   } catch(e) { UI.showToast(e.message,'err'); }
+};
+
+/* ── Toggle vitals edit form ── */
+window._toggleVitalsEdit = function(patientId) {
+  var form = document.getElementById('vitals-edit-' + patientId);
+  if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
+};
+
+/* ── Save updated vitals ── */
+window._saveVitals = async function(patientId) {
+  const sys    = parseFloat(document.getElementById('v-systolic')?.value) || null;
+  const dia    = parseFloat(document.getElementById('v-diastolic')?.value) || null;
+  const hr     = parseFloat(document.getElementById('v-hr')?.value) || null;
+  const temp   = parseFloat(document.getElementById('v-temp')?.value) || null;
+  const spo2   = parseFloat(document.getElementById('v-spo2')?.value) || null;
+  const weight = parseFloat(document.getElementById('v-weight')?.value) || null;
+  const height = parseFloat(document.getElementById('v-height')?.value) || null;
+  const statusEl = document.getElementById('vitals-save-status');
+
+  if (!sys && !hr && !temp) {
+    if (statusEl) { statusEl.style.color = 'var(--red)'; statusEl.textContent = 'Please enter at least one vital sign.'; }
+    return;
+  }
+
+  /* Calculate BMI if height + weight provided */
+  let bmi = null;
+  if (height && weight) {
+    const hm = height / 100;
+    bmi = Math.round(weight / (hm * hm) * 10) / 10;
+  }
+
+  const vitals = {
+    ...(sys && dia ? { bp: { systolic: sys, diastolic: dia } } : {}),
+    ...(hr     ? { heartRate: hr }     : {}),
+    ...(temp   ? { temperature: temp } : {}),
+    ...(spo2   ? { spO2: spo2 }       : {}),
+    ...(weight ? { weight: weight }    : {}),
+    ...(height ? { height: height }    : {}),
+    ...(bmi    ? { bmi: bmi }          : {}),
+    recordedAt: new Date().toISOString(),
+    recordedBy: API.getStoredUser()?._id,
+  };
+
+  try {
+    if (statusEl) { statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = 'Saving…'; }
+
+    /* Try patient vitals endpoint first, fall back to updating via appointment */
+    let vitsSaved = false;
+    try {
+      await API._fetchDirect('/patients/' + patientId + '/profile', {
+        method: 'PATCH',
+        body: JSON.stringify({ latestVitals: vitals })
+      });
+      vitsSaved = true;
+    } catch(profileErr) {
+      /* Fall back to appointment status update with vitals in body */
+      try {
+        const apptRes = await API.appointments.list({ patient: patientId, limit: 5 });
+        const todayAppts = (apptRes.data||[]).filter(a => {
+          const d = new Date(a.scheduledAt);
+          const t = new Date();
+          return d.getFullYear()===t.getFullYear() && d.getMonth()===t.getMonth() && d.getDate()===t.getDate();
+        });
+        if (todayAppts.length) {
+          await API._fetchDirect('/appointments/' + todayAppts[0]._id + '/status', {
+            method: 'PATCH',
+            body: JSON.stringify({ status: 'in_progress', vitals })
+          });
+          vitsSaved = true;
+        }
+      } catch(_) {}
+    }
+    if (!vitsSaved) throw new Error('Could not save vitals — please check your backend routes');
+
+    if (statusEl) { statusEl.style.color = 'var(--green-dark)'; statusEl.textContent = '✅ Vitals saved successfully'; }
+    UI.showToast('Vitals updated', 'ok');
+
+    /* Update the vitals display inline */
+    const displayEl = document.getElementById('vitals-display-' + patientId);
+    if (displayEl && sys) {
+      const bpEl = displayEl.querySelector('.vital-box:first-child .vital-val');
+      if (bpEl) bpEl.textContent = sys + '/' + dia;
+    }
+
+    /* Hide the form after 1.5s */
+    setTimeout(function() {
+      const form = document.getElementById('vitals-edit-' + patientId);
+      if (form) form.style.display = 'none';
+      /* Reload to show fresh data */
+      _loadConsultPatient(patientId);
+    }, 1500);
+
+  } catch(e) {
+    if (statusEl) { statusEl.style.color = 'var(--red)'; statusEl.textContent = e.message || 'Failed to save vitals'; }
+  }
 };
