@@ -1,3 +1,4 @@
+
 'use strict';
 
 const express      = require('express');
@@ -25,105 +26,118 @@ const facilityRoutes     = require('./routes/facilities');
 const analyticsRoutes    = require('./routes/analytics');
 const queueRoutes        = require('./routes/queue');
 
-const app = express();
+const app  = express();
 const PORT = parseInt(process.env.PORT) || 5000;
 
 // ── Security ──
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
-const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5500,http://127.0.0.1:5500,null')
-  .split(',').map(o => o.trim());
+// ── CORS — fixed for Netlify + Render production ──────────────────────────────
+const allowedOrigins = (
+  process.env.CLIENT_ORIGIN ||
+  'http://localhost:5500,http://127.0.0.1:5500,http://localhost:3000,null'
+).split(',').map(o => o.trim());
 
 app.use(cors({
   origin: (origin, cb) => {
+    // Allow requests with no origin (Postman, mobile apps, server-to-server)
     if (!origin) return cb(null, true);
+    // Explicitly listed origins
     if (allowedOrigins.includes(origin)) return cb(null, true);
-    // Auto-allow Railway, Vercel, Netlify deployment URLs
+    // Auto-allow all cloud deployment domains
     const isCloud = /\.(railway\.app|up\.railway\.app|vercel\.app|netlify\.app|onrender\.com)$/.test(origin);
     if (isCloud) return cb(null, true);
-    // Auto-allow any private network IP (LAN access)
-    const localNet = /^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(origin);
-    if (localNet) return cb(null, true);
+    // Auto-allow LAN IPs for local network access
+    const isLAN = /^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(origin);
+    if (isLAN) return cb(null, true);
+    // Block everything else
     logger.error(`CORS blocked: ${origin} — add to CLIENT_ORIGIN in .env`);
     cb(new Error(`CORS blocked: ${origin}`));
   },
   credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization']
+  methods:      ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders:['Content-Type','Authorization'],
 }));
 
+// ── Rate limiting ─────────────────────────────────────────────────────────────
 app.use(rateLimit({
-  windowMs: 15 * 60 * 1000, max: 200,
+  windowMs: 15 * 60 * 1000, max: 300,   // raised to 300 for production
   standardHeaders: true, legacyHeaders: false,
-  message: { success: false, message: 'Too many requests.' }
+  message: { success: false, message: 'Too many requests. Please try again in a few minutes.' },
+  skip: (req) => req.path === '/health', // never rate-limit health checks
 }));
 
-// ── General middleware ──
+// ── General middleware ────────────────────────────────────────────────────────
 app.use(compression());
-
-// Serve uploaded ID documents
-
 app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(mongoSanitize());
-app.use('/api/v1/medications', require('./routes/medications'));
-app.use(morgan('dev'));
-app.use('/api/v1/queue2', require('./routes/queue2'));
-// ── Health check (works even without DB) ──
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+// ── Health check (no auth required) ──────────────────────────────────────────
 app.get('/health', (_req, res) => {
   const dbState = ['disconnected','connected','connecting','disconnecting'];
   res.json({
     status: 'ok',
-    env: process.env.NODE_ENV || 'development',
-    db: dbState[mongoose.connection.readyState] || 'unknown',
-    port: PORT
+    env:    process.env.NODE_ENV || 'development',
+    db:     dbState[mongoose.connection.readyState] || 'unknown',
+    port:   PORT,
   });
 });
 
-// ── Routes ──
+// ── API routes ────────────────────────────────────────────────────────────────
+app.use('/api/v1/auth',               authRoutes);
+app.use('/api/v1/users',              userRoutes);
+app.use('/api/v1/patients',           patientRoutes);
+app.use('/api/v1/appointments',       appointmentRoutes);
+app.use('/api/v1/prescriptions',      prescriptionRoutes);
+app.use('/api/v1/medications',        medicationRoutes);
+app.use('/api/v1/labs',               labRoutes);
+app.use('/api/v1/facilities',         facilityRoutes);
+app.use('/api/v1/analytics',          analyticsRoutes);
+app.use('/api/v1/queue',              queueRoutes);
+app.use('/api/v1/queue2',             require('./routes/queue2'));
 app.use('/api/v1/consultation-notes', require('./routes/consultationNotes'));
-app.use('/api/v1/auth',          authRoutes);
-app.use('/api/v1/users',         userRoutes);
-app.use('/api/v1/patients',      patientRoutes);
-app.use('/api/v1/appointments',  appointmentRoutes);
-app.use('/api/v1/prescriptions', prescriptionRoutes);
-app.use('/api/v1/medications',   medicationRoutes);
-app.use('/api/v1/labs',          labRoutes);
-app.use('/api/v1/queue2',         require('./routes/queue2'));
-app.use('/api/v1/facilities',    facilityRoutes);
-app.use('/api/v1/analytics',     analyticsRoutes);
-app.use('/api/v1/queue',         queueRoutes);
- //ADD TO backend/server.js:
-   app.use('/api/v1/surveys', require('./routes/surveys'));
-   
+app.use('/api/v1/surveys',            require('./routes/surveys'));
+app.use('/api/v1/ml',                 require('./routes/ml'));
+// Notifications route (SMS + email)
+try {
+  app.use('/api/v1/notifications', require('./routes/notifications'));
+} catch(_) { logger.warn('notifications route not found — skipping'); }
+
+// ── 404 + error handler ───────────────────────────────────────────────────────
 app.use(notFound);
 app.use(errorHandler);
 
-// ── Start server first, then connect DB ──
-// Server starts immediately so you can see /health even if DB is down
+// ── Start server, then connect DB ─────────────────────────────────────────────
 const http = require('http');
 const httpServer = http.createServer(app);
 const { initSignaling } = require('./utils/signaling');
 initSignaling(httpServer);
 const { startScheduler } = require('./utils/scheduler');
-httpServer.listen(PORT, () => {
+
+httpServer.listen(PORT, '0.0.0.0', () => {
   logger.info(`Server running on http://localhost:${PORT}`);
   logger.info(`Health check: http://localhost:${PORT}/health`);
   connectWithRetry().then(() => startScheduler());
 });
+
 httpServer.on('error', err => {
-  if (err.code === 'EADDRINUSE') { logger.error(`Port ${PORT} in use. Run: netstat -ano | findstr :${PORT} then taskkill /PID <n> /F`); process.exit(1); }
+  if (err.code === 'EADDRINUSE') {
+    logger.error(`Port ${PORT} in use. Run: netstat -ano | findstr :${PORT} then taskkill /PID <n> /F`);
+    process.exit(1);
+  }
 });
 
-// ── MongoDB connection with retry ──
+// ── MongoDB connection with retry ─────────────────────────────────────────────
 async function connectWithRetry(attempt = 1) {
-  const uri = process.env.MONGO_URI;
+  const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
 
   if (!uri || uri.includes('YOUR_')) {
     logger.error('─────────────────────────────────────────');
     logger.error('MONGO_URI is not set in your .env file!');
-    logger.error('Open nihms-backend/.env and set it.');
+    logger.error('Open backend/.env and add: MONGO_URI=mongodb+srv://...');
     logger.error('─────────────────────────────────────────');
     return;
   }
@@ -141,10 +155,10 @@ async function connectWithRetry(attempt = 1) {
       logger.info(`[DB] Attempt ${attempt} — trying ${label}…`);
       await mongoose.connect(connectionUri, {
         serverSelectionTimeoutMS: 10000,
-        connectTimeoutMS: 10000,
-        socketTimeoutMS: 30000,
+        connectTimeoutMS:         10000,
+        socketTimeoutMS:          30000,
         family: 4,
-        ...opts
+        ...opts,
       });
       logger.info(`[DB] Connected via ${label}`);
       return;
@@ -156,15 +170,12 @@ async function connectWithRetry(attempt = 1) {
     }
   }
 
-  // All strategies failed — wait and retry
   const wait = Math.min(attempt * 5, 30);
   logger.error(`[DB] All strategies failed. Retrying in ${wait}s… (attempt ${attempt})`);
   logger.error('[DB] Checklist:');
   logger.error('  1. Atlas → Network Access → "Allow Access from Anywhere" (0.0.0.0/0)');
   logger.error('  2. Atlas → Database Access → user exists with correct password');
-  logger.error('  3. Try phone hotspot to rule out router firewall');
-  logger.error('  4. Run: Test-NetConnection ac-hrstpxa-shard-00-00.gwti7gs.mongodb.net -Port 27017');
-
+  logger.error('  3. Render env vars → MONGO_URI is set correctly');
   setTimeout(() => connectWithRetry(attempt + 1), wait * 1000);
 }
 
@@ -178,20 +189,16 @@ function buildStrategies(uri, user, rawPass) {
   const dbAuth     = `/nihms?authSource=admin&replicaSet=${replicaSet}&retryWrites=true&w=majority`;
 
   return [
-    // 1. Original URI from .env
-    { label: 'original .env URI',     connectionUri: uri,                                                             opts: {} },
-    // 2. Direct port 27017 with ssl
-    { label: 'direct port 27017/ssl', connectionUri: `mongodb://${user}:${pass}@${hosts27017}${dbAuth}&ssl=true`,    opts: {} },
-    // 3. Direct port 27017 with tls
-    { label: 'direct port 27017/tls', connectionUri: `mongodb://${user}:${pass}@${hosts27017}${dbAuth}&tls=true`,    opts: {} },
-    // 4. Port 443 (bypasses firewalls)
-    { label: 'direct port 443',       connectionUri: `mongodb://${user}:${pass}@${hosts443}${dbAuth}&ssl=true`,      opts: {} },
-    // 5. Port 443 with tlsAllowInvalidCertificates (last resort)
-    { label: 'port 443 (relaxed TLS)',connectionUri: `mongodb://${user}:${pass}@${hosts443}${dbAuth}&ssl=true`,      opts: { tlsAllowInvalidCertificates: true } },
+    { label: 'original .env URI',     connectionUri: uri,                                                           opts: {} },
+    { label: 'direct port 27017/ssl', connectionUri: `mongodb://${user}:${pass}@${hosts27017}${dbAuth}&ssl=true`,   opts: {} },
+    { label: 'direct port 27017/tls', connectionUri: `mongodb://${user}:${pass}@${hosts27017}${dbAuth}&tls=true`,   opts: {} },
+    { label: 'direct port 443',       connectionUri: `mongodb://${user}:${pass}@${hosts443}${dbAuth}&ssl=true`,     opts: {} },
+    { label: 'port 443 (relaxed TLS)',connectionUri: `mongodb://${user}:${pass}@${hosts443}${dbAuth}&ssl=true`,     opts: { tlsAllowInvalidCertificates: true } },
   ];
 }
 
 process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received — closing server gracefully');
   await mongoose.connection.close();
   process.exit(0);
 });

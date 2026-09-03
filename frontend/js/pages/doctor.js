@@ -337,7 +337,7 @@ window._loadConsultPatient = async (patientId) => {
                   <div style="font-weight:500;font-size:13px">${p.idDocument.filename}</div>
                   <div style="font-size:11px">Uploaded ${new Date(p.idDocument.uploadedAt).toLocaleDateString('en-ZA')}</div>
                 </div>
-                <a href="http://localhost:5000${p.idDocument.url}" target="_blank" download class="btn btn-xs"><i class="ti ti-download"></i>Download</a>
+                <a href="https://nihms-backend.onrender.com${p.idDocument.url}" target="_blank" download class="btn btn-xs"><i class="ti ti-download"></i>Download</a>
               </div>` : '<p style="color:var(--text-muted);font-size:13px;margin-bottom:10px">No ID document uploaded.</p>'}
 
             <!-- Upload record -->
@@ -606,8 +606,8 @@ window._sendRx = async (patientId) => {
       if (match) medicationId = match._id;
     } catch(_) { /* Stock lookup failed — still send prescription */ }
 
-    /* Create prescription regardless of stock match */
-    await API.prescriptions.create({
+    /* Create prescription */
+    const rxResult = await API.prescriptions.create({
       patient:  patientId,
       facility: user?.facilityId || user?.facility,
       prescribedBy: user?._id,
@@ -624,12 +624,63 @@ window._sendRx = async (patientId) => {
       notes: 'Prescribed by Dr. ' + (user?.firstName||'') + ' ' + (user?.lastName||''),
     });
 
+    /* Generate a pharmacy queue ticket for the patient */
+    const ticketNum = 'P-' + String(Math.floor(Math.random()*900)+100);
+
+    /* Fetch patient contact details and send SMS + email */
+    try {
+      const pRes = await API._fetchDirect('/patients/' + patientId, { method: 'GET' });
+      const pt   = pRes?.data;
+      const docName = 'Dr. ' + (user?.firstName||'') + ' ' + (user?.lastName||'');
+      const facName = user?.facilityName || 'the clinic';
+
+      const smsMsg = 'NIHMS Pharmacy: ' + docName + ' has prescribed ' + med + ' for you. ' +
+        'Your pharmacy queue ticket is ' + ticketNum + '. Please proceed to the pharmacy at ' + facName + '. ' +
+        'Bring this message when collecting.';
+
+      const emailHtml =
+        '<div style="font-family:Arial;max-width:520px;margin:0 auto">' +
+        '<div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);padding:20px;border-radius:10px 10px 0 0;text-align:center">' +
+        '<h2 style="color:#fff;margin:0">Pharmacy Prescription Ready</h2></div>' +
+        '<div style="padding:24px;background:#f9f9f9;border-radius:0 0 10px 10px">' +
+        '<p>Dear <strong>' + (pt?.firstName||'Patient') + ' ' + (pt?.lastName||'') + '</strong>,</p>' +
+        '<p>' + docName + ' has sent a prescription to the pharmacy for you.</p>' +
+        '<div style="text-align:center;margin:20px 0;padding:20px;background:#fff;border-radius:10px;border:2px solid #0F6E56">' +
+        '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#888;margin-bottom:6px">Your Pharmacy Queue Ticket</div>' +
+        '<div style="font-size:56px;font-weight:900;color:#0F6E56;font-family:monospace;line-height:1.1">' + ticketNum + '</div>' +
+        '<div style="font-size:13px;color:#666;margin-top:8px">Please proceed to the pharmacy at ' + facName + '</div>' +
+        '</div>' +
+        '<table style="width:100%;border-collapse:collapse;margin:16px 0">' +
+        '<tr><td style="padding:8px;border:1px solid #ddd;background:#f0f0f0;font-weight:600">Medication</td><td style="padding:8px;border:1px solid #ddd">' + med + '</td></tr>' +
+        '<tr><td style="padding:8px;border:1px solid #ddd;background:#f0f0f0;font-weight:600">Dosage</td><td style="padding:8px;border:1px solid #ddd">' + dose + '</td></tr>' +
+        '<tr><td style="padding:8px;border:1px solid #ddd;background:#f0f0f0;font-weight:600">Duration</td><td style="padding:8px;border:1px solid #ddd">' + days + ' days</td></tr>' +
+        '<tr><td style="padding:8px;border:1px solid #ddd;background:#f0f0f0;font-weight:600">Prescribed by</td><td style="padding:8px;border:1px solid #ddd">' + docName + '</td></tr>' +
+        '</table>' +
+        '<p style="font-size:12px;color:#888">Please show this email or your queue ticket number at the pharmacy counter. Bring your ID or patient card.</p>' +
+        '</div></div>';
+
+      if (pt?.phone) {
+        API._fetchDirect('/notifications/sms', {
+          method: 'POST', body: JSON.stringify({ to: pt.phone, message: smsMsg })
+        }).catch(() => {});
+      }
+      if (pt?.email) {
+        API._fetchDirect('/notifications/email', {
+          method: 'POST', body: JSON.stringify({
+            to: pt.email,
+            subject: 'NIHMS — Your Pharmacy Ticket: ' + ticketNum,
+            html: emailHtml,
+          })
+        }).catch(() => {});
+      }
+    } catch(_) { /* Notification failure must not block prescription creation */ }
+
     /* Clear fields */
     const clear = (id) => { const el = document.getElementById(id); if(el) el.value = id==='rx-days'?'30':''; };
     ['rx-med','rx-dose','rx-days','rx-instructions'].forEach(clear);
 
     /* Success feedback */
-    UI.showToast('✅ Prescription sent to pharmacy', 'ok');
+    UI.showToast('✅ Prescription sent · Patient notified with ticket ' + ticketNum, 'ok');
     if (btn) {
       btn.innerHTML = '<i class="ti ti-check"></i> Sent!';
       btn.style.background = 'var(--green-dark)';
@@ -658,7 +709,7 @@ window._uploadPatientDoc = async (patientId, input) => {
     const form  = new FormData();
     form.append('idDocument', file);
     // Staff uploading on behalf of patient — use patient-specific endpoint
-    const res = await fetch(`http://localhost:5000/api/v1/patients/${patientId}/upload-doc`, {
+    const res = await fetch(`https://nihms-backend.onrender.com/api/v1/patients/${patientId}/upload-doc`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form
     });
     const data = await res.json();

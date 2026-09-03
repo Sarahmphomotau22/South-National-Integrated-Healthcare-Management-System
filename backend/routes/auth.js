@@ -3,9 +3,10 @@ const express  = require('express');
 const { body } = require('express-validator');
 const router   = express.Router();
 const ctrl     = require('../controllers/authController');
-const logger   = require('../utils/logger');
 const { protect } = require('../middleware/auth');
 const validate = require('../middleware/validate');
+const jwt = require('jsonwebtoken');
+const SECRET = process.env.JWT_SECRET;
 
 const pwdRules = [
   body('password')
@@ -94,7 +95,7 @@ router.post('/change-password', protect, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/v1/auth/verify-email.html?token=&email=
+// GET /api/v1/auth/verify-email?token=&email=
 router.get('/verify-email', async (req, res, next) => {
   try {
     const { token, email } = req.query;
@@ -150,7 +151,7 @@ router.post('/resend-verification', async (req, res, next) => {
 
     const origins   = (process.env.CLIENT_ORIGIN || 'http://localhost:5500').split(',').map(s=>s.trim()).filter(s=>s&&s!=='null');
     const clientUrl = origins.find(o => !o.includes('localhost') && !o.includes('127.0.0.1')) || origins[0];
-    const verifyUrl = `${clientUrl}/verify-email.html?token=${verifyToken}&email=${encodeURIComponent(email)}`;
+    const verifyUrl = `${clientUrl}/verify-email?token=${verifyToken}&email=${encodeURIComponent(email)}`;
     await sendWelcomeEmail({ to: user.email, firstName: user.firstName, role: user.role, verifyUrl });
 
     logger.info(`Verification email resent to ${email}`);
@@ -169,8 +170,9 @@ router.post('/chat', async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'messages array required' });
     }
 
-    const http  = require('http');
-    const https = require('https');
+    const http   = require('http');
+    const https  = require('https');
+    const logger = require('../utils/logger');
 
     // ── Helper: make HTTP(S) request ──
     const makeRequest = (lib, options, body) => new Promise((resolve, reject) => {
@@ -185,7 +187,20 @@ router.post('/chat', async (req, res, next) => {
       req.end();
     });
 
-    const sys = systemPrompt || 'You are a helpful South African health assistant.';
+    const sys = systemPrompt || `You are NOMI, the NIHMS (National Integrated Healthcare Management System) health assistant for South Africa.
+
+CRITICAL RULES — follow these exactly:
+- NEVER show your thinking process, reasoning steps, analysis, or numbered plans
+- NEVER use markdown formatting — no asterisks, no hashes, no bullet dashes
+- Reply ONLY with the final answer, written in plain conversational text
+- Use short paragraphs separated by blank lines
+- Write in simple, clear language suitable for all literacy levels
+- Always give practical, actionable health information
+- Include emergency guidance when relevant (call 10177 for emergencies)
+- Mention consulting a doctor or clinic for personal medical decisions
+- Tailor advice to the South African public health context (NHI, public clinics, CHCs)
+- Never refuse to answer a health question — always provide helpful information
+- Keep replies under 400 words`;
 
     // ── 1. Try Ollama (local, free, no API key) ──
     const ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
@@ -223,34 +238,92 @@ router.post('/chat', async (req, res, next) => {
       logger.info('[AI] Ollama not available: ' + ollamaErr.message);
     }
 
-    // ── 2. Try Groq (free cloud, no credit card, Llama models) ──
+    // ── 2. Try Groq (free cloud) — model fallback chain ──────────────────
     if (process.env.GROQ_API_KEY) {
-      try {
-        const groqModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-        const groqBody  = JSON.stringify({
-          model:       groqModel,
-          max_tokens:  800,
-          temperature: 0.7,
-          messages:    [{ role: 'system', content: sys }, ...messages.slice(-10)]
-        });
-        const groqOpts = {
-          hostname: 'api.groq.com', port: 443,
-          path:     '/openai/v1/chat/completions', method: 'POST',
-          headers: {
-            'Content-Type':  'application/json',
-            'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
-            'Content-Length': Buffer.byteLength(groqBody)
+      // Try models in order until one works (handles decommissioned models)
+      // Current live Groq models as of Aug 2026 — verified from Groq API
+      // Prefer Llama-4 — clean output, no thinking tokens leaked
+      // Qwen models are last resort: they expose <think>...</think> in replies
+      const groqModels = [
+        process.env.GROQ_MODEL,
+        'meta-llama/llama-4-maverick-17b-128e-instruct',
+        'meta-llama/llama-4-scout-17b-16e-instruct',
+        'llama-3.3-70b-versatile',
+        'llama-3.1-8b-instant',
+        'qwen/qwen3.6-27b',
+        'qwen/qwen3-32b',
+      ].filter(Boolean);
+
+      let groqSuccess = false;
+      for (const groqModel of groqModels) {
+        try {
+          const groqBody = JSON.stringify({
+            model:       groqModel,
+            max_tokens:  800,
+            temperature: 0.7,
+            messages:    [{ role: 'system', content: sys }, ...messages.slice(-10)]
+          });
+          const groqOpts = {
+            hostname: 'api.groq.com', port: 443,
+            path:     '/openai/v1/chat/completions', method: 'POST',
+            headers: {
+              'Content-Type':   'application/json',
+              'Authorization':  'Bearer ' + process.env.GROQ_API_KEY,
+              'Content-Length': Buffer.byteLength(groqBody)
+            }
+          };
+          const resp = await makeRequest(https, groqOpts, groqBody);
+          const data = JSON.parse(resp.body);
+
+          if (resp.status === 200 && data.choices?.[0]?.message?.content) {
+            logger.info('[AI] Groq responded with model: ' + groqModel);
+            let reply = data.choices[0].message.content;
+
+            // Strip thinking tokens — Qwen and some reasoning models leak their
+            // internal chain-of-thought wrapped in <think>...</think> blocks
+            reply = reply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+            // Also strip numbered "thinking process" headers that some models output
+            // e.g. "1. Analyze User Input:" style preambles before the real answer
+            const thinkingPatterns = [
+              /^[\s\S]*?(?=Hello|Good\s(?:morning|afternoon|evening)|Dear|I\s(?:understand|can\s(?:see|help|explain)|would))/i,
+            ];
+            for (const pattern of thinkingPatterns) {
+              const match = reply.match(pattern);
+              if (match && match[0].length > 200 && match[0].includes('\n')) {
+                // Only strip if there's a substantial preamble (likely thinking output)
+                const stripped = reply.replace(pattern, '').trim();
+                if (stripped.length > 50) reply = stripped;
+              }
+            }
+
+            return res.json({ success: true, reply, provider: 'groq', model: groqModel });
           }
-        };
-        const resp = await makeRequest(https, groqOpts, groqBody);
-        const data = JSON.parse(resp.body);
-        if (resp.status === 200 && data.choices?.[0]?.message?.content) {
-          logger.info('[AI] Groq responded with model: ' + groqModel);
-          return res.json({ success: true, reply: data.choices[0].message.content, provider: 'groq' });
+
+          // Log the specific error so you can see it in nodemon console
+          const errMsg = data.error?.message || ('HTTP ' + resp.status);
+          logger.warn('[AI] Groq model ' + groqModel + ' failed: ' + errMsg);
+
+          // If model is decommissioned or not found, try next
+          if (data.error?.code === 'model_not_found' || data.error?.code === 'model_decommissioned' ||
+              errMsg.includes('decommissioned') || errMsg.includes('not found') ||
+              errMsg.includes('does not exist') || resp.status === 404) {
+            continue; // try next model
+          }
+
+          // For auth errors or rate limits, no point trying other models
+          if (resp.status === 401 || resp.status === 403) {
+            logger.error('[AI] Groq auth error — check GROQ_API_KEY in .env');
+            break;
+          }
+          if (resp.status === 429) {
+            logger.warn('[AI] Groq rate limited — try again in a moment');
+            break;
+          }
+
+        } catch (groqErr) {
+          logger.warn('[AI] Groq model ' + groqModel + ' error: ' + groqErr.message);
         }
-        logger.warn('[AI] Groq error: ' + (data.error?.message || resp.status));
-      } catch (groqErr) {
-        logger.warn('[AI] Groq error: ' + groqErr.message);
       }
     }
 
@@ -288,17 +361,13 @@ router.post('/chat', async (req, res, next) => {
     return res.json({
       success: true,
       provider: 'none',
-      reply: 'The AI assistant needs a quick setup. Choose one option:\n\n' +
-             '**Option A — Groq (free cloud, easiest for online hosting):**\n' +
-             '1. Go to console.groq.com — sign up free, no credit card\n' +
-             '2. Create an API key\n' +
-             '3. Add to backend/.env: GROQ_API_KEY=gsk_...\n' +
-             '4. Restart the backend\n\n' +
-             '**Option B — Ollama (free local AI, best when on same PC):**\n' +
-             '1. Download from ollama.com\n' +
-             '2. Run: ollama pull llama3.2\n' +
-             '3. Restart the backend\n\n' +
-             'For urgent health questions, call your clinic or dial 10177.'
+      reply: [
+              'Hello! I am NOMI, the NIHMS Health Assistant.',
+              '',
+          
+              'Please speak to a nurse or doctor at your clinic for health questions.',
+              'For emergencies, call 10177 immediately.'
+             ].join('\n')
     });
 
   } catch (err) { next(err); }

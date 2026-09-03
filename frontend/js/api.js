@@ -9,7 +9,12 @@ const API = (() => {
 // - On Railway/cloud: uses BACKEND_URL meta tag injected at build
 // - Locally: uses localhost:5000
 const _metaBackend = document.querySelector('meta[name="backend-url"]')?.content;
-const BASE_URL = _metaBackend || 'http://localhost:5000/api/v1';
+const _isLocal = window.location.hostname === 'localhost' ||
+                 window.location.hostname === '127.0.0.1' ||
+                 /^192\.168\./.test(window.location.hostname) ||
+                 /^10\./.test(window.location.hostname) ||
+                 /^172\.(1[6-9]|2[0-9]|3[01])\./.test(window.location.hostname);
+const BASE_URL = _metaBackend || (_isLocal ? 'http://localhost:5000/api/v1' : 'https://nihms-backend.onrender.com/api/v1');
 
   /* ── Token management ── */
   const Tokens = {
@@ -35,6 +40,18 @@ const BASE_URL = _metaBackend || 'http://localhost:5000/api/v1';
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+
+    /* Detect HTML error pages (e.g. Netlify 404, Render cold-start page) */
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await res.text();
+      throw new Error(
+        res.status === 404 ? 'API route not found — check backend URL configuration' :
+        res.status === 502 ? 'Backend is starting up — please wait a moment and try again' :
+        res.status === 503 ? 'Backend is unavailable — please try again shortly' :
+        `Server returned ${res.status} (expected JSON, got HTML)`
+      );
+    }
 
     if (res.status === 401 && retry) {
       try {
@@ -210,7 +227,7 @@ const BASE_URL = _metaBackend || 'http://localhost:5000/api/v1';
       } catch {
         _refreshPromise = null;
         Tokens.clear();
-        window.location.replace('/');
+        window.location.replace('login.html');
         return;
       }
     }

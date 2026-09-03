@@ -9,7 +9,9 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
   <link rel="stylesheet" href="css/variables.css" />
-  <!-- layout/components/pages.css not loaded here — login has its own complete styles -->
+  <link rel="stylesheet" href="css/layout.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/pages.css" />
   <style>
     /* ═══════════════════════════════════
        FULL-SCREEN AUTH WITH BACKGROUND
@@ -151,25 +153,24 @@
     }
     .eye-btn:hover { color: #555; }
 
-    /* Primary button — !important to override components.css .btn */
+    /* Primary button */
     .btn-main {
-      display: flex !important; align-items: center !important;
-      justify-content: center !important; gap: 8px !important;
-      width: 100% !important; padding: 13px !important;
-      background: linear-gradient(135deg, #0F6E56 0%, #1A4A9B 100%) !important;
-      color: #fff !important; border: none !important; border-radius: 50px !important;
-      font-family: inherit !important; font-size: 15px !important; font-weight: 600 !important;
-      cursor: pointer !important; letter-spacing: .03em !important;
-      box-shadow: 0 4px 18px rgba(15,110,86,.35) !important;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 13px;
+      background: linear-gradient(135deg, #0F6E56 0%, #1A4A9B 100%);
+      color: #fff; border: none; border-radius: 50px;
+      font-family: inherit; font-size: 15px; font-weight: 600;
+      cursor: pointer; letter-spacing: .03em;
+      box-shadow: 0 4px 18px rgba(15,110,86,.35);
       transition: transform .15s, box-shadow .15s, opacity .15s;
-      margin-bottom: 14px !important;
+      margin-bottom: 14px;
     }
     .btn-main:hover:not(:disabled) {
-      transform: translateY(-2px) !important;
-      box-shadow: 0 8px 28px rgba(15,110,86,.40) !important;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 28px rgba(15,110,86,.40);
     }
     .btn-main:active { transform: scale(.98); }
-    .btn-main:disabled { opacity: .6 !important; cursor: not-allowed !important; }
+    .btn-main:disabled { opacity: .6; cursor: not-allowed; }
 
     /* Secondary button */
     .btn-sec {
@@ -315,6 +316,7 @@
     }
   </style>
 </head>
+<script src="js/ml.js"></script>
 <body>
 
 <!-- Background -->
@@ -335,15 +337,15 @@
       <!-- ══════════ LOGIN PANEL ══════════ -->
       <div class="auth-panel active" id="panel-login">
         <div class="panel-icon"><i class="ti ti-stethoscope"></i></div>
-        <div class="auth-heading">Welcome back</div>
-        <div class="auth-sub">Sign in to your NIHMS account</div>
+        <div class="auth-heading" data-i18n="welcome">Welcome back</div>
+        <div class="auth-sub" data-i18n="signInSub">Sign in to your NIHMS account</div>
         <div id="login-alert" class="alert alert-err hidden"></div>
 
         <div class="form-group">
           <label class="form-label">Email address or ID number</label>
           <div class="input-wrap">
             <i class="ti ti-user input-icon-l"></i>
-            <input class="f-inp" type="text" id="login-email" placeholder="name@facility.gov.za or 8203041234083" autocomplete="username" />
+            <input class="f-inp" type="text" id="login-email" data-i18n-ph="emailLabel" placeholder="name@facility.gov.za or 8203041234083" autocomplete="username" />
           </div>
         </div>
 
@@ -351,7 +353,7 @@
           <label class="form-label">Password</label>
           <div class="input-wrap">
             <i class="ti ti-lock input-icon-l"></i>
-            <input class="f-inp" type="password" id="login-password" placeholder="Enter your password" autocomplete="current-password" />
+            <input class="f-inp" type="password" id="login-password" data-i18n-ph="passwordPlaceholder" placeholder="Enter your password" autocomplete="current-password" />
             <button class="eye-btn" type="button" onclick="togglePwd('login-password',this)"><i class="ti ti-eye"></i></button>
           </div>
         </div>
@@ -711,7 +713,7 @@
         <i class="ti ti-chevron-down" style="font-size:14px;color:var(--text-hint)"></i>
       </div>
       <div class="profile-dropdown" id="profile-dropdown">
-        <div class="dd-item" onclick="toggleDropdown();Router.setPage('myprofile');setTimeout(()=>_showEpTab&&_showEpTab(0),300)"><i class="ti ti-user"></i> My profile</div>
+        <div class="dd-item" onclick="toggleDropdown();Router.setPage('myprofile')"><i class="ti ti-user"></i> My profile</div>
         <div class="dd-sep"></div>
         <div class="dd-item dd-logout" onclick="doLogout()"><i class="ti ti-logout"></i> Sign out</div>
       </div>
@@ -765,7 +767,8 @@
     _updateDots(n);
   };
 </script>
-<script src="js/api.js"></script>
+<script src="js/accessibility.js"></script>
+  <script src="js/api.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/router.js"></script>
@@ -788,6 +791,15 @@
   // Enter key
   document.getElementById('login-email')?.addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('login-password')?.focus(); });
   document.getElementById('login-password')?.addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+
+  /* Accessibility: reload settings + retranslate after login */
+  var _origDoLogin = window.doLogin;
+  if (_origDoLogin) {
+    window.doLogin = async function() {
+      await _origDoLogin.apply(this, arguments);
+      if (window._a11yRefresh) setTimeout(window._a11yRefresh, 600);
+    };
+  }
 </script>
 </body>
 </html>

@@ -112,18 +112,19 @@ window.Router = (() => {
     },
 
     pharmacy: {
-      label: 'Pharmacy', icon: 'ti-pill',
-      default: 'pharmacy_dashboard',
+      label: 'Pharmacist', icon: 'ti-pill',
+      default: 'rx-queue',
       nav: [
-        { section: 'DISPENSING' },
-  { id: 'rx-queue',      icon: 'ti-list-check',     label: 'Rx Queue'        },
-  { id: 'dispensed',     icon: 'ti-clipboard-check', label: 'Dispensed Today' },
-  { section: 'INVENTORY' },
-  { id: 'stock',         icon: 'ti-package',         label: 'Stock'           },
-  { section: 'PATIENTS'  },
-  { id: 'ph-history',    icon: 'ti-history',         label: 'Med History'     },
-  { section: 'REPORTS'   },
-  { id: 'ph-analytics',  icon: 'ti-chart-bar',       label: 'Analytics'       },
+        { id: 'rx-queue',      icon: 'ti-layout-dashboard', label: 'Overview'                },
+        { id: 'stock',         icon: 'ti-package-search',   label: 'Stock management'        },
+        { id: 'ph-validation', icon: 'ti-shield-check',     label: 'Prescription validation' },
+        { id: 'dispensed',     icon: 'ti-clipboard-check',  label: 'Dispensing & labels'     },
+        { id: 'ph-queue',      icon: 'ti-users',            label: 'Pharmacy queue'          },
+        { id: 'ph-history',    icon: 'ti-history',          label: 'Medication history'      },
+        { id: 'ph-suppliers',  icon: 'ti-truck',            label: 'Suppliers & orders'      },
+        { id: 'ph-controlled', icon: 'ti-book-lock',        label: 'Controlled register'     },
+        { id: 'ph-reminders',  icon: 'ti-bell',             label: 'Refill reminders'        },
+        { id: 'ph-analytics',  icon: 'ti-chart-bar',        label: 'Analytics'               },
       ]
     },
 
