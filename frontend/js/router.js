@@ -40,10 +40,12 @@ window.Router = (() => {
 
     facility_admin: {
       label: 'Facility Admin', icon: 'ti-building-hospital',
-      default: 'facility_admin',
+      default: 'receptionist',
       nav: [
+        { section: 'Reception' },
+        { id: 'receptionist',    icon: 'ti-layout-dashboard', label: 'Reception desk' },
         { section: 'Facility' },
-        { id: 'facility_admin',  icon: 'ti-layout-dashboard', label: 'Facility dashboard' },
+        { id: 'facility_admin',  icon: 'ti-building-hospital',label: 'Facility dashboard' },
         { id: 'queue_dashboard', icon: 'ti-list-numbers',     label: 'Queue management' },
         { section: 'Management' },
         { id: 'users',           icon: 'ti-users-group',      label: 'Staff management' },
@@ -75,28 +77,15 @@ window.Router = (() => {
       label: 'Nurse', icon: 'ti-heart-rate-monitor',
       default: 'nurse_dashboard',
       nav: [
-        { section: 'Triage' },
-        { id: 'nurse_dashboard', icon: 'ti-layout-dashboard', label: 'Triage dashboard' },
-        { id: 'queue_dashboard', icon: 'ti-list-numbers',     label: 'Queue management' },
-        { id: 'registration',    icon: 'ti-user-plus',        label: 'Patient registration' },
-        { id: 'queue',           icon: 'ti-users',            label: 'Queue' },
-        { section: 'Tools' },
-        { id: 'checkin',         icon: 'ti-login',            label: 'Patient check-in' },
-        { id: 'assistant',       icon: 'ti-robot',            label: 'AI Assistant' },
+        { id: 'nurse_dashboard', icon: 'ti-layout-dashboard', label: 'Nurse Station' },
       ]
     },
 
     receptionist: {
-      label: 'Receptionist', icon: 'ti-device-desktop',
-      default: 'reception',
+      label: 'Receptionist', icon: 'ti-layout-dashboard',
+      default: 'receptionist',
       nav: [
-        { section: 'Reception' },
-        { id: 'reception',       icon: 'ti-layout-dashboard', label: 'Reception desk' },
-        { id: 'queue_dashboard', icon: 'ti-list-numbers',     label: 'Queue management' },
-        { id: 'registration',    icon: 'ti-user-plus',        label: 'Register patient' },
-        { section: 'Tools' },
-        { id: 'checkin',         icon: 'ti-login',            label: 'Patient check-in' },
-        { id: 'assistant',       icon: 'ti-robot',            label: 'AI Assistant' },
+        { id: 'receptionist', icon: 'ti-layout-dashboard', label: 'Dashboard' },
       ]
     },
 

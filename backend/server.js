@@ -27,6 +27,7 @@ const analyticsRoutes    = require('./routes/analytics');
 const queueRoutes        = require('./routes/queue');
 
 const app  = express();
+app.set('trust proxy', 1); // Trust Render's reverse proxy
 const PORT = parseInt(process.env.PORT) || 5000;
 
 // ── Security ──
@@ -68,6 +69,7 @@ app.use(rateLimit({
 }));
 
 // ── General middleware ────────────────────────────────────────────────────────
+
 app.use(compression());
 app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));
 app.use(express.json({ limit: '10kb' }));

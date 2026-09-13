@@ -1,806 +1,2339 @@
 /**
- * receptionist.js — Receptionist Dashboard matching wireframe
- * Patient Arrival · Queue Assignment · Communication Hub · Bookings Overview · Status Overview
+ * js/pages/receptionist.js — NIHMS Receptionist
+ * Rebuilt from Figma/Make.com Queue Management System design
+ *
+ * Tabs: overview · checkin · book · queue · appointments · emergency · messaging · analytics
  */
 if (typeof Pages === 'undefined') window.Pages = {};
 
-Pages['reception'] = () => {
-  if (window._recInt) clearInterval(window._recInt);
-  setTimeout(_recLoad, 0);
-  window._recInt = setInterval(_recLoad, 15000);
+/* ─── Constants ────────────────────────────────────────────────────── */
+var DEPARTMENTS = [
+  { id:'gen',  name:'General Consultation',    color:'#0d9488', avgWait:18 },
+  { id:'tele', name:'Telemedicine',            color:'#3b82f6', avgWait:12 },
+  { id:'lab',  name:'Lab / Blood Draw',        color:'#8b5cf6', avgWait:20 },
+  { id:'imm',  name:'Immunisation',            color:'#f59e0b', avgWait:10 },
+  { id:'mh',   name:'Mental Health',           color:'#ec4899', avgWait:35 },
+  { id:'cc',   name:'Chronic Care Follow-up',  color:'#14b8a6', avgWait:25 },
+  { id:'mc',   name:'Maternal & Child Health', color:'#f97316', avgWait:22 },
+  { id:'pp',   name:'Pharmacy Pickup',         color:'#6366f1', avgWait:8  },
+  { id:'sr',   name:'Specialist Referral',     color:'#0ea5e9', avgWait:40 },
+  { id:'wp',   name:'Wellness & Preventive',   color:'#22c55e', avgWait:15 },
+];
 
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('en-ZA', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
-  const timeStr = now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+var NIHMS_PATIENTS = [
+  { id:'8203041234083', firstName:'Nomsa',  lastName:'Dlamini',    phone:'+27659019697', dob:'1982/03/04', gender:'Female', email:'nomsa.dlamini@gmail.com' },
+  { id:'9001155012086', firstName:'Sipho',  lastName:'Ndlovu',     phone:'+27761234567', dob:'1990/01/15', gender:'Male',   email:'sipho@webmail.co.za'      },
+  { id:'7506280432088', firstName:'Fatima', lastName:'Al-Hassan',  phone:'+27823456789', dob:'1975/06/28', gender:'Female', email:'fatima.hassan@outlook.com' },
+  { id:'6801045223081', firstName:'Johan',  lastName:'van Wyk',    phone:'+27724445555', dob:'1968/01/04', gender:'Male',   email:'johan.vanwyk@gmail.com'    },
+  { id:'A12345678',     firstName:'Grace',  lastName:'Mahlangu',   phone:'+27711112222', dob:'1988/06/12', gender:'Female', email:'grace.m@hotmail.com'       },
+];
 
-  return `
-<style>
-  .rec-card { background:var(--bg-card);border:1.5px solid var(--border);border-radius:var(--radius-xl);padding:16px }
-  .rec-label { font-weight:700;font-size:14px;margin-bottom:12px }
-  .rec-btn { width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg-card);font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;text-align:left;display:flex;align-items:center;gap:8px;transition:all .15s;margin-bottom:6px }
-  .rec-btn:hover { background:var(--bg-surface) }
-  .rec-btn-dark { background:#2C2C2A;color:#fff;border-color:#2C2C2A }
-  .rec-btn-dark:hover { background:#444 }
-  .rec-counter { display:flex;align-items:center;gap:4px;padding:5px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-weight:500 }
-  .rec-stat { background:var(--bg-card);border:1.5px solid var(--border);border-radius:10px;padding:14px 16px;display:flex;align-items:center;justify-content:space-between }
-  .rec-stat-label { font-size:13px;color:var(--text-muted) }
-  .rec-stat-val { font-size:22px;font-weight:900;color:var(--text) }
-</style>
+var TOKEN_SEQ = { n:14 };
+function _genToken(dept) {
+  TOKEN_SEQ.n++;
+  var abbr = { 'General Consultation':'GC','Telemedicine':'TL','Lab / Blood Draw':'LB',
+    'Immunisation':'IM','Mental Health':'MH','Chronic Care Follow-up':'CC',
+    'Maternal & Child Health':'MC','Pharmacy Pickup':'PP','Specialist Referral':'SR',
+    'Wellness & Preventive':'WP' };
+  return (abbr[dept]||'GN') + '-' + String(TOKEN_SEQ.n).padStart(3,'0');
+}
 
-<!-- Top bar -->
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-  <div style="display:flex;align-items:center;gap:12px">
-    <i class="ti ti-building-hospital" style="font-size:20px;color:var(--green-dark)"></i>
-    <span style="font-weight:700;font-size:15px">NIHMS</span>
-    <span style="color:var(--border)">|</span>
-    <span id="rec-facility" style="font-size:14px;color:var(--text-muted)">Loading…</span>
-  </div>
-  <div style="font-size:13px;color:var(--text-muted)">${dateStr}, ${timeStr}</div>
-</div>
-<div class="page-title" style="text-align:center;margin-bottom:16px">Receptionist Dashboard</div>
+function _fmtTime(d) {
+  return (d||new Date()).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'});
+}
+function _fmtDate(d) {
+  return (d||new Date()).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'});
+}
 
-<!-- Main 3-column grid -->
-<div style="display:grid;grid-template-columns:280px 1fr 300px;gap:14px;align-items:start">
-
-  <!-- ═══ LEFT: Patient Arrival ═══ -->
-  <div style="display:flex;flex-direction:column;gap:12px">
-    <div class="rec-card">
-      <div class="rec-label">Patient Arrival</div>
-      <!-- Search -->
-      <div style="position:relative;margin-bottom:10px">
-        <input id="rec-search" type="text" placeholder="Search Patient by ID/Name…"
-          style="width:100%;padding:9px 36px 9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;outline:none"
-          oninput="_recSearch(this.value)"
-          onfocus="this.style.borderColor='var(--green)'" onblur="this.style.borderColor='var(--border)'">
-        <i class="ti ti-search" style="position:absolute;right:11px;top:50%;transform:translateY(-50%);color:#aaa;font-size:15px"></i>
-      </div>
-      <div id="rec-search-results" style="margin-bottom:8px"></div>
-
-      <!-- Today's appointments quick list -->
-      <div id="rec-today-appts" style="margin-bottom:10px"></div>
-
-      <!-- Action buttons -->
-      <button class="rec-btn" onclick="_recShowWI()">
-        <i class="ti ti-user-plus" style="font-size:15px;color:var(--green-dark)"></i>Register New Patient
-      </button>
-      <button class="rec-btn" onclick="_recWalkIn()">
-        <i class="ti ti-walk" style="font-size:15px;color:var(--blue)"></i>Walk-In
-      </button>
-      <button class="rec-btn" style="color:var(--red);border-color:var(--red)" onclick="_recEmergency()">
-        <i class="ti ti-urgent" style="font-size:15px"></i>Emergency
-      </button>
-    </div>
-
-    <!-- Feedback & Surveys (bottom left) -->
-    <div class="rec-card">
-      <div class="rec-label">Feedback &amp; Surveys</div>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-        <i class="ti ti-speakerphone" style="font-size:24px;color:var(--text-muted)"></i>
-        <span style="font-size:22px;font-weight:700" id="rec-fb-count">—</span>
-        <span style="font-size:13px;color:var(--text-muted)">Responses Today</span>
-      </div>
-      <button class="rec-btn" onclick="_recViewFeedback()">
-        <i class="ti ti-chart-bar" style="font-size:14px"></i>View Feedback
-      </button>
-    </div>
-  </div>
-
-  <!-- ═══ CENTRE: Queue Assignment + Bookings ═══ -->
-  <div style="display:flex;flex-direction:column;gap:12px">
-    <!-- Queue Assignment -->
-    <div class="rec-card">
-      <div class="rec-label">Queue Assignment</div>
-      <!-- Counters row -->
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-        <label class="rec-counter" style="cursor:pointer">
-          <input type="checkbox" checked id="qc-walkin" style="accent-color:var(--green);margin:0"> Walk-In:&nbsp;<strong id="qc-w">0</strong>
-        </label>
-        <label class="rec-counter" style="cursor:pointer">
-          <input type="checkbox" checked id="qc-prebooked" style="accent-color:var(--green);margin:0"> Pre-Booked:&nbsp;<strong id="qc-pb">0</strong>
-        </label>
-        <div class="rec-counter" style="color:var(--red)">
-          Emergency:&nbsp;<strong id="qc-em">0</strong>
-        </div>
-      </div>
-      <!-- Assign panel -->
-      <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start;margin-bottom:12px">
-        <div>
-          <label style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;display:block">Assign to Queue:</label>
-          <input id="qa-patient" type="text" placeholder="Patient name or token…"
-            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;outline:none;margin-bottom:8px"
-            onfocus="this.style.borderColor='var(--green)'" onblur="this.style.borderColor='var(--border)'">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="font-size:13px;color:var(--text-muted)">Token:</span>
-            <span id="qa-token" style="font-size:20px;font-weight:900;font-family:var(--mono);color:var(--green-dark)">—</span>
-          </div>
-        </div>
-        <!-- QR code placeholder -->
-        <div id="qa-qr" style="width:80px;height:80px;border:1.5px solid var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;background:var(--bg-surface)">
-          <i class="ti ti-qrcode" style="font-size:36px;color:var(--text-muted)"></i>
-        </div>
-      </div>
-      <!-- AI Suggestion -->
-      <div id="qa-ai" style="padding:10px 14px;background:var(--bg-surface);border-radius:8px;border:1px solid var(--border);font-size:13px;color:var(--text-muted);margin-bottom:10px">
-        <i class="ti ti-brain" style="color:#4A6CF7"></i> AI Suggestion: Enter a patient above to see routing suggestion
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-green" style="flex:1" onclick="_recAssign()"><i class="ti ti-check"></i>Assign to Queue</button>
-        <button class="btn" onclick="_recVerifyToken()"><i class="ti ti-search"></i>Verify token</button>
-      </div>
-    </div>
-
-    <!-- Bookings Overview -->
-    <div class="rec-card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <div class="rec-label" style="margin:0">Bookings Overview</div>
-        <div style="display:flex;gap:4px">
-          ${['Today','Month','Year'].map((t,i)=>`
-            <button id="bo-${t.toLowerCase()}" onclick="_recBoTab('${t.toLowerCase()}')"
-              style="padding:5px 12px;border:1.5px solid ${i===0?'var(--green)':'var(--border)'};border-radius:6px;background:${i===0?'var(--green-light)':'transparent'};color:${i===0?'var(--green-dark)':'#888'};font-size:12px;font-weight:500;cursor:pointer;font-family:inherit">
-              ${t}
-            </button>`).join('')}
-        </div>
-      </div>
-      <!-- Timeline chart -->
-      <div style="overflow-x:auto">
-        <div id="bo-chart" style="min-width:460px">
-          <!-- Time header -->
-          <div style="display:grid;grid-template-columns:80px 1fr;margin-bottom:4px">
-            <div></div>
-            <div style="display:flex;justify-content:space-between;padding:0 2px;font-size:11px;color:var(--text-muted)">
-              <span>8:00</span><span>10:00</span><span>12:00</span><span>14:00</span><span>16:00</span>
-            </div>
-          </div>
-          <!-- Walk-in row -->
-          <div style="display:grid;grid-template-columns:80px 1fr;align-items:center;margin-bottom:6px">
-            <div style="font-size:12px;font-weight:500;display:flex;align-items:center;gap:4px">
-              <i class="ti ti-chevron-right" style="font-size:11px"></i> Walk-In
-            </div>
-            <div style="height:28px;background:var(--bg-surface);border-radius:6px;position:relative;overflow:hidden" id="bo-walkin-bar">
-              <div style="position:absolute;height:100%;background:#888;border-radius:4px;left:5%;width:18%"></div>
-            </div>
-          </div>
-          <!-- Pre-booked row -->
-          <div style="display:grid;grid-template-columns:80px 1fr;align-items:center;margin-bottom:6px">
-            <div style="font-size:12px;font-weight:500;display:flex;align-items:center;gap:4px">
-              <i class="ti ti-chevron-right" style="font-size:11px"></i> Pre-Booked
-            </div>
-            <div style="height:28px;background:var(--bg-surface);border-radius:6px;position:relative;overflow:hidden" id="bo-prebooked-bar">
-              <div style="position:absolute;height:100%;background:#888;border-radius:4px;left:20%;width:16%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600">Walk-In</div>
-              <div style="position:absolute;height:100%;background:#555;border-radius:4px;left:40%;width:18%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600">Booked</div>
-              <div style="position:absolute;height:100%;background:#333;border-radius:4px;left:63%;width:16%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600">Emergency</div>
-            </div>
-          </div>
-          <!-- Emergency row -->
-          <div style="display:grid;grid-template-columns:80px 1fr;align-items:center">
-            <div style="font-size:12px;font-weight:500;display:flex;align-items:center;gap:4px">
-              <i class="ti ti-chevron-right" style="font-size:11px"></i> Emergency
-            </div>
-            <div style="height:28px;background:var(--bg-surface);border-radius:6px;position:relative;overflow:hidden">
-              <div style="position:absolute;height:100%;background:#999;border-radius:4px;left:30%;width:14%"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══ RIGHT: Communication Hub + Feedback + Status ═══ -->
-  <div style="display:flex;flex-direction:column;gap:12px">
-    <!-- Communication Hub -->
-    <div class="rec-card">
-      <div class="rec-label">Communication Hub</div>
-      <!-- Announcement input -->
-      <div style="margin-bottom:10px">
-        <label style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:5px;display:block">Announcement:</label>
-        <input id="rec-announcement" type="text" placeholder="Type a message to broadcast…"
-          style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;outline:none"
-          onfocus="this.style.borderColor='var(--green)'" onblur="this.style.borderColor='var(--border)'"
-          onkeydown="if(event.key==='Enter')_recSendAlert()">
-      </div>
-      <!-- Alert type + send -->
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        <select id="rec-alert-type"
-          style="flex:1;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;outline:none;background:var(--bg-card)">
-          <option value="general">📢 General</option>
-          <option value="delay">🕐 Delay notice</option>
-          <option value="emergency">🚨 Emergency</option>
-          <option value="maintenance">🔧 Maintenance</option>
-        </select>
-        <button class="rec-btn-dark" style="padding:8px 16px;border-radius:8px;border:none;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px" onclick="_recSendAlert()">
-          <i class="ti ti-send"></i>Send Alert
-        </button>
-      </div>
-      <!-- Direction buttons -->
-      <div style="display:flex;gap:6px">
-        <button class="rec-btn" style="margin:0;flex:1;justify-content:center;font-size:12px;padding:8px 10px" onclick="_recDirect('waiting')">
-          <i class="ti ti-sofa" style="font-size:13px"></i>Send to Waiting Area
-        </button>
-        <button class="rec-btn" style="margin:0;flex:1;justify-content:center;font-size:12px;padding:8px 10px" onclick="_recDirect('kiosk')">
-          <i class="ti ti-device-desktop" style="font-size:13px"></i>Direct to Kiosk
-        </button>
-      </div>
-      <!-- Recent alerts -->
-      <div style="margin-top:12px">
-        <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">Recent alerts</div>
-        <div id="rec-alerts-log" style="font-size:12px;color:var(--text-muted)">No alerts sent today</div>
-      </div>
-    </div>
-
-    <!-- Feedback & Surveys (right) -->
-    <div class="rec-card">
-      <div class="rec-label">Feedback &amp; Surveys</div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-        <i class="ti ti-speakerphone" style="font-size:20px;color:var(--text-muted)"></i>
-        <span style="font-size:18px;font-weight:700" id="rec-fb-count2">—</span>
-        <span style="font-size:13px;color:var(--text-muted)">Responses Today</span>
-      </div>
-      <div id="rec-fb-stars" style="font-size:13px;color:var(--text-muted);margin-bottom:8px">Loading…</div>
-      <button class="rec-btn" onclick="_recViewFeedback()">
-        <i class="ti ti-eye" style="font-size:14px"></i>View Feedback
-      </button>
-    </div>
-
-    <!-- Status Overview -->
-    <div class="rec-card">
-      <div class="rec-label">Status Overview</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div class="rec-stat">
-          <div><div class="rec-stat-label">In Queue</div><div class="rec-stat-val" id="st-queue">—</div></div>
-        </div>
-        <div class="rec-stat">
-          <div><div class="rec-stat-label">Avg. Wait Time</div><div class="rec-stat-val" id="st-wait">—</div></div>
-        </div>
-        <div class="rec-stat">
-          <div><div class="rec-stat-label">Checked In</div><div class="rec-stat-val" id="st-in">—</div></div>
-        </div>
-        <div class="rec-stat" style="position:relative">
-          <div><div class="rec-stat-label">Pending</div><div class="rec-stat-val" id="st-pend">—</div></div>
-          <i class="ti ti-menu-2" style="position:absolute;right:12px;bottom:12px;color:var(--text-muted);font-size:16px"></i>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Walk-in registration modal -->
-<div id="rec-wi-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:500;align-items:center;justify-content:center">
-  <div style="background:var(--bg-card);border-radius:var(--radius-xl);padding:24px;width:560px;max-width:95vw;box-shadow:var(--shadow-md);max-height:90vh;overflow-y:auto">
-    <div style="font-size:16px;font-weight:700;margin-bottom:4px"><i class="ti ti-user-plus"></i> Walk-in Registration</div>
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Search by ID / passport to find or create a patient profile.</div>
-    <div style="background:var(--bg-surface);border-radius:var(--radius);padding:14px;margin-bottom:14px;border:1.5px solid var(--border)">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:10px"><i class="ti ti-search"></i> Step 1 — Search by ID / Passport number</div>
-      <div style="display:flex;gap:8px">
-        <div style="flex:1">
-          <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">SA ID / Passport number *</label>
-          <input id="wi-idnum" class="f-input" placeholder="e.g. 8901015009087 or A12345678"
-            style="margin:0;font-family:var(--mono);font-size:14px;font-weight:600;letter-spacing:.04em"
-            oninput="this.value=this.value.replace(/[^a-zA-Z0-9]/g,'').toUpperCase()"
-            onkeydown="if(event.key===String.fromCharCode(13))_wiSearchID()">
-        </div>
-        <div style="display:flex;align-items:flex-end">
-          <button class="btn btn-green" id="wi-search-btn" onclick="_wiSearchID()" style="white-space:nowrap">
-            <i class="ti ti-search"></i>Search
-          </button>
-        </div>
-      </div>
-      <div id="wi-search-result" style="margin-top:10px"></div>
-    </div>
-    <div id="wi-form" style="display:none">
-      <div id="wi-exists-banner" style="display:none;margin-bottom:12px"></div>
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:10px"><i class="ti ti-user"></i> Patient information</div>
-      <div class="two-col">
-        <div class="f-group"><label class="f-label">First name *</label><input class="f-input" id="wi-fname" placeholder="First name"></div>
-        <div class="f-group"><label class="f-label">Last name *</label><input class="f-input" id="wi-lname" placeholder="Last name"></div>
-      </div>
-      <div class="two-col">
-        <div class="f-group"><label class="f-label">Phone number *</label><input class="f-input" id="wi-phone" placeholder="+27820000000" type="tel"></div>
-        <div class="f-group"><label class="f-label">Date of birth (auto from SA ID)</label><input class="f-input" id="wi-dob" type="date" readonly style="background:var(--bg-surface);color:var(--text-muted)"></div>
-      </div>
-      <div class="two-col">
-        <div class="f-group"><label class="f-label">Gender</label>
-          <select class="f-select" id="wi-gender" style="margin:0">
-            <option value="">-- Select --</option><option value="male">Male</option>
-            <option value="female">Female</option><option value="prefer_not_to_say">Prefer not to say</option>
-          </select>
-        </div>
-        <div class="f-group"><label class="f-label">Email (optional)</label><input class="f-input" id="wi-email" placeholder="patient@email.com" type="email"></div>
-      </div>
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin:14px 0 10px"><i class="ti ti-stethoscope"></i> Visit details</div>
-      <div class="f-group"><label class="f-label">Chief complaint / reason for visit</label>
-        <input class="f-input" id="wi-complaint" placeholder="e.g. Headache, chest pain, routine check-up...">
-      </div>
-      <div class="two-col">
-        <div class="f-group"><label class="f-label">Visit type</label>
-          <div style="display:flex;gap:5px" id="wi-type-btns">
-            <button onclick="_wiSetType('walkin',this)" style="flex:1;padding:8px 4px;border:1.5px solid var(--green);border-radius:8px;background:var(--green-light);color:var(--green-dark);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">Walk-in</button>
-            <button onclick="_wiSetType('priority',this)" style="flex:1;padding:8px 4px;border:1.5px solid var(--border);border-radius:8px;background:transparent;color:#888;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">Priority</button>
-            <button onclick="_wiSetType('emergency',this)" style="flex:1;padding:8px 4px;border:1.5px solid var(--border);border-radius:8px;background:transparent;color:#888;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">Emergency</button>
-          </div>
-        </div>
-        <div class="f-group"><label class="f-label">Priority reason</label>
-          <select class="f-select" id="wi-pri-reason" style="margin:0">
-            <option value="">-- None --</option><option value="elderly">Elderly (65+)</option>
-            <option value="pregnant">Pregnant</option><option value="disabled">Disability / mobility</option>
-            <option value="child_under_5">Child under 5</option>
-          </select>
-        </div>
-      </div>
-      <div class="two-col">
-        <div class="f-group"><label class="f-label">Language preference</label>
-          <select class="f-select" id="wi-lang" style="margin:0">
-            <option value="en">English</option><option value="zu">isiZulu</option>
-            <option value="af">Afrikaans</option><option value="st">Sesotho</option>
-            <option value="xh">isiXhosa</option><option value="ts">Xitsonga</option>
-          </select>
-        </div>
-        <div class="f-group"><label class="f-label">Medical aid (optional)</label>
-          <input class="f-input" id="wi-aid" placeholder="e.g. Discovery, Bonitas...">
-        </div>
-      </div>
-      <input type="hidden" id="wi-patient-id">
-      <input type="hidden" id="wi-is-new">
-    </div>
-    <div id="wi-alert" class="alert hidden" style="margin-bottom:8px"></div>
-    <div style="display:flex;gap:8px;margin-top:4px">
-      <button class="btn btn-green" id="wi-submit-btn" style="flex:1;display:none" onclick="_wiSubmit()">
-        <i class="ti ti-login"></i><span id="wi-submit-label">Check in and issue token</span>
-      </button>
-      <button class="btn" onclick="_wiClose()">Cancel</button>
-    </div>
-  </div>
-</div>`;
+/* ─── State ─────────────────────────────────────────────────────────── */
+var _R = {
+  tab: 'overview',
+  queue: [],
+  appointments: (function(){
+    var td = new Date().toISOString().slice(0,10);
+    /* tomorrow */
+    var tm = new Date(); tm.setDate(tm.getDate()+1); var tmStr=tm.toISOString().slice(0,10);
+    /* day after */
+    var da = new Date(); da.setDate(da.getDate()+2); var daStr=da.toISOString().slice(0,10);
+    return [
+      { id:'A001', patientId:'8203041234083', name:'Nomsa Dlamini',    dept:'General Consultation',   clinician:'Dr T. Mokoena',  date:td,    time:'09:00', verified:true,  type:'booked',  ref:'APT-001', status:'active', phone:'+27659019697', email:'nomsa.dlamini@gmail.com' },
+      { id:'A002', patientId:'9001155012086', name:'Sipho Ndlovu',     dept:'Lab / Blood Draw',       clinician:'Lab',            date:td,    time:'10:30', verified:false, type:'walkin',  ref:'APT-002', status:'active', phone:'+27761234567', email:'sipho@webmail.co.za'      },
+      { id:'A003', patientId:'7506280432088', name:'Fatima Al-Hassan', dept:'Maternal & Child Health',clinician:'Dr N. Sithole',  date:td,    time:'11:00', verified:true,  type:'booked',  ref:'APT-003', status:'active', phone:'+27823456789', email:'fatima.hassan@outlook.com' },
+      { id:'A004', patientId:'6801045223081', name:'Johan van Wyk',    dept:'Chronic Care Follow-up', clinician:'Dr M. Dlamini',  date:tmStr, time:'08:30', verified:false, type:'booked',  ref:'APT-004', status:'active', phone:'+27724445555', email:'' },
+      { id:'A005', patientId:'A12345678',     name:'Grace Mahlangu',   dept:'Mental Health',          clinician:'Dr K. Moyo',     date:daStr, time:'14:00', verified:false, type:'booked',  ref:'APT-005', status:'active', phone:'+27711112222', email:'grace.m@hotmail.com' },
+    ];
+  }()),
+  messages: [
+    { id:1, from:'Nurse Station', to:'Reception',    text:'Queue building up — 6 patients waiting for vitals.', time:'08:45', read:false },
+    { id:2, from:'Dr T. Mokoena',to:'Reception',    text:'Running 15 min late — please notify patients.', time:'09:02', read:false },
+    { id:3, from:'Pharmacy',      to:'Reception',    text:'Insulin reorder placed. Low stock until Thursday.', time:'07:30', read:true  },
+  ],
+  /* checkin state */
+  ci: { step:'search', id:'', patient:null, appt:null, dept:'General Consultation', result:null },
+  /* book state */
+  bk: { step:'search', id:'', patient:null, regForm:{}, slot:null, slotIdx:null, result:null },
+  /* queue filters */
+  qDept:'all', qStatus:'all',
+  /* calendar */
+  calView:'week', calDate: new Date(), calDept:'all',
+  /* emergency */
+  emId:'', emName:'', emDesc:'', emDept:'General Consultation',
+  /* messaging */
+  msgTo:'', msgBody:'',
+  /* analytics */
+  // no extra state needed
 };
 
+/* ─── Helpers ────────────────────────────────────────────────────────── */
+function _svgIcon(name) {
+  var icons = {
+    back:     '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>',
+    check:    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>',
+    checkW:   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>',
+    users:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    cal:      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    heart:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+    done:     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>',
+    plus:     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+    clock:    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    alert:    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    bolt:     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+    msg:      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    chart:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+    queue:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+    checkin:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>',
+  };
+  return icons[name]||'';
+}
 
-/* ── State ── */
-let _wiType = 'walkin';
-let _wiPatientData = null;
-let _recSelectedPatient = null;
-let _recAlertLog = [];
+function _priCfg(p) {
+  var m = { urgent:{label:'Urgent',color:'#dc2626',bg:'#fef2f2',border:'#fca5a5'}, elderly:{label:'Elderly',color:'#d97706',bg:'#fffbeb',border:'#fcd34d'}, normal:{label:'Normal',color:'#64748b',bg:'#f8fafc',border:'#e2e8f0'} };
+  return m[p]||m.normal;
+}
+function _stCfg(s) {
+  var m = { waiting:{label:'Waiting',color:'#b45309',bg:'#fffbeb',border:'#fcd34d'}, 'at-nurse':{label:'At Nurse',color:'#7c3aed',bg:'#f5f3ff',border:'#c4b5fd'}, 'with-doctor':{label:'With Doctor',color:'#0d9488',bg:'#f0fdfa',border:'#99f6e4'}, done:{label:'Done',color:'#16a34a',bg:'#f0fdf4',border:'#86efac'}, 'no-show':{label:'No-show',color:'#9ca3af',bg:'#f9fafb',border:'#e5e7eb'} };
+  return m[s]||m.waiting;
+}
 
-window._wiSetType = function(t, btn) {
-  _wiType = t;
-  document.querySelectorAll('#wi-type-btns button').forEach(function(b){
-    b.style.borderColor='var(--border)';b.style.background='transparent';b.style.color='#888';
-  });
-  if(btn){btn.style.borderColor='var(--green)';btn.style.background='var(--green-light)';btn.style.color='var(--green-dark)';}
-};
+function _badge(text, cfg) {
+  return '<span style="display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+cfg.bg+';color:'+cfg.color+';border:1px solid '+cfg.border+'">'+text+'</span>';
+}
 
-window._wiSearchID = async function() {
-  var idnum = (document.getElementById('wi-idnum')||{value:''}).value.trim();
-  if(!idnum||idnum.length<6){ _wiAlertMsg('Enter a valid ID or passport number (min 6 chars)'); return; }
-  var btn=document.getElementById('wi-search-btn');
-  if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div>';}
-  var rEl=document.getElementById('wi-search-result');
-  if(rEl) rEl.innerHTML='<div style="font-size:13px;color:var(--text-muted)">Searching NIHMS records...</div>';
-  try {
-    var res=await API._fetchDirect('/patients?nationalId='+encodeURIComponent(idnum)+'&limit=1',{method:'GET'});
-    var patients=res.data||[];
-    if(patients.length) {
-      var p=patients[0]; _wiPatientData=p; _wiFillForm(p,false);
-      if(rEl) rEl.innerHTML=
-        '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#EDFBF3;border-radius:10px;border:1.5px solid var(--green)">'+
-        '<div style="width:36px;height:36px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;flex-shrink:0">'+
-          (p.firstName||'?')[0]+(p.lastName||'?')[0]+
+function _inp(id, label, placeholder, value, type, required) {
+  return '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">'+label+(required?' *':'')+'</label>'+
+    '<input id="'+id+'" type="'+(type||'text')+'" value="'+(value||'')+'" placeholder="'+(placeholder||'')+'" '+
+    'style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box" '+
+    'onfocus="this.style.borderColor=\'#0d9488\'" onblur="this.style.borderColor=\'#e2e8f0\'">'+
+  '</div>';
+}
+
+function _sel(id, label, opts, val) {
+  return '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">'+label+'</label>'+
+    '<select id="'+id+'" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;background:#fff">'+
+    opts.map(function(o){ return '<option value="'+(o.v||o)+'"'+(((o.v||o)===(val||opts[0].v||opts[0]))||((o.label||o)===val)?' selected':'')+'>'+( o.label||o)+'</option>'; }).join('')+
+    '</select></div>';
+}
+
+function _pBtn(label, onclick, color) {
+  color=color||'#0d9488';
+  return '<button onclick="'+onclick+'" style="display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 20px;border-radius:9px;border:none;background:'+color+';color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">'+label+'</button>';
+}
+function _sBtn(label, onclick) {
+  return '<button onclick="'+onclick+'" style="display:inline-flex;align-items:center;gap:5px;padding:9px 16px;border-radius:9px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">'+label+'</button>';
+}
+function _tBtn(label, onclick) {
+  return '<button onclick="'+onclick+'" style="display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:7px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">'+label+'</button>';
+}
+
+function _card(content, pad) {
+  return '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:'+(pad||'18px 20px')+'">'+content+'</div>';
+}
+
+function _stepBar(steps, current, color) {
+  color=color||'#0d9488';
+  var idx=steps.indexOf(current);
+  return '<div style="display:flex;align-items:center;gap:0;margin-bottom:24px">'+
+    steps.map(function(s,i){
+      var done=i<idx,active=i===idx;
+      return '<div style="display:flex;align-items:center;flex:1">'+
+        '<div style="display:flex;flex-direction:column;align-items:center;flex:1">'+
+          '<div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;margin-bottom:4px;background:'+(done?color:active?color:'#f1f5f9')+';color:'+(done||active?'#fff':'#94a3b8')+'">'+
+            (done?_svgIcon('checkW'):(i+1))+
+          '</div>'+
+          '<div style="font-size:10px;font-weight:600;text-align:center;color:'+(active?color:done?color+'99':'#94a3b8')+'">'+s+'</div>'+
         '</div>'+
-        '<div style="flex:1">'+
-          '<div style="font-weight:700;font-size:14px;color:var(--green-dark)">Patient found in NIHMS</div>'+
-          '<div style="font-size:12px;color:var(--text-muted)">'+p.firstName+' '+p.lastName+' - ID: '+(p.nationalId||idnum)+' - '+(p.phone||'no phone on record')+'</div>'+
-        '</div></div>';
-      var b=document.getElementById('wi-exists-banner');
-      if(b){
-        b.style.display='block';
-        b.innerHTML=
-          '<div style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px;background:#FFF9E6;border-radius:10px;border-left:4px solid var(--amber)">'+
-          '<i class="ti ti-alert-triangle" style="font-size:18px;color:var(--amber);flex-shrink:0;margin-top:1px"></i>'+
-          '<div><div style="font-weight:700;font-size:13px;color:#7A5C10">Existing patient - profile found</div>'+
-          '<div style="font-size:12px;color:#7A5C10;margin-top:3px">This walk-in will be linked to <strong>'+p.firstName+' '+p.lastName+'</strong> existing record. Name and DOB are locked. Phone and email can be updated.</div></div></div>';
+        (i<steps.length-1?'<div style="height:2px;flex:1;margin-bottom:18px;border-radius:2px;background:'+(i<idx?color:'#e2e8f0')+'"></div>':'');
+    }).join('')+
+  '</div>';
+}
+
+/* ─── Tab render engine ──────────────────────────────────────────────── */
+function _rRec() {
+  var el=document.getElementById('rec-body');
+  if(!el) return;
+  /* Render persistent top bar on every page */
+  var topBar = document.getElementById('rec-top-bar');
+  if (topBar) topBar.innerHTML = _rTopBar();
+  var fns={overview:_rOverview,checkin:_rCheckin,book:_rBook,register:_rRegisterNew,'patient-file':_rPatientFile,queue:_rQueue,appointments:_rAppointments,'apt-edit':_rAptEditPage,emergency:_rEmergency,messaging:_rMessaging,analytics:_rAnalytics};
+  el.innerHTML=(fns[_R.tab]||_rOverview)();
+  _rBind();
+}
+
+function _rTopBar() {
+  var now     = new Date();
+  var timeStr = now.toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  var dateStr = now.toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  /* Restart clock after render */
+  clearInterval(window._recClockTimer);
+  window._recClockTimer = setInterval(function(){
+    var el = document.getElementById('rec-clock');
+    if (!el){ clearInterval(window._recClockTimer); return; }
+    el.textContent = new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }, 1000);
+  return '<div style="display:flex;align-items:center;justify-content:space-between;' +
+    'background:linear-gradient(135deg,#0d9488,#0f766e);' +
+    'border-radius:14px;padding:14px 22px;margin-bottom:12px;box-shadow:0 2px 10px rgba(13,148,136,.2)">' +
+    '<div>' +
+      '<div style="font-size:18px;font-weight:800;color:#fff;letter-spacing:-.01em;margin-bottom:2px">'+dateStr+'</div>' +
+      '<div style="font-size:13px;color:rgba(255,255,255,.75);display:flex;align-items:center;gap:5px">' +
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.8)" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>' +
+        'Reception Desk &nbsp;·&nbsp; Johannesburg CHC' +
+      '</div>' +
+    '</div>' +
+    '<div id="rec-clock" style="font-size:36px;font-weight:900;font-family:monospace;color:#fff;letter-spacing:.04em">'+timeStr+'</div>' +
+  '</div>';
+}
+
+function _rTab(t){ _R.tab=t; _rRec(); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SHELL
+═══════════════════════════════════════════════════════════════════════ */
+Pages['receptionist'] = function() {
+  _R.tab='overview';
+  setTimeout(_rRec, 80);
+
+  var topNav = '';
+
+  return '<div style="display:flex;flex-direction:column;height:calc(100vh - 120px);overflow:hidden">'+
+    '<div id="rec-top-bar" style="flex-shrink:0;padding:12px 20px 0"></div>'+
+    '<div id="rec-body" style="flex:1;overflow:auto;background:#f8fafc">Loading…</div>'+
+  '</div>';
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TAB 1 — OVERVIEW
+═══════════════════════════════════════════════════════════════════════ */
+function _rOverview() {
+  var q=_R.queue;
+  var waiting=q.filter(function(p){return p.status==='waiting';});
+  var atNurse=q.filter(function(p){return p.status==='at-nurse';});
+  var done=q.filter(function(p){return p.status==='done';});
+  var unreadMsg=_R.messages.filter(function(m){return !m.read;}).length;
+
+  /* Live date/time header */
+  var now=new Date();
+  var timeStr=now.toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  var dateStr=now.toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+
+  var timeHeader=
+    '<div style="display:flex;align-items:center;justify-content:space-between;' +
+    'background:linear-gradient(135deg,#0d9488 0%,#0f766e 100%);' +
+    'border-radius:14px;padding:18px 26px;margin-bottom:20px;box-shadow:0 2px 12px rgba(13,148,136,.2)">' +
+      '<div>' +
+        '<div style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-.01em;margin-bottom:3px">'+dateStr+'</div>' +
+        '<div style="font-size:14px;color:rgba(255,255,255,.75);font-weight:500;display:flex;align-items:center;gap:6px">' +
+          '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.8)" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>' +
+          'Reception Desk &nbsp;·&nbsp; Johannesburg CHC' +
+        '</div>' +
+      '</div>' +
+      '<div style="text-align:right">' +
+        '<div id="rec-clock" style="font-size:42px;font-weight:900;font-family:monospace;color:#fff;letter-spacing:.04em;line-height:1">'+timeStr+'</div>' +
+        '<div style="font-size:11px;color:rgba(255,255,255,.6);margin-top:3px;text-transform:uppercase;letter-spacing:.08em">Local time</div>' +
+      '</div>' +
+    '</div>';
+
+  /* Start live clock ticker */
+  clearInterval(window._recClockTimer);
+  window._recClockTimer=setInterval(function(){
+    var el=document.getElementById('rec-clock');
+    if(!el){clearInterval(window._recClockTimer);return;}
+    el.textContent=new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  },1000);
+
+  var kpis=[
+    {label:'Total Patients Today', value:q.length,               sub:waiting.length+' waiting',   color:'#0d9488', icon:_svgIcon('users')},
+    {label:'Appointments Today',   value:_R.appointments.length, sub:_R.appointments.filter(function(a){return a.verified;}).length+' verified', color:'#3b82f6', icon:_svgIcon('cal')},
+    {label:'At Nurses Station',    value:atNurse.length,          sub:'taking vitals',              color:'#7c3aed', icon:_svgIcon('heart')},
+    {label:'Completed Today',      value:done.length,             sub:'discharged',                 color:'#10b981', icon:_svgIcon('done')},
+  ];
+
+  var kpiHtml='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">'+
+    kpis.map(function(k){
+      return _card(
+        '<div style="display:flex;align-items:center;gap:14px">'+
+          '<div style="width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:'+k.color+'">'+k.icon+'</div>'+
+          '<div><div style="font-size:26px;font-weight:800;color:#0f172a;line-height:1">'+k.value+'</div>'+
+          '<div style="font-size:11px;color:#94a3b8;margin-top:1px">'+k.label+'</div>'+
+          '<div style="font-size:11px;font-weight:600;margin-top:2px;color:'+k.color+'">'+k.sub+'</div></div>'+
+        '</div>');
+    }).join('')+
+  '</div>';
+
+  var actions=[
+    {label:'Patient Check-in',   sub:'ID scan → issue queue token',        tab:'checkin',     color:'#0d9488', icon:_svgIcon('checkin')},
+    {label:'Book Appointment',   sub:'Search patient → pick slot',          tab:'book',        color:'#3b82f6', icon:_svgIcon('cal')},
+    {label:'Register New Patient',sub:'Add patient profile to NIHMS',       tab:'register',    color:'#8b5cf6', icon:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>'},
+    {label:'Queue Management',   sub:'Live queue · advance patients',       tab:'queue',       color:'#7c3aed', icon:_svgIcon('queue')},
+    {label:'Appointments',       sub:'Day · Week · Month · Year calendar',  tab:'appointments',color:'#f59e0b', icon:_svgIcon('cal')},
+    {label:'Emergency Intake',   sub:'Fast-track critical patients',        tab:'emergency',   color:'#ef4444', icon:_svgIcon('bolt')},
+    {label:'Messaging',          sub:(unreadMsg?unreadMsg+' unread · ':'')+'Send alerts', tab:'messaging',   color:'#8b5cf6', icon:_svgIcon('msg')},
+    {label:'Analytics',          sub:'Wait times · dept performance',       tab:'analytics',   color:'#0ea5e9', icon:_svgIcon('chart')},
+    {label:'Patient Files',      sub:'Search · view · edit patient records', tab:'patient-file',color:'#10b981', icon:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>'},
+  ];
+
+  var actHtml='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">'+
+    actions.map(function(a){
+      return '<button onclick="_rTab(\''+a.tab+'\')" '+
+        'style="display:flex;align-items:center;gap:14px;background:#fff;border:1.5px solid #e2e8f0;border-radius:14px;padding:16px;cursor:pointer;text-align:left;font-family:inherit;transition:border-color .15s" '+
+        'onmouseover="this.style.borderColor=\''+a.color+'\'" onmouseout="this.style.borderColor=\'#e2e8f0\'">'+
+        '<div style="width:40px;height:40px;border-radius:10px;background:'+a.color+';display:flex;align-items:center;justify-content:center;flex-shrink:0">'+a.icon+'</div>'+
+        '<div><div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:2px">'+a.label+'</div>'+
+        '<div style="font-size:11px;color:#94a3b8">'+a.sub+'</div></div>'+
+      '</button>';
+    }).join('')+
+  '</div>';
+
+  /* Live queue snapshot */
+  var liveRows=waiting.slice(0,5).map(function(p,i){
+    var wait=Math.floor((new Date()-new Date(p.checkedInAt))/60000);
+    return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9">'+
+      '<td style="padding:9px 14px;font-family:monospace;font-weight:700;font-size:13px;color:#0d9488">'+p.token+'</td>'+
+      '<td style="padding:9px 14px;font-weight:600;font-size:13px">'+p.name+'</td>'+
+      '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+p.department+'</td>'+
+      '<td style="padding:9px 14px">'+_badge('Waiting',_stCfg('waiting'))+'</td>'+
+      '<td style="padding:9px 14px;font-size:12px;color:'+(wait>20?'#ef4444':'#64748b')+';font-weight:'+(wait>20?'700':'400')+'">'+wait+' min</td>'+
+    '</tr>';
+  }).join('');
+
+  var liveHtml=waiting.length
+    ?'<table style="width:100%;border-collapse:collapse"><thead><tr>'+
+      ['Token','Patient','Department','Status','Wait'].map(function(h){return '<th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8">'+h+'</th>';}).join('')+
+      '</tr></thead><tbody>'+liveRows+'</tbody></table>'
+    :'<div style="padding:20px;text-align:center;color:#94a3b8;font-size:13px">No patients in queue yet</div>';
+
+  /* Notices */
+  var noticesHtml=_R.messages.slice(0,3).map(function(m){
+    return '<div style="padding:10px 14px;border-radius:8px;border:1px solid #f1f5f9;background:'+(m.read?'#fff':'#f0fdfa')+'">'+
+      '<div style="display:flex;justify-content:space-between;margin-bottom:3px">'+
+        '<span style="font-size:12px;font-weight:700;color:#0f172a">'+m.from+'</span>'+
+        '<span style="font-size:11px;color:#94a3b8">'+m.time+'</span>'+
+      '</div>'+
+      '<div style="font-size:12px;color:#475569">'+m.text+'</div>'+
+    '</div>';
+  }).join('<div style="height:6px"></div>');
+
+  return '<div style="padding:20px">'+
+    kpiHtml+actHtml+
+    '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">'+
+      _card('<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'+
+        '<div style="font-size:14px;font-weight:700;color:#0f172a">Live Queue</div>'+
+        '<button onclick="_rTab(\'queue\')" style="font-size:12px;color:#0d9488;border:none;background:transparent;cursor:pointer">View all →</button>'+
+      '</div>'+liveHtml) +
+      _card('<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'+
+        '<div style="font-size:14px;font-weight:700;color:#0f172a">Notices</div>'+
+        '<button onclick="_rTab(\'messaging\')" style="font-size:12px;color:#8b5cf6;border:none;background:transparent;cursor:pointer">Open →</button>'+
+      '</div>'+noticesHtml) +
+    '</div>'+
+  '</div>';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TAB 2 — PATIENT CHECK-IN
+═══════════════════════════════════════════════════════════════════════ */
+function _rCheckin() {
+  var ci = _R.ci;
+  if (!ci) { _R.ci = { step:'search', id:'', patient:null, appt:null, dept:'General Consultation', result:null, notFound:false }; ci = _R.ci; }
+
+  var back = '<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">' +
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>' +
+    'Back to Overview</button>';
+
+
+
+  /* ══════════════════ SUCCESS SCREEN ══════════════════ */
+  if (ci.step === 'done' && ci.result) {
+    var r = ci.result;
+    return '<div style="padding:28px 32px;max-width:900px">' + back +
+      '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
+        '<div>' +
+          '<div style="background:#fff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden">' +
+            '<div style="background:linear-gradient(135deg,#0d9488,#0f766e);padding:28px;text-align:center">' +
+              '<div style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;margin:0 auto 12px">' +
+                '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
+              '</div>' +
+              '<div style="font-size:20px;font-weight:800;color:#fff;margin-bottom:4px">Check-In Complete</div>' +
+              '<div style="font-size:14px;color:rgba(255,255,255,.8)">' + r.name + ' has been added to the queue.</div>' +
+            '</div>' +
+            '<div style="padding:24px">' +
+              '<div style="text-align:center;margin-bottom:20px">' +
+                '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#94a3b8;margin-bottom:8px">Queue Token</div>' +
+                '<div style="font-size:64px;font-weight:900;font-family:monospace;color:#0d9488;line-height:1">' + r.token + '</div>' +
+                '<div style="font-size:14px;color:#64748b;margin-top:6px">' + r.dept + '</div>' +
+              '</div>' +
+              '<div style="background:#f8fafc;border-radius:10px;padding:14px 16px;margin-bottom:16px">' +
+                '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px">' +
+                  '<span style="color:#64748b">Patient</span><strong>' + r.name + '</strong>' +
+                '</div>' +
+                '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px">' +
+                  '<span style="color:#64748b">Department</span><strong>' + r.dept + '</strong>' +
+                '</div>' +
+                '<div style="display:flex;justify-content:space-between;font-size:13px">' +
+                  '<span style="color:#64748b">Checked in at</span><strong>' + _fmtTime() + '</strong>' +
+                '</div>' +
+              '</div>' +
+              '<div style="padding:12px 14px;background:#eff6ff;border-radius:10px;font-size:13px;color:#1d4ed8;margin-bottom:20px">' +
+                '🏥 Patient directed to <strong>Nurses Station</strong> for vitals before consultation.' +
+              '</div>' +
+              '<div style="display:flex;gap:10px">' +
+                '<button onclick="_R.ci={step:\'search\',id:\'\',patient:null,appt:null,dept:\'General Consultation\',result:null,notFound:false};_rRec()" ' +
+                  'style="flex:1;padding:13px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">' +
+                  'Check in another patient</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
+          '<div style="padding:14px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Notifications sent</div>' +
+          '<div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">' +
+            '<div style="display:flex;align-items:center;gap:10px"><div style="width:32px;height:32px;border-radius:50%;background:#f0fdf4;border:1px solid #86efac;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;font-weight:600">SMS sent</div><div style="font-size:11px;color:#94a3b8">' + (r.phone || 'Patient phone') + '</div></div></div>' +
+            '<div style="display:flex;align-items:center;gap:10px"><div style="width:32px;height:32px;border-radius:50%;background:#f0fdf4;border:1px solid #86efac;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;font-weight:600">Email sent</div><div style="font-size:11px;color:#94a3b8">' + (r.email || 'Patient email') + '</div></div></div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ══════════════════ STEP 1: SEARCH ══════════════════ */
+  if (ci.step === 'search') {
+    return '<div style="padding:28px 32px">' + back +
+      '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
+        '<div>' +
+          '<div style="margin-bottom:24px">' +
+            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Patient Check-in</div>' +
+            '<div style="font-size:15px;color:#64748b">Search by SA ID or passport to find the patient profile.</div>' +
+          '</div>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+            '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:10px">SA ID / PASSPORT NUMBER *</div>' +
+            '<div style="display:flex;gap:10px;margin-bottom:' + (ci.notFound ? '14px' : '0') + '">' +
+              '<input id="ci-id" type="text" value="' + (ci.id || '') + '" placeholder="e.g. 8203041234083" ' +
+              'style="flex:1;padding:12px 16px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;font-family:inherit;outline:none;color:#0f172a" ' +
+              'onfocus="this.style.borderColor=\"#0d9488\"" onblur="this.style.borderColor=\"#e2e8f0\"">' +
+              '<button onclick="_rCheckinSearch()" style="display:flex;align-items:center;gap:8px;padding:12px 24px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">' +
+                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
+                'Search' +
+              '</button>' +
+            '</div>' +
+            (ci.notFound
+              ? '<div style="padding:14px 16px;background:#fef2f2;border-radius:10px;border:1px solid #fecaca;margin-bottom:14px">' +
+                  '<div style="font-size:14px;font-weight:700;color:#dc2626;margin-bottom:4px">Patient not found</div>' +
+                  '<div style="font-size:13px;color:#ef4444">No profile exists for ID <strong>' + ci.id + '</strong> in NIHMS.</div>' +
+                  '<div style="font-size:13px;color:#ef4444">Register the patient first.</div>' +
+                '</div>' +
+                '<button onclick="_R.ci.step=\'register\';_rRec()" style="width:100%;padding:14px;border-radius:10px;border:2px dashed #0d9488;background:transparent;color:#0d9488;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
+                  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
+                  'Register new patient →' +
+                '</button>'
+              : '') +
+          '</div>' +
+        '</div>' +
+        _ciSidePanel() +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ══════════════════ STEP 2: REGISTER ══════════════════ */
+  if (ci.step === 'register') {
+    return '<div style="padding:28px 32px">' + back +
+      '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
+        '<div>' +
+          '<div style="margin-bottom:24px">' +
+            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Patient Registration</div>' +
+            '<div style="font-size:15px;color:#64748b">Complete the patient profile then proceed to book the appointment.</div>' +
+          '</div>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#0d9488">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
+              '<span style="font-size:13px;font-weight:700">Register new patient</span>' +
+            '</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
+              _frmInp('ci-reg-fn','FIRST NAME *','Nomsa') +
+              _frmInp('ci-reg-ln','LAST NAME *','Dlamini') +
+              _frmInp('ci-reg-id','SA ID / PASSPORT *', '', 'text', ci.id || '') +
+              _frmInp('ci-reg-dob','DATE OF BIRTH','','date') +
+              _frmSel('ci-reg-gen','GENDER',[{v:'',label:'— Select —'},{v:'Female',label:'Female'},{v:'Male',label:'Male'},{v:'Other',label:'Other'}]) +
+              _frmSel('ci-reg-blood','BLOOD TYPE',[{v:'',label:'— Unknown —'},{v:'A+',label:'A+'},{v:'A-',label:'A-'},{v:'B+',label:'B+'},{v:'B-',label:'B-'},{v:'AB+',label:'AB+'},{v:'AB-',label:'AB-'},{v:'O+',label:'O+'},{v:'O-',label:'O-'}]) +
+              _frmInp('ci-reg-ph','PHONE NUMBER *','+27820000000','tel') +
+              _frmInp('ci-reg-em','EMAIL','patient@email.com','email') +
+            '</div>' +
+            '<div style="margin-top:14px">' + _frmInp('ci-reg-addr','ADDRESS','Street address, suburb, city') + '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:10px;margin-top:14px">' +
+            '<button onclick="_rCiRegister()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
+              'Register' +
+            '</button>' +
+            '<button onclick="_R.ci.step=\'search\';_rRec()" style="padding:14px 24px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Back</button>' +
+          '</div>' +
+        '</div>' +
+        _ciSidePanel() +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ══════════════════ STEP 3: BOOK SLOT ══════════════════ */
+  if (ci.step === 'verify' || ci.step === 'slot') {
+    var pt      = ci.patient || {};
+    var initials = (((pt.firstName||'?')[0])+((pt.lastName||'?')[0])).toUpperCase();
+    var selSlot  = ci.selectedSlot || null;
+    var selDate  = ci.selectedDate || '';
+
+    /* ── Build available slots based on clinic hours ──────────────────── */
+    /* All half-hour slots within clinic hours */
+    var ALL_SLOTS_WEEKDAY = ['07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
+                              '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
+                              '15:00','15:30','16:00','16:30'];
+    var ALL_SLOTS_SAT     = ['07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
+                              '11:00','11:30','12:00','12:30','13:00'];
+
+    function getAvailableSlots(dateStr) {
+      if (!dateStr) return [];
+      var d   = new Date(dateStr + 'T00:00:00');
+      var day = d.getDay(); /* 0=Sun,6=Sat */
+      if (day === 0) return []; /* Clinic closed Sunday */
+      var allSlots = day === 6 ? ALL_SLOTS_SAT : ALL_SLOTS_WEEKDAY;
+
+      /* Remove past slots if today */
+      var todayStr = new Date().toISOString().slice(0,10);
+      if (dateStr === todayStr) {
+        var nowH = new Date().getHours();
+        var nowM = new Date().getMinutes();
+        /* Add 30min buffer */
+        var cutoff = nowH * 60 + nowM + 30;
+        allSlots = allSlots.filter(function(t) {
+          var parts = t.split(':');
+          return parseInt(parts[0]) * 60 + parseInt(parts[1]) >= cutoff;
+        });
       }
-      var sl=document.getElementById('wi-submit-label'); if(sl) sl.textContent='Link to existing profile and issue token';
+      return allSlots;
+    }
+
+    var availSlots = getAvailableSlots(selDate);
+    var isSunday   = selDate && new Date(selDate + 'T00:00:00').getDay() === 0;
+    var dateChosen = !!selDate;
+
+    var slotGrid = '';
+    if (!dateChosen) {
+      slotGrid = '<div style="padding:14px;background:#f8fafc;border-radius:8px;text-align:center;color:#94a3b8;font-size:13px">Select a date first to see available slots</div>';
+    } else if (isSunday) {
+      slotGrid = '<div style="padding:14px;background:#fef2f2;border-radius:8px;text-align:center;color:#dc2626;font-size:13px;font-weight:600">⛔ Clinic is closed on Sundays</div>';
+    } else if (availSlots.length === 0) {
+      slotGrid = '<div style="padding:14px;background:#fef2f2;border-radius:8px;text-align:center;color:#dc2626;font-size:13px">No slots available — all slots for today have passed.</div>';
     } else {
-      _wiPatientData=null; _wiFillForm(null,true,idnum);
-      if(rEl) rEl.innerHTML=
-        '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#EEF2FF;border-radius:10px;border:1.5px solid #BEC8F0">'+
-        '<i class="ti ti-user-plus" style="font-size:22px;color:#4A6CF7;flex-shrink:0"></i>'+
-        '<div><div style="font-weight:700;font-size:14px;color:#1E2C80">New patient - not in NIHMS</div>'+
-        '<div style="font-size:12px;color:#1E2C80;margin-top:2px">Fill in the details below to create a profile and issue a token.</div></div></div>';
-      var b2=document.getElementById('wi-exists-banner'); if(b2) b2.style.display='none';
-      var sl2=document.getElementById('wi-submit-label'); if(sl2) sl2.textContent='Create new profile and issue token';
+      slotGrid = '<div id="ci-slot-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">' +
+        availSlots.map(function(t) {
+          var isSel = selSlot === t;
+          return '<button data-slot="' + t + '" ' +
+            'style="padding:12px 8px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:14px;' +
+            'border:1.5px solid ' + (isSel?'#0d9488':'#e2e8f0') + ';' +
+            'background:' + (isSel?'#f0fdfa':'#fff') + ';' +
+            'color:' + (isSel?'#0d9488':'#0f172a') + ';' +
+            'font-weight:' + (isSel?'700':'500') + '">' + t + '</button>';
+        }).join('') +
+      '</div>';
     }
-    document.getElementById('wi-form').style.display='block';
-    document.getElementById('wi-submit-btn').style.display='flex';
-    document.getElementById('wi-alert').classList.add('hidden');
-  } catch(err){
-    if(rEl) rEl.innerHTML='<div style="color:var(--red);font-size:13px"><i class="ti ti-alert-circle"></i> Search failed: '+err.message+'</div>';
-  } finally { if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-search"></i>Search';} }
-};
 
-function _wiFillForm(p, isNew, prefillId) {
-  prefillId=prefillId||'';
-  var lock=!isNew;
-  function _set(id,val,ro){
-    var e=document.getElementById(id); if(!e) return;
-    e.value=val||'';
-    if(ro){e.setAttribute('readonly','');e.style.background='var(--bg-surface)';e.style.color='var(--text-muted)';}
-    else{e.removeAttribute('readonly');e.style.background='';e.style.color='';}
+    /* Min date = today */
+    var todayIso = new Date().toISOString().slice(0,10);
+
+    var hintText = selDate
+      ? (new Date(selDate+'T00:00:00').getDay()===6 ? 'Saturday · Clinic 07:00–13:00' : 'Weekday · Clinic 07:00–17:00')
+      : 'Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Sun closed';
+
+    var slotHtml =
+      '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px">' +
+          _frmSel('ci-slot-dept','DEPARTMENT *', DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};}), ci.dept||'General Consultation') +
+          '<div>' +
+            '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">DATE *</label>' +
+            '<input id="ci-slot-date" type="date" min="' + todayIso + '" value="' + selDate + '" ' +
+            'onchange="_ciDateChange(this.value)" ' +
+            'style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#0f172a">' +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569">AVAILABLE TIME SLOTS *</div>' +
+          '<div style="font-size:11px;color:#94a3b8">' + hintText + '</div>' +
+        '</div>' +
+        slotGrid +
+        (!selSlot && dateChosen && !isSunday && availSlots.length > 0
+          ? '<div id="ci-slot-error" style="font-size:12px;color:#ef4444;margin-top:8px">Please select a time slot</div>'
+          : '') +
+      '</div>';
+
+    return '<div style="padding:28px 32px">' + back +
+      '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
+        '<div>' +
+          '<div style="margin-bottom:24px">' +
+            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Book & Check In</div>' +
+            '<div style="font-size:15px;color:#64748b">Select a slot for <strong>' + (pt.firstName||'') + ' ' + (pt.lastName||'') + '</strong> then confirm check-in.</div>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:#f0fdfa;border-radius:12px;border:1px solid #99f6e4;margin-bottom:16px">' +
+            '<div style="width:38px;height:38px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">' + initials + '</div>' +
+            '<div style="flex:1"><div style="font-weight:700;font-size:14px;color:#0f172a">' + (pt.firstName||'') + ' ' + (pt.lastName||'') + '</div><div style="font-size:12px;color:#64748b">' + (pt.phone||pt.id||'') + '</div></div>' +
+            '<button onclick="_R.ci.step=\'search\';_R.ci.patient=null;_rRec()" style="font-size:13px;color:#0d9488;border:none;background:transparent;cursor:pointer;font-family:inherit;text-decoration:underline">Change</button>' +
+          '</div>' +
+          slotHtml +
+        '</div>' +
+        _ciSidePanel() +
+      '</div>' +
+      '<div style="padding:16px 0 0;margin-top:20px">' +
+        '<button onclick="_rCheckinIssue()" style="width:100%;padding:16px;border-radius:12px;border:none;background:#0d9488;color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:10px">' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
+          'Confirm Booking & Check In Patient' +
+        '</button>' +
+      '</div>' +
+    '</div>';
   }
-  _set('wi-fname',p?p.firstName:'',lock);
-  _set('wi-lname',p?p.lastName:'',lock);
-  _set('wi-phone',p?p.phone||'':'',false);
-  _set('wi-email',p?p.email||'':'',false);
-  _set('wi-aid',p&&p.medicalAid?p.medicalAid.schemeName||'':'',false);
-  var idnum=(document.getElementById('wi-idnum')||{value:''}).value;
-  _set('wi-dob',_wiParseDOB(idnum)||(p&&p.dateOfBirth?p.dateOfBirth.slice(0,10):''),true);
-  var gEl=document.getElementById('wi-gender');
-  if(gEl){
-    if(p&&p.gender){gEl.value=p.gender;if(lock){gEl.disabled=true;gEl.style.opacity='.65';}}
-    else{var g=parseInt(idnum[6]);if(!isNaN(g))gEl.value=g<5?'female':'male';}
-  }
-  document.getElementById('wi-patient-id').value=p?(p._id||p.user||''):'';
-  document.getElementById('wi-is-new').value=isNew?'1':'0';
+
+  /* fallback */
+  _R.ci = { step:'search', id:'', patient:null, appt:null, dept:'General Consultation', result:null, notFound:false };
+  return _rCheckin();
 }
 
-function _wiParseDOB(id) {
-  if(!id||id.length<6||!/^[0-9]/.test(id)) return '';
-  var yr=parseInt(id.slice(0,2)),mo=id.slice(2,4),day=id.slice(4,6);
-  if(isNaN(parseInt(mo))||isNaN(parseInt(day))) return '';
-  var fy=yr>(new Date().getFullYear()%100)?1900+yr:2000+yr;
-  return fy+'-'+mo+'-'+day;
-}
-
-window._wiSubmit = async function() {
-  var fid=API.getStoredUser()&&(API.getStoredUser().facilityId||API.getStoredUser().facility);
-  var isNew=(document.getElementById('wi-is-new')||{}).value==='1';
-  var pid=(document.getElementById('wi-patient-id')||{}).value||'';
-  var fname=((document.getElementById('wi-fname')||{}).value||'').trim();
-  var lname=((document.getElementById('wi-lname')||{}).value||'').trim();
-  var phone=((document.getElementById('wi-phone')||{}).value||'').trim();
-  var idnum=((document.getElementById('wi-idnum')||{}).value||'').trim();
-  var email=((document.getElementById('wi-email')||{}).value||'').trim()||undefined;
-  var complaint=((document.getElementById('wi-complaint')||{}).value||'').trim()||undefined;
-  var aid=((document.getElementById('wi-aid')||{}).value||'').trim()||undefined;
-  var gender=(document.getElementById('wi-gender')||{}).value||undefined;
-  var dob=(document.getElementById('wi-dob')||{}).value||undefined;
-  var lang=(document.getElementById('wi-lang')||{}).value||'en';
-  var priReason=(document.getElementById('wi-pri-reason')||{}).value||undefined;
-  if(!fname||!lname){_wiAlertMsg('First and last name are required');return;}
-  if(!phone){_wiAlertMsg('Phone number is required');return;}
-  if(!idnum){_wiAlertMsg('ID or Passport number is required');return;}
-  var btn=document.getElementById('wi-submit-btn');
-  if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Processing...';}
-  try {
-    var resolvedPid=pid;
-    if(isNew){
-      var body={firstName:fname,lastName:lname,phone:phone,nationalId:idnum,registeredByStaff:true,facilityId:fid};
-      if(email) body.email=email; if(gender) body.gender=gender; if(dob) body.dateOfBirth=dob;
-      if(aid) body.medicalAid={schemeName:aid};
-      var np=await API._fetchDirect('/patients',{method:'POST',body:JSON.stringify(body)});
-      resolvedPid=(np.data&&(np.data._id||np.data.user))||undefined;
-      UI.showToast('New patient profile created','ok');
-    } else if(pid){
-      var patch={phone:phone};
-      if(email) patch.email=email; if(aid) patch.medicalAid={schemeName:aid};
-      await API._fetchDirect('/patients/'+pid,{method:'PATCH',body:JSON.stringify(patch)}).catch(function(){});
-    }
-    var qbody={facilityId:fid,patientName:fname+' '+lname,patientPhone:phone,tokenType:_wiType};
-    if(resolvedPid) qbody.patientId=resolvedPid;
-    if(email) qbody.patientEmail=email;
-    if(priReason) qbody.priorityReason=priReason;
-    if(complaint) qbody.notes=complaint;
-    qbody.language=lang;
-    var res=await API._fetchDirect('/queue2/walkin',{method:'POST',body:JSON.stringify(qbody)});
-    var token=res.data&&res.data.token, pos=res.data&&res.data.position, wait=res.data&&res.data.estimatedWait;
-    _wiClose();
-    var qaT=document.getElementById('qa-token'); if(qaT) qaT.textContent=token;
-    var qrEl=document.getElementById('qa-qr');
-    if(qrEl) qrEl.innerHTML='<div style="text-align:center;padding:8px"><div style="font-size:26px;font-weight:900;font-family:var(--mono);color:var(--green-dark)">'+token+'</div><div style="font-size:10px;color:var(--text-muted)">'+fname+' '+lname+'</div></div>';
-    UI.showToast('Token '+token+' issued - '+fname+' '+lname+' - Position '+pos+' - ~'+wait+' min','ok');
-    if(confirm('Token '+token+' issued to '+fname+' '+lname+'.\nPrint token slip?')) _wiPrintSlip(token,fname+' '+lname,pos,wait,_wiType,lang);
-    if(typeof _recLoad==='function') _recLoad();
-  } catch(err){_wiAlertMsg(err.message||'Registration failed');}
-  finally{if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-login"></i><span id="wi-submit-label">Check in and issue token</span>';}}
-};
-
-function _wiPrintSlip(token,name,pos,wait,tokenType,lang) {
-  tokenType=tokenType||'walkin'; lang=lang||'en';
-  var labels={en:{w:'Est. wait',m:'min'},zu:{w:'Ulindelo',m:'iminithi'},af:{w:'Geskatte',m:'minute'},st:{w:'Nako',m:'metsotso'},xh:{w:'Ulindelo',m:'iimizuzu'},ts:{w:'Nkarhi',m:'minutu'}};
-  var L=labels[lang]||labels.en;
-  var bgMap={emergency:'#E24B4A',priority:'#EF9F27',normal:'#1A4A9B',walkin:'#0F6E56'};
-  var lblMap={emergency:'EMERGENCY',priority:'PRIORITY',normal:'PRE-BOOKED',walkin:'WALK-IN'};
-  var bg=bgMap[tokenType]||'#0F6E56', lbl=lblMap[tokenType]||'WALK-IN';
-  var w=window.open('','_blank');
-  var html='<!DOCTYPE html><html><head><title>Token '+token+'</title>'+
-    '<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial;text-align:center;padding:28px;max-width:280px;margin:0 auto}'+
-    '.tok{font-size:72px;font-weight:900;color:#0F6E56;line-height:1;font-family:monospace;margin:8px 0}'+
-    '.row{display:flex;justify-content:space-around;margin:14px 0}.row div{text-align:center}.row span{font-size:22px;font-weight:700;display:block}'+
-    'hr{border:none;border-top:1px dashed #ccc;margin:14px 0}.note{font-size:11px;color:#aaa;line-height:1.6}</style></head><body>'+
-    '<div style="font-size:18px;font-weight:900;color:#0F6E56;margin-bottom:2px">NIHMS</div>'+
-    '<div style="font-size:10px;color:#aaa;margin-bottom:14px">National Integrated Healthcare Management System</div>'+
-    '<div style="font-size:11px;padding:3px 12px;border-radius:20px;background:'+bg+';color:#fff;display:inline-block;margin-bottom:12px">'+lbl+'</div>'+
-    '<div style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#aaa">Your queue token</div>'+
-    '<div class="tok">'+token+'</div>'+
-    '<div style="font-size:13px;color:#555;margin-bottom:8px">'+name+'</div>'+
-    '<div class="row"><div><span>'+(pos||'-')+'</span>Position</div>'+
-    '<div><span>'+(wait!=null?wait:'-')+'</span>'+L.w+' ('+L.m+')</div></div>'+
-    '<hr><div class="note">Please remain in the waiting area<br>'+new Date().toLocaleString('en-ZA')+'</div></body></html>';
-  w.document.write(html); w.document.close(); setTimeout(function(){w.print();},400);
-}
-
-window._wiClose = function() {
-  document.getElementById('rec-wi-modal').style.display='none';
-  ['wi-idnum','wi-fname','wi-lname','wi-phone','wi-email','wi-complaint','wi-aid','wi-dob'].forEach(function(id){
-    var e=document.getElementById(id); if(!e) return; e.value=''; e.removeAttribute('readonly'); e.style.background=''; e.style.color='';
-  });
-  var g=document.getElementById('wi-gender'); if(g){g.value='';g.disabled=false;g.style.opacity='';}
-  ['wi-patient-id','wi-is-new'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});
-  var f=document.getElementById('wi-form'); if(f) f.style.display='none';
-  var sb=document.getElementById('wi-submit-btn'); if(sb) sb.style.display='none';
-  var eb=document.getElementById('wi-exists-banner'); if(eb) eb.style.display='none';
-  var sr=document.getElementById('wi-search-result'); if(sr) sr.innerHTML='';
-  var al=document.getElementById('wi-alert'); if(al) al.classList.add('hidden');
-  _wiType='walkin';
-  document.querySelectorAll('#wi-type-btns button').forEach(function(b,i){
-    b.style.borderColor=i===0?'var(--green)':'var(--border)';
-    b.style.background=i===0?'var(--green-light)':'transparent';
-    b.style.color=i===0?'var(--green-dark)':'#888';
-  });
-};
-
-function _wiAlertMsg(msg){
-  var el=document.getElementById('wi-alert'); if(!el) return;
-  el.className='alert alert-error'; el.innerHTML='<i class="ti ti-alert-circle"></i> '+msg; el.classList.remove('hidden');
-}
-
-window._recShowWI    = function() { document.getElementById('rec-wi-modal').style.display='flex'; };
-window._recWalkIn    = function() { document.getElementById('rec-wi-modal').style.display='flex'; };
-window._recEmergency = function() {
-  _wiType='emergency';
-  document.getElementById('rec-wi-modal').style.display='flex';
-  setTimeout(function(){
-    document.querySelectorAll('#wi-type-btns button').forEach(function(b,i){
-      b.style.borderColor=i===2?'var(--green)':'var(--border)';
-      b.style.background=i===2?'var(--green-light)':'transparent';
-      b.style.color=i===2?'var(--green-dark)':'#888';
+/* Slot selection — updates state + re-highlights without full re-render */
+/* Bind slot grid clicks via event delegation after render */
+function _bindSlotGrid() {
+  var grid = document.getElementById('ci-slot-grid');
+  if (!grid || grid._bound) return;
+  grid._bound = true;
+  grid.addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-slot]');
+    if (!btn) return;
+    var t = btn.getAttribute('data-slot');
+    _R.ci.selectedSlot = t;
+    /* Update styles on all slot buttons */
+    grid.querySelectorAll('[data-slot]').forEach(function(b) {
+      var sel = b.getAttribute('data-slot') === t;
+      b.style.border     = '1.5px solid ' + (sel ? '#0d9488' : '#e2e8f0');
+      b.style.background = sel ? '#f0fdfa' : '#fff';
+      b.style.color      = sel ? '#0d9488' : '#0f172a';
+      b.style.fontWeight = sel ? '700' : '500';
     });
-  },60);
-};
-
-/* ── Load live data ── */
-async function _recLoad() {
-  const u   = API.getStoredUser();
-  const fid = u?.facilityId || u?.facility;
-
-  // Facility name
-  const fnEl = document.getElementById('rec-facility');
-  if (fnEl) fnEl.textContent = u?.facilityName || 'Your Facility';
-
-  if (!fid) return;
-
-  try {
-    const res = await API._fetchDirect(`/queue2?facility=${fid}&date=${new Date().toISOString().slice(0,10)}`, {method:'GET'});
-    const all = res.data||[], stats = res.stats||{};
-
-    // Queue counters
-    const _t = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
-    _t('qc-w',   all.filter(e=>['walkin','priority'].includes(e.tokenType)).length);
-    _t('qc-pb',  all.filter(e=>e.tokenType==='normal').length);
-    _t('qc-em',  all.filter(e=>e.tokenType==='emergency').length);
-
-    // Status overview
-    _t('st-queue', all.filter(e=>e.status==='waiting').length);
-    _t('st-wait',  (stats.avgWaitMins||0)+' Min');
-    _t('st-in',    all.length);
-    _t('st-pend',  all.filter(e=>e.status==='waiting').length);
-
-    // Feedback
-    const sat = all.filter(e=>e.satisfaction);
-    const avgS = sat.length ? (sat.reduce((s,e)=>s+e.satisfaction,0)/sat.length).toFixed(1) : null;
-    _t('rec-fb-count',  sat.length);
-    _t('rec-fb-count2', sat.length);
-    const fbEl = document.getElementById('rec-fb-stars');
-    if (fbEl) fbEl.innerHTML = avgS
-      ? `<div style="display:flex;align-items:center;gap:6px"><span style="font-size:18px">⭐</span><strong>${avgS}</strong><span style="color:var(--text-muted)">/ 5.0 avg rating</span></div>`
-      : '<div style="color:var(--text-muted)">No ratings yet today</div>';
-
-    // Load today's appointments for quick access
-    try {
-      const apptRes = await API.appointments.list({ limit:5 });
-      const todayStr = new Date().toDateString();
-      const todayA   = (apptRes.data||[]).filter(a=>new Date(a.scheduledAt).toDateString()===todayStr&&a.status==='confirmed').slice(0,3);
-      const apptEl   = document.getElementById('rec-today-appts');
-      if (apptEl) {
-        apptEl.innerHTML = todayA.map(a=>`
-          <div onclick="_recSelectAppt('${a._id}','${a.patient?.firstName||''} ${a.patient?.lastName||''}')"
-            style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:5px;cursor:pointer;font-size:13px"
-            onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background=''">
-            <i class="ti ti-chevron-right" style="font-size:11px;color:var(--text-muted)"></i>
-            <span style="flex:1;font-weight:500">${a.patient?.firstName||'—'} ${a.patient?.lastName||''}</span>
-            <span style="color:var(--text-muted);font-size:11px">${new Date(a.scheduledAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
-          </div>`).join('');
-      }
-    } catch(_){}
-
-  } catch(e){ console.warn('Rec load error:', e.message); }
-}
-
-/* ── Search patients ── */
-window._recSearch = async (val) => {
-  if (!val||val.length<2) { document.getElementById('rec-search-results').innerHTML=''; return; }
-  try {
-    const res = await API._fetchDirect(`/patients?search=${encodeURIComponent(val)}&limit=4`,{method:'GET'});
-    const el  = document.getElementById('rec-search-results');
-    if (!el) return;
-    el.innerHTML = (res.data||[]).map(p=>`
-      <div onclick="_recSelectPatient('${p._id}','${p.firstName} ${p.lastName}')"
-        style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--bg-surface);border-radius:8px;margin-bottom:4px;cursor:pointer;border:1px solid transparent"
-        onmouseover="this.style.borderColor='var(--green)'" onmouseout="this.style.borderColor='transparent'">
-        <div style="width:28px;height:28px;border-radius:50%;background:var(--green-light);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--green-dark);flex-shrink:0">
-          ${(p.firstName||'?')[0]}${(p.lastName||'?')[0]}
-        </div>
-        <div>
-          <div style="font-weight:600;font-size:13px">${p.firstName} ${p.lastName}</div>
-          <div style="font-size:11px;color:var(--text-muted)">ID: ${p.nationalId||'—'} · ${p.phone||'—'}</div>
-        </div>
-      </div>`).join('')||'<div style="font-size:12px;color:var(--text-muted);padding:6px">No results</div>';
-  } catch(_){}
-};
-
-window._recSelectPatient = (id, name) => {
-  _recSelectedPatient = { id, name };
-  document.getElementById('rec-search-results').innerHTML='';
-  document.getElementById('rec-search').value = name;
-  document.getElementById('qa-patient').value  = name;
-  // AI suggestion
-  const ai = document.getElementById('qa-ai');
-  if (ai) ai.innerHTML = `<i class="ti ti-brain" style="color:#4A6CF7"></i> AI Suggestion: Route <strong>${name}</strong> to General Queue`;
-};
-
-window._recSelectAppt = (apptId, name) => {
-  document.getElementById('qa-patient').value = name;
-  document.getElementById('qa-token').textContent = 'A-??';
-  const ai = document.getElementById('qa-ai');
-  if (ai) ai.innerHTML = `<i class="ti ti-brain" style="color:#4A6CF7"></i> AI Suggestion: Pre-booked — issue priority A-token for <strong>${name}</strong>`;
-};
-
-/* ── Walk-in modal ── */
-window._recShowWI    = () => { document.getElementById('rec-wi-modal').style.display='flex'; };
-window._recWalkIn    = () => { _recSetWI2Type('walkin',null); document.getElementById('rec-wi-modal').style.display='flex'; };
-window._recEmergency = () => { _recSetWI2Type('emergency',null); document.getElementById('rec-wi-modal').style.display='flex'; };
-
-window._recSetWI2Type = (t, btn) => {
-  _recWI2Type = t;
-  document.querySelectorAll('#wi2-type-btns button').forEach(b=>{b.style.borderColor='var(--border)';b.style.background='transparent';b.style.color='#888';});
-  if (btn) { btn.style.borderColor='var(--green)';btn.style.background='var(--green-light)';btn.style.color='var(--green-dark)'; }
-  else {
-    const btns=document.querySelectorAll('#wi2-type-btns button');
-    const idx={'walkin':0,'priority':1,'emergency':2}[t]??0;
-    if(btns[idx]){btns[idx].style.borderColor='var(--green)';btns[idx].style.background='var(--green-light)';btns[idx].style.color='var(--green-dark)';}
-  }
-};
-
-window._recSubmitWI = async () => {
-  const btn  = document.getElementById('wi2-btn');
-  const fid  = API.getStoredUser()?.facilityId||API.getStoredUser()?.facility;
-  const name = document.getElementById('wi2-name')?.value?.trim();
-  if (!name) { _recAlert2('wi2-alert','Patient name required'); return; }
-  if (btn) { btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div>'; }
-  try {
-    const res = await API._fetchDirect('/queue2/walkin',{method:'POST',body:JSON.stringify({
-      facilityId:fid, patientName:name,
-      patientPhone:document.getElementById('wi2-phone')?.value?.trim()||'',
-      tokenType:_recWI2Type, language:'en'
-    })});
-    document.getElementById('rec-wi-modal').style.display='none';
-    document.getElementById('qa-token').textContent = res.data?.token||'—';
-    // Show QR
-    const qrEl = document.getElementById('qa-qr');
-    if (qrEl) qrEl.innerHTML=`<div style="text-align:center;padding:8px"><div style="font-size:28px;font-weight:900;font-family:var(--mono);color:var(--green-dark)">${res.data?.token}</div><div style="font-size:10px;color:var(--text-muted)">Token issued</div></div>`;
-    UI.showToast(`Token ${res.data?.token} issued to ${name}`,'ok');
-    document.getElementById('wi2-name').value=''; document.getElementById('wi2-phone').value='';
-    _recLoad();
-  } catch(e){ _recAlert2('wi2-alert',e.message); }
-  finally { if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-login"></i>Check in & issue token';} }
-};
-
-/* ── Queue assign ── */
-window._recAssign = async () => {
-  const name = document.getElementById('qa-patient')?.value?.trim();
-  const fid  = API.getStoredUser()?.facilityId||API.getStoredUser()?.facility;
-  if (!name) { UI.showToast('Enter a patient name or token','err'); return; }
-  try {
-    const res = await API._fetchDirect('/queue2/walkin',{method:'POST',body:JSON.stringify({facilityId:fid,patientName:name,tokenType:'walkin'})});
-    document.getElementById('qa-token').textContent = res.data?.token;
-    const qrEl=document.getElementById('qa-qr');
-    if(qrEl) qrEl.innerHTML=`<div style="text-align:center;padding:6px"><div style="font-size:24px;font-weight:900;font-family:var(--mono);color:var(--green-dark)">${res.data?.token}</div><div style="font-size:10px;color:var(--text-muted)">Issued</div></div>`;
-    UI.showToast('Token issued: '+res.data?.token,'ok');
-    _recLoad();
-  } catch(e){ UI.showToast(e.message,'err'); }
-};
-
-window._recVerifyToken = async () => {
-  const ref=document.getElementById('qa-patient')?.value?.trim(); if(!ref) return;
-  const fid=API.getStoredUser()?.facilityId||API.getStoredUser()?.facility;
-  try {
-    const r=await API._fetchDirect(`/queue2?facility=${fid}&date=${new Date().toISOString().slice(0,10)}`,{method:'GET'});
-    const e=(r.data||[]).find(e=>e.token.toUpperCase()===ref.toUpperCase()||e.patientName?.toLowerCase()===ref.toLowerCase());
-    if (e) { document.getElementById('qa-token').textContent=e.token; UI.showToast(`${e.token} — ${e.patientName} · ${e.status}`,'ok'); }
-    else     UI.showToast('Not found in today\'s queue','err');
-  } catch(e){ UI.showToast(e.message,'err'); }
-};
-
-/* ── Communication Hub — Send Alert (also shows on patient overview) ── */
-window._recSendAlert = async () => {
-  const msg  = document.getElementById('rec-announcement')?.value?.trim();
-  const type = document.getElementById('rec-alert-type')?.value||'general';
-  const fid  = API.getStoredUser()?.facilityId||API.getStoredUser()?.facility;
-  if (!msg) { UI.showToast('Type a message first','err'); return; }
-
-  // Save to localStorage so patient overview can read it
-  const alert = { id:Date.now(), type, msg, time:new Date().toISOString(), facilityId:fid };
-  const existing = JSON.parse(localStorage.getItem('nihms_facility_alerts')||'[]');
-  existing.unshift(alert);
-  // Keep only last 10 per facility
-  const filtered = existing.filter(a=>a.facilityId===fid).slice(0,10);
-  const others   = existing.filter(a=>a.facilityId!==fid);
-  localStorage.setItem('nihms_facility_alerts', JSON.stringify([...filtered,...others]));
-
-  // Also send via delay-notify API if it's a delay message
-  if (type==='delay') {
-    try {
-      const mins = parseInt(msg.match(/\d+/)?.[0])||15;
-      await API._fetchDirect('/queue2/delay-notify',{method:'POST',body:JSON.stringify({facilityId:fid,delayMinutes:mins,reason:msg})});
-      UI.showToast('Delay notification sent to all waiting patients','ok');
-    } catch(e){ UI.showToast('Alert saved locally (queue notify failed: '+e.message+')','warn'); }
-  } else {
-    UI.showToast('Alert broadcast to facility','ok');
-  }
-
-  // Update log
-  _recAlertLog.unshift({ type, msg, time:new Date() });
-  _recUpdateAlertLog();
-  document.getElementById('rec-announcement').value='';
-};
-
-function _recUpdateAlertLog() {
-  const el = document.getElementById('rec-alerts-log');
-  if (!el) return;
-  const icons = { general:'ti-speakerphone', delay:'ti-clock', emergency:'ti-urgent', maintenance:'ti-tool' };
-  const colors = { general:'var(--text-muted)', delay:'var(--amber)', emergency:'var(--red)', maintenance:'#888' };
-  el.innerHTML = _recAlertLog.slice(0,4).map(a=>`
-    <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-      <i class="ti ${icons[a.type]||'ti-speakerphone'}" style="font-size:13px;color:${colors[a.type]||'#888'};flex-shrink:0;margin-top:1px"></i>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.msg}</div>
-        <div style="font-size:10px;color:var(--text-hint)">${a.time.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
-      </div>
-    </div>`).join('')||'<div style="color:var(--text-muted)">No alerts yet</div>';
-}
-
-/* ── Bookings tab ── */
-let _recBoTab_active = 'today';
-window._recBoTab = (t) => {
-  _recBoTab_active = t;
-  ['today','month','year'].forEach(tab=>{
-    const btn=document.getElementById('bo-'+tab); if(!btn) return;
-    btn.style.borderColor=tab===t?'var(--green)':'var(--border)';
-    btn.style.background=tab===t?'var(--green-light)':'transparent';
-    btn.style.color=tab===t?'var(--green-dark)':'#888';
+    /* Hide validation error */
+    var errEl = document.querySelector('#ci-slot-error');
+    if (errEl) errEl.style.display = 'none';
   });
-};
-
-/* ── Direction & feedback ── */
-window._recDirect = (dest) => {
-  const labels={waiting:'Waiting area',kiosk:'Self-service kiosk'};
-  UI.showToast(`Patient directed to ${labels[dest]||dest}`,'ok');
-};
-window._recViewFeedback = () => {
-  Router.setPage('queue_dashboard');
-  setTimeout(()=>window._qdShowAnalytics&&_qdShowAnalytics(),300);
-};
-
-/* ── Helpers ── */
-function _recAlert2(id, msg) {
-  const el=document.getElementById(id); if(!el) return;
-  el.className='alert alert-error'; el.innerHTML=`<i class="ti ti-alert-circle"></i> ${msg}`; el.classList.remove('hidden');
 }
+/* Keep _ciSelectSlot for compatibility */
+window._ciSelectSlot = function(t) {
+  _R.ci.selectedSlot = t;
+  _rRec();
+};
+
+/* Date change — save date + re-render slot grid only */
+window._ciDateChange = function(dateStr) {
+  _R.ci.selectedDate  = dateStr;
+  _R.ci.selectedSlot  = null; /* Reset slot when date changes */
+  _rRec();
+};
+
+/* Side panel helper for checkin */
+function _ciSidePanel() {
+  var recentQ = _R.queue.slice(-4).reverse();
+  return '<div style="display:flex;flex-direction:column;gap:14px">' +
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
+      '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Dept. Queue Status</div>' +
+      DEPARTMENTS.slice(0,8).map(function(d) {
+        var qd = _R.queue.filter(function(q){return q.department===d.name&&q.status!=='done';}).length;
+        return '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #f8fafc">' +
+          '<span style="width:7px;height:7px;border-radius:50%;background:' + d.color + ';flex-shrink:0"></span>' +
+          '<span style="flex:1;font-size:12px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + d.name + '</span>' +
+          '<span style="font-size:12px;font-weight:700;color:' + (qd > 4 ? '#ef4444' : '#0d9488') + ';margin-right:4px">' + qd + '</span>' +
+          '<span style="font-size:11px;color:#cbd5e1">~' + d.avgWait + 'm</span>' +
+        '</div>';
+      }).join('') +
+    '</div>' +
+    (recentQ.length ? '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
+      '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Recent Check-ins</div>' +
+      recentQ.map(function(p) {
+        return '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #f8fafc">' +
+          '<span style="font-family:monospace;font-size:12px;font-weight:700;color:#0d9488;min-width:52px">' + p.token + '</span>' +
+          '<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + p.name + '</div>' +
+          '<div style="font-size:10px;color:#94a3b8">' + p.department + '</div></div>' +
+        '</div>';
+      }).join('') +
+    '</div>' : '') +
+  '</div>';
+}
+
+/* Form input/select helpers for checkin */
+function _frmInp(id, label, placeholder, type, value) {
+  return '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">' + label + '</label>' +
+    '<input id="' + id + '" type="' + (type || 'text') + '" placeholder="' + (placeholder || '') + '" value="' + (value || '') + '" ' +
+    'style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#0f172a" ' +
+    'onfocus="this.style.borderColor=\"#0d9488\"" onblur="this.style.borderColor=\"#e2e8f0\""></div>';
+}
+function _frmSel(id, label, opts, val) {
+  return '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">' + label + '</label>' +
+    '<select id="' + id + '" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;background:#fff;color:#0f172a">' +
+    opts.map(function(o){ return '<option value="' + (o.v||o) + '"' + ((o.v||o)===(val||'')?'selected':'') + '>' + (o.label||o) + '</option>'; }).join('') +
+    '</select></div>';
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TAB 3 — BOOK APPOINTMENT
+═══════════════════════════════════════════════════════════════════════ */
+function _rBook() {
+  var bk = _R.bk;
+  if (!bk) { _R.bk = { step:'search', id:'', patient:null, slot:null, slotIdx:null, result:null, notFound:false, selectedSlot:null, selectedDate:'', dept:'General Consultation' }; bk = _R.bk; }
+
+  var back = '<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
+
+  /* ══ SUCCESS ══ */
+  if (bk.step === 'done' && bk.result) {
+    var r = bk.result;
+    return '<div style="padding:28px 32px">' + back +
+      '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
+        '<div style="background:#fff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden">' +
+          '<div style="background:linear-gradient(135deg,#3b82f6,#2563eb);padding:28px;text-align:center">' +
+            '<div style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;margin:0 auto 12px">' +
+              '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
+            '</div>' +
+            '<div style="font-size:20px;font-weight:800;color:#fff;margin-bottom:4px">Appointment Confirmed</div>' +
+            '<div style="font-size:14px;color:rgba(255,255,255,.8)">' + r.name + '</div>' +
+          '</div>' +
+          '<div style="padding:24px">' +
+            '<div style="background:#f8fafc;border-radius:12px;padding:16px;margin-bottom:16px">' +
+              '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">' +
+                '<div><div style="font-size:10px;color:#94a3b8;margin-bottom:2px">REFERENCE</div><div style="font-weight:700;color:#3b82f6">' + r.ref + '</div></div>' +
+                '<div><div style="font-size:10px;color:#94a3b8;margin-bottom:2px">DEPARTMENT</div><div style="font-weight:700">' + r.dept + '</div></div>' +
+                '<div><div style="font-size:10px;color:#94a3b8;margin-bottom:2px">DATE</div><div style="font-weight:700">' + r.date + '</div></div>' +
+                '<div><div style="font-size:10px;color:#94a3b8;margin-bottom:2px">TIME</div><div style="font-weight:700">' + r.time + '</div></div>' +
+              '</div>' +
+            '</div>' +
+            '<div style="padding:12px 14px;background:#eff6ff;border-radius:10px;font-size:13px;color:#1d4ed8;margin-bottom:20px">' +
+              '📅 Confirmation sent to patient via SMS' + (r.email ? ' & email' : '') + '.' +
+            '</div>' +
+            '<div style="display:flex;gap:10px">' +
+              '<button onclick="_R.bk={step:\'search\',id:\'\',patient:null,slot:null,slotIdx:null,result:null,notFound:false,selectedSlot:null,selectedDate:\'\',dept:\'General Consultation\'};_rRec()" style="flex:1;padding:13px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Book another appointment</button>' +
+              '<button onclick="_rTab(\'appointments\')" style="padding:13px 20px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">View calendar</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        _bkSidePanel() +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ══ STEP 1: SEARCH ══ */
+  if (bk.step === 'search') {
+    return '<div style="padding:28px 32px">' + back +
+      '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
+        '<div>' +
+          '<div style="margin-bottom:24px">' +
+            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Book Appointment</div>' +
+            '<div style="font-size:15px;color:#64748b">Search by SA ID or passport to find the patient profile.</div>' +
+          '</div>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+            '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:10px">SA ID / PASSPORT NUMBER *</div>' +
+            '<div style="display:flex;gap:10px">' +
+              '<input id="bk-id" type="text" value="' + (bk.id||'') + '" placeholder="e.g. 8203041234083" ' +
+              'style="flex:1;padding:12px 16px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;font-family:inherit;outline:none;color:#0f172a" ' +
+              'onfocus="this.style.borderColor=\"#3b82f6\"" onblur="this.style.borderColor=\"#e2e8f0\"">' +
+              '<button onclick="_rBookSearch()" style="display:flex;align-items:center;gap:8px;padding:12px 24px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">' +
+                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Search' +
+              '</button>' +
+            '</div>' +
+            (bk.notFound
+              ? '<div style="padding:14px 16px;background:#fef2f2;border-radius:10px;border:1px solid #fecaca;margin-top:14px">' +
+                  '<div style="font-size:14px;font-weight:700;color:#dc2626;margin-bottom:4px">Patient not found</div>' +
+                  '<div style="font-size:13px;color:#ef4444">No profile exists for ID <strong>' + bk.id + '</strong> in NIHMS.</div>' +
+                  '<div style="font-size:13px;color:#ef4444">Register the patient first.</div>' +
+                '</div>' +
+                '<button onclick="_R.bk.step=\'register\';_rRec()" style="margin-top:10px;width:100%;padding:14px;border-radius:10px;border:2px dashed #3b82f6;background:transparent;color:#3b82f6;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
+                  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
+                  'Register new patient →' +
+                '</button>'
+              : '') +
+          '</div>' +
+        '</div>' +
+        _bkSidePanel() +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ══ STEP 2: REGISTER ══ */
+  if (bk.step === 'register') {
+    return '<div style="padding:28px 32px">' + back +
+      '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
+        '<div>' +
+          '<div style="margin-bottom:24px">' +
+            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Patient Registration</div>' +
+            '<div style="font-size:15px;color:#64748b">Complete the patient profile then proceed to book the appointment.</div>' +
+          '</div>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#3b82f6">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
+              '<span style="font-size:13px;font-weight:700">Register new patient</span>' +
+            '</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
+              _frmInp('bk-reg-fn','FIRST NAME *','Nomsa') +
+              _frmInp('bk-reg-ln','LAST NAME *','Dlamini') +
+              _frmInp('bk-reg-id','SA ID / PASSPORT *','', 'text', bk.id||'') +
+              _frmInp('bk-reg-dob','DATE OF BIRTH','','date') +
+              _frmSel('bk-reg-gen','GENDER',[{v:'',label:'— Select —'},{v:'Female',label:'Female'},{v:'Male',label:'Male'},{v:'Other',label:'Other'}]) +
+              _frmSel('bk-reg-blood','BLOOD TYPE',[{v:'',label:'— Unknown —'},{v:'A+',label:'A+'},{v:'A-',label:'A-'},{v:'B+',label:'B+'},{v:'B-',label:'B-'},{v:'AB+',label:'AB+'},{v:'AB-',label:'AB-'},{v:'O+',label:'O+'},{v:'O-',label:'O-'}]) +
+              _frmInp('bk-reg-ph','PHONE NUMBER *','+27820000000','tel') +
+              _frmInp('bk-reg-em','EMAIL','patient@email.com','email') +
+            '</div>' +
+            '<div style="margin-top:14px">' + _frmInp('bk-reg-addr','ADDRESS','Street address, suburb, city') + '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:10px;margin-top:14px">' +
+            '<button onclick="_rBookRegisterNew()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>Register' +
+            '</button>' +
+            '<button onclick="_R.bk.step=\'search\';_rRec()" style="padding:14px 24px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Back</button>' +
+          '</div>' +
+        '</div>' +
+        _bkSidePanel() +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ══ STEP 3: BOOK SLOT ══ */
+  if (bk.step === 'slot' && bk.patient) {
+    var pt = bk.patient;
+    var initials = (((pt.firstName||'?')[0])+((pt.lastName||'?')[0])).toUpperCase();
+    var selSlot = bk.selectedSlot || null;
+    var selDate = bk.selectedDate || '';
+
+    var ALL_SLOTS_WEEKDAY = ['07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
+                             '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
+                             '15:00','15:30','16:00','16:30'];
+    var ALL_SLOTS_SAT = ['07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00','12:30','13:00'];
+
+    function getBkSlots(dateStr) {
+      if (!dateStr) return [];
+      var d = new Date(dateStr + 'T00:00:00');
+      var day = d.getDay();
+      if (day === 0) return [];
+      /* For future dates, show all slots. For today, filter past */
+      var todayStr = new Date().toISOString().slice(0,10);
+      var slots = day === 6 ? ALL_SLOTS_SAT : ALL_SLOTS_WEEKDAY;
+      if (dateStr === todayStr) {
+        var cut = new Date().getHours()*60 + new Date().getMinutes() + 30;
+        slots = slots.filter(function(t){var p=t.split(':');return +p[0]*60+ +p[1]>=cut;});
+      }
+      return slots;
+    }
+
+    var todayIso = new Date().toISOString().slice(0,10);
+    var isSun = selDate && new Date(selDate+'T00:00:00').getDay()===0;
+    var availSlots = getBkSlots(selDate);
+    var isSat = selDate && new Date(selDate+'T00:00:00').getDay()===6;
+    var hintText = selDate ? (isSat?'Saturday · 07:00–13:00':isSun?'Closed':'Weekday · 07:00–17:00') : 'Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Sun closed';
+
+    var slotGrid = !selDate
+      ? '<div style="padding:14px;background:#f8fafc;border-radius:8px;text-align:center;color:#94a3b8;font-size:13px">Select a date to see available slots</div>'
+      : isSun
+        ? '<div style="padding:14px;background:#fef2f2;border-radius:8px;text-align:center;color:#dc2626;font-size:13px;font-weight:600">⛔ Clinic closed on Sundays</div>'
+        : availSlots.length === 0
+          ? '<div style="padding:14px;background:#fef2f2;border-radius:8px;text-align:center;color:#dc2626;font-size:13px">No slots available — all have passed for today.</div>'
+          : '<div id="bk-slot-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">' +
+              availSlots.map(function(t){
+                var isSel = selSlot===t;
+                return '<button data-bkslot="'+t+'" style="padding:12px 8px;border-radius:8px;border:1.5px solid '+(isSel?'#3b82f6':'#e2e8f0')+';background:'+(isSel?'#eff6ff':'#fff')+';color:'+(isSel?'#3b82f6':'#0f172a')+';font-size:14px;font-weight:'+(isSel?'700':'500')+';cursor:pointer;font-family:inherit">'+t+'</button>';
+              }).join('')+
+            '</div>';
+
+    return '<div style="padding:28px 32px">' + back +
+      '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
+        '<div>' +
+          '<div style="margin-bottom:24px">' +
+            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Book & Schedule</div>' +
+            '<div style="font-size:15px;color:#64748b">Select a department, date and slot for <strong>'+(pt.firstName||'')+' '+(pt.lastName||'')+'</strong>.</div>' +
+          '</div>' +
+
+          /* Patient pill */
+          '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:#eff6ff;border-radius:12px;border:1px solid #bfdbfe;margin-bottom:16px">' +
+            '<div style="width:38px;height:38px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">'+initials+'</div>' +
+            '<div style="flex:1"><div style="font-weight:700;font-size:14px;color:#0f172a">'+(pt.firstName||'')+' '+(pt.lastName||'')+'</div><div style="font-size:12px;color:#64748b">'+(pt.phone||pt.id||'')+'</div></div>' +
+            '<button onclick="_R.bk.step=\'search\';_R.bk.patient=null;_rRec()" style="font-size:13px;color:#3b82f6;border:none;background:transparent;cursor:pointer;font-family:inherit;text-decoration:underline">Change</button>' +
+          '</div>' +
+
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+            /* Date + visit type (dept merged in) */
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">' +
+              '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">DATE *</label>' +
+                '<input id="bk-slot-date" type="date" min="'+todayIso+'" value="'+selDate+'" onchange="_bkDateChange(this.value)" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#0f172a"></div>' +
+              _frmSel('bk-visit-type','VISIT TYPE / DEPARTMENT', DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};}), bk.dept||'General Consultation') +
+            '</div>' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
+              '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569">AVAILABLE TIME SLOTS *</div>' +
+              '<div style="font-size:11px;color:#94a3b8">'+hintText+'</div>' +
+            '</div>' +
+            slotGrid +
+            (!selSlot && selDate && !isSun && availSlots.length>0
+              ? '<div id="bk-slot-error" style="font-size:12px;color:#ef4444;margin-top:8px">Please select a time slot</div>'
+              : '') +
+          '</div>' +
+        '</div>' +
+        _bkSidePanel() +
+      '</div>' +
+      '<div style="padding:16px 0 0;margin-top:20px">' +
+        '<button onclick="_rBookConfirm()" style="width:100%;padding:16px;border-radius:12px;border:none;background:#3b82f6;color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:10px">' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
+          'Confirm Appointment' +
+        '</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* fallback */
+  _R.bk = { step:'search', id:'', patient:null, slot:null, slotIdx:null, result:null, notFound:false, selectedSlot:null, selectedDate:'', dept:'General Consultation' };
+  return _rBook();
+}
+
+/* Book side panel — upcoming appointments */
+function _bkSidePanel() {
+  var today = new Date().toISOString().slice(0,10);
+  var upcoming = _R.appointments
+    .filter(function(a){ return a.status!=='cancelled' && (a.date||'').slice(0,10) >= today; })
+    .sort(function(a,b){ return ((a.date||'').slice(0,10)+a.time) > ((b.date||'').slice(0,10)+b.time) ? 1 : -1; })
+    .slice(0,6);
+  return '<div style="display:flex;flex-direction:column;gap:14px">' +
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
+      '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Upcoming Appointments</div>' +
+      (upcoming.length
+        ? upcoming.map(function(a){
+            return '<div style="padding:9px 14px;border-bottom:1px solid #f8fafc">' +
+              '<div style="display:flex;align-items:center;justify-content:space-between">' +
+                '<div style="font-size:12px;font-weight:600;color:#0f172a">'+(a.name||'Patient')+'</div>' +
+                '<div style="font-family:monospace;font-size:11px;color:#3b82f6">'+a.ref+'</div>' +
+              '</div>' +
+              '<div style="font-size:11px;color:#94a3b8;margin-top:2px">'+a.dept+' · '+(a.date||'')+(a.time?' @ '+a.time:'')+'</div>' +
+            '</div>';
+          }).join('')
+        : '<div style="padding:16px;text-align:center;font-size:13px;color:#94a3b8">No upcoming appointments</div>') +
+    '</div>' +
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:16px">' +
+      '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:10px">Dept. availability</div>' +
+      DEPARTMENTS.slice(0,6).map(function(d){
+        var booked = _R.appointments.filter(function(a){return a.dept===d.name&&(a.date||'').slice(0,10)===today&&a.status!=='cancelled';}).length;
+        var pct    = Math.min(Math.round(booked/10*100),100);
+        return '<div style="margin-bottom:8px">' +
+          '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">' +
+            '<span style="color:#475569">'+d.name+'</span><span style="color:#94a3b8">'+booked+' booked</span>' +
+          '</div>' +
+          '<div style="height:4px;background:#f1f5f9;border-radius:2px"><div style="height:4px;background:'+d.color+';border-radius:2px;width:'+pct+'%"></div></div>' +
+        '</div>';
+      }).join('') +
+    '</div>' +
+  '</div>';
+}
+
+/* Book page event helpers */
+window._bkDateChange = function(dateStr) {
+  _R.bk.selectedDate  = dateStr;
+  _R.bk.selectedSlot  = null;
+  _rRec();
+};
+
+function _bindBkGrids() {
+  /* Slot grid */
+  var slotGrid = document.getElementById('bk-slot-grid');
+  if (slotGrid && !slotGrid._bound) {
+    slotGrid._bound = true;
+    slotGrid.addEventListener('click', function(e){
+      var btn = e.target.closest('[data-bkslot]');
+      if (!btn) return;
+      var t = btn.getAttribute('data-bkslot');
+      _R.bk.selectedSlot = t;
+      slotGrid.querySelectorAll('[data-bkslot]').forEach(function(b){
+        var s = b.getAttribute('data-bkslot')===t;
+        b.style.border='1.5px solid '+(s?'#3b82f6':'#e2e8f0');
+        b.style.background=s?'#eff6ff':'#fff';
+        b.style.color=s?'#3b82f6':'#0f172a';
+        b.style.fontWeight=s?'700':'500';
+      });
+      var errEl=document.getElementById('bk-slot-error');
+      if(errEl) errEl.style.display='none';
+    });
+  }
+  /* Dept is now in the visit type dropdown — no grid binding needed */
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TAB 4 — QUEUE MANAGEMENT
+═══════════════════════════════════════════════════════════════════════ */
+function _rQueue() {
+  var q=_R.queue;
+  var deptF=_R.qDept, statusF=_R.qStatus;
+  var filtered=q.filter(function(p){
+    var dOk=deptF==='all'||p.department===deptF;
+    var sOk=statusF==='all'||p.status===statusF;
+    return dOk&&sOk;
+  });
+
+  var counts={ waiting:q.filter(function(p){return p.status==='waiting';}).length, 'at-nurse':q.filter(function(p){return p.status==='at-nurse';}).length, 'with-doctor':q.filter(function(p){return p.status==='with-doctor';}).length, done:q.filter(function(p){return p.status==='done';}).length };
+
+  var statPills='<div style="display:flex;gap:10px;margin-bottom:14px">'+
+    [['waiting','Waiting','#d97706'],['at-nurse','At Nurse','#7c3aed'],['with-doctor','With Doctor','#0d9488'],['done','Done','#16a34a']].map(function(s){
+      return '<div style="padding:10px 16px;background:#fff;border-radius:10px;border:1px solid #e2e8f0;text-align:center;flex:1">'+
+        '<div style="font-size:22px;font-weight:800;color:'+s[2]+'">'+counts[s[0]]+'</div>'+
+        '<div style="font-size:11px;color:#94a3b8">'+s[1]+'</div>'+
+      '</div>';
+    }).join('')+
+  '</div>';
+
+  var toolbar='<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:14px">'+
+    '<select onchange="_R.qDept=this.value;_rRec()" style="padding:7px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
+      '<option value="all">All Departments</option>'+
+      DEPARTMENTS.map(function(d){return '<option value="'+d.name+'"'+(deptF===d.name?' selected':'')+'>'+d.name+'</option>';}).join('')+
+    '</select>'+
+    '<select onchange="_R.qStatus=this.value;_rRec()" style="padding:7px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
+      [['all','All Status'],['waiting','Waiting'],['at-nurse','At Nurse'],['with-doctor','With Doctor'],['done','Done']].map(function(o){
+        return '<option value="'+o[0]+'"'+(statusF===o[0]?' selected':'')+'>'+o[1]+'</option>';
+      }).join('')+
+    '</select>'+
+    '<button onclick="_rQueueDelayModal()" style="display:flex;align-items:center;gap:5px;padding:7px 14px;border-radius:8px;border:1.5px solid #fcd34d;background:#fffbeb;color:#b45309;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">'+_svgIcon('clock')+' Notify Delay</button>'+
+    '<button onclick="_rTab(\'emergency\')" style="display:flex;align-items:center;gap:5px;padding:7px 14px;border-radius:8px;border:1.5px solid #fca5a5;background:#fef2f2;color:#dc2626;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">'+_svgIcon('alert')+' Emergency Override</button>'+
+  '</div>';
+
+  var deptCards='';
+
+  var rows=filtered.length
+    ?filtered.map(function(p,i){
+        var pc=_priCfg(p.priority), sc=_stCfg(p.status);
+        var wait=Math.floor((new Date()-new Date(p.checkedInAt))/60000);
+        return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9">'+
+          '<td style="padding:9px 14px;font-family:monospace;font-weight:700;font-size:13px;color:#0d9488">'+p.token+'</td>'+
+          '<td style="padding:9px 14px"><div style="font-weight:600;font-size:13px">'+p.name+'</div><div style="font-size:11px;color:#94a3b8">'+p.id+'</div></td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+p.department+'</td>'+
+          '<td style="padding:9px 14px">'+_badge(pc.label,{color:pc.color,bg:pc.bg,border:pc.border})+'</td>'+
+          '<td style="padding:9px 14px">'+_badge(sc.label,{color:sc.color,bg:sc.bg,border:sc.border})+'</td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:'+(wait>20?'#dc2626':'#64748b')+';font-weight:'+(wait>20?'700':'400')+'">'+wait+' min</td>'+
+          '<td style="padding:9px 14px">'+
+            (function(){
+              var isTele = p.department==='Telemedicine';
+              if(p.status==='waiting') return isTele
+                ? _tBtn('→ Doctor','_rQueueAdvance(\''+p.token+'\',\'with-doctor\')')
+                : _tBtn('→ Nurse','_rQueueAdvance(\''+p.token+'\',\'at-nurse\')');
+              if(p.status==='at-nurse') return _tBtn('→ Doctor','_rQueueAdvance(\''+p.token+'\',\'with-doctor\')');
+              if(p.status==='with-doctor') return _tBtn('Done','_rQueueAdvance(\''+p.token+'\',\'done\')');
+              return '';
+            }())+'</td>'+
+        '</tr>';
+      }).join('')
+    :'<tr><td colspan="7" style="padding:24px;text-align:center;color:#94a3b8;font-size:13px">No patients match the current filter</td></tr>';
+
+  return '<div style="padding:20px">'+
+    statPills+toolbar+deptCards+
+    _card(
+      '<table style="width:100%;border-collapse:collapse">'+
+        '<thead><tr>'+['Token','Patient','Department','Priority','Status','Wait','Action'].map(function(h){
+          return '<th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8">'+h+'</th>';
+        }).join('')+'</tr></thead><tbody>'+rows+'</tbody></table>','0')+
+  '</div>';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TAB 5 — APPOINTMENTS CALENDAR
+═══════════════════════════════════════════════════════════════════════ */
+function _rAppointments() {
+  var calDate=_R.calDate||new Date();
+  var calView=_R.calView||'week';
+  var calDept=_R.calDept||'all';
+
+  var HOURS=['07:00','08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00'];
+  var DAYS_ABBR=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  /* Header label */
+  function headerLabel(){
+    if(calView==='day') return calDate.toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+    if(calView==='week'){
+      var mon=new Date(calDate); mon.setDate(calDate.getDate()-((calDate.getDay()+6)%7));
+      var sun=new Date(mon); sun.setDate(mon.getDate()+6);
+      return mon.getDate()+' – '+sun.getDate()+' '+sun.toLocaleDateString('en-ZA',{month:'long',year:'numeric'});
+    }
+    if(calView==='month') return calDate.toLocaleDateString('en-ZA',{month:'long',year:'numeric'});
+    return calDate.getFullYear().toString();
+  }
+
+  /* Navigate */
+  function navDate(dir){
+    var d=new Date(_R.calDate);
+    if(calView==='day')   d.setDate(d.getDate()+dir);
+    if(calView==='week')  d.setDate(d.getDate()+dir*7);
+    if(calView==='month') d.setMonth(d.getMonth()+dir);
+    if(calView==='year')  d.setFullYear(d.getFullYear()+dir);
+    _R.calDate=d; _rRec();
+  }
+  window._calNav=navDate;
+
+  /* Toolbar */
+  var toolbar='<div style="display:flex;align-items:center;gap:8px;padding:12px 20px;border-bottom:1px solid #e2e8f0;background:#fff;flex-shrink:0;flex-wrap:wrap">'+
+    '<button onclick="_calNav(-1)" style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:7px;background:#fff;cursor:pointer;font-size:14px">‹</button>'+
+    '<button onclick="_calNav(1)"  style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:7px;background:#fff;cursor:pointer;font-size:14px">›</button>'+
+    '<span style="font-size:14px;font-weight:700;color:#0f172a;min-width:220px">'+headerLabel()+'</span>'+
+    '<div style="display:flex;border:1.5px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-left:8px">'+
+      ['day','week','month','year'].map(function(v){
+        return '<button onclick="_R.calView=\''+v+'\';_rRec()" style="padding:6px 14px;border:none;background:'+(calView===v?'#0d9488':'#fff')+';color:'+(calView===v?'#fff':'#475569')+';font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">'+v.charAt(0).toUpperCase()+v.slice(1)+'</button>';
+      }).join('')+
+    '</div>'+
+    '<select onchange="_R.calDept=this.value;_rRec()" style="padding:6px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;outline:none">'+
+      '<option value="all">All Departments</option>'+
+      DEPARTMENTS.map(function(d){return '<option value="'+d.name+'"'+(calDept===d.name?' selected':'')+'>'+d.name+'</option>';}).join('')+
+    '</select>'+
+    '<button onclick="_rTab(\'book\')" style="margin-left:auto;display:flex;align-items:center;gap:5px;padding:7px 14px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"white\" stroke-width=\"2\"><line x1=\"12\" y1=\"5\" x2=\"12\" y2=\"19\"/><line x1=\"5\" y1=\"12\" x2=\"19\" y2=\"12\"/></svg> New appointment</button>'+
+  '</div>';
+
+  /* Filter appointments */
+  var apts=_R.appointments.filter(function(a){ return calDept==='all'||a.dept===calDept; });
+
+  /* VIEWS */
+  var cal='';
+
+  /* DAY VIEW */
+  if(calView==='day'){
+    var dayStr=calDate.toISOString().slice(0,10);
+    var isSunDay=calDate.getDay()===0;
+    if(isSunDay){
+      cal='<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:16px">⛔ Clinic closed on Sundays</div>';
+    } else {
+      var dayApts=apts.filter(function(a){return a.date&&a.date.slice(0,10)===dayStr&&a.status!=='cancelled';});
+      cal='<div style="flex:1;overflow:auto"><table style="width:100%;border-collapse:collapse">'+
+        '<thead><tr><th style="width:60px;padding:8px;border-right:1px solid #f1f5f9;border-bottom:1px solid #e2e8f0"></th>'+
+        '<th style="padding:10px;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:700;color:#0d9488">'+calDate.toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long'})+'</th></tr></thead><tbody>'+
+        HOURS.map(function(h){
+          var hNum=parseInt(h);
+          var slotApts=dayApts.filter(function(a){return parseInt((a.time||'0').split(':')[0])===hNum;});
+          return '<tr><td style="padding:4px 8px;border-right:1px solid #f1f5f9;border-top:1px solid #f8fafc;font-size:10px;color:#cbd5e1;white-space:nowrap;vertical-align:top">'+h+'</td>'+
+            '<td style="padding:3px;border-top:1px solid #f8fafc;vertical-align:top;min-height:40px">'+
+            slotApts.map(function(a){
+              var col={booked:'#3b82f6',walkin:'#0d9488',emergency:'#dc2626'}[a.type]||'#3b82f6';
+              return '<div style="background:'+col+'18;border-left:3px solid '+col+';border-radius:5px;padding:6px 10px;margin-bottom:3px;cursor:pointer" onclick="_rAptEdit(\''+a.id+'\')">' +
+                '<div style="font-size:12px;font-weight:700;color:'+col+'">'+(a.name||'Patient')+'</div>' +
+                '<div style="font-size:11px;color:#64748b">'+a.time+' · '+(a.dept||'')+'</div>' +
+              '</div>';
+            }).join('')+
+            '</td></tr>';
+        }).join('')+
+        '</tbody></table></div>';
+    }
+  }
+
+  /* MONTH VIEW */
+  if(calView==='month'){
+    var firstDay=new Date(calDate.getFullYear(),calDate.getMonth(),1);
+    var lastDay =new Date(calDate.getFullYear(),calDate.getMonth()+1,0);
+    var startPad=(firstDay.getDay()+6)%7; /* Mon=0 */
+    var todayMs=new Date().toDateString();
+    var weeks=[]; var week=[];
+    for(var pi=0;pi<startPad;pi++) week.push(null);
+    for(var di=1;di<=lastDay.getDate();di++){
+      week.push(new Date(calDate.getFullYear(),calDate.getMonth(),di));
+      if(week.length===7){weeks.push(week);week=[];}
+    }
+    while(week.length<7) week.push(null);
+    if(week.length) weeks.push(week);
+    cal='<div style="flex:1;overflow:auto;padding:8px">'+
+      '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-bottom:4px">'+
+        ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(function(d,i){
+          return '<div style="padding:6px;text-align:center;font-size:11px;font-weight:700;color:'+(i===6?'#cbd5e1':'#475569')+'">'+d+'</div>';
+        }).join('')+
+      '</div>'+
+      weeks.map(function(wk){
+        return '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-bottom:1px">'+
+          wk.map(function(d,wi){
+            if(!d) return '<div style="min-height:64px;background:#f9fafb;border-radius:4px"></div>';
+            var ds=d.toISOString().slice(0,10);
+            var isSunM=d.getDay()===0;
+            var isToday=d.toDateString()===todayMs;
+            var dayApts=apts.filter(function(a){return a.date&&a.date.slice(0,10)===ds&&a.status!=='cancelled';});
+            return '<div style="min-height:64px;border-radius:4px;padding:4px;background:'+(isSunM?'#f9fafb':isToday?'#f0fdfa':'#fff')+';border:1px solid '+(isToday?'#0d9488':'#f1f5f9')+'">'+
+              '<div style="font-size:11px;font-weight:700;margin-bottom:2px;color:'+(isSunM?'#cbd5e1':isToday?'#0d9488':'#475569')+'">'+d.getDate()+'</div>'+
+              dayApts.slice(0,3).map(function(a){
+                var col={booked:'#3b82f6',walkin:'#0d9488',emergency:'#dc2626'}[a.type]||'#3b82f6';
+                return '<div style="font-size:9px;font-weight:600;color:'+col+';background:'+col+'15;border-radius:3px;padding:1px 4px;margin-bottom:1px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer" onclick="_rAptEdit(\''+a.id+'\')">'+(a.name||'Patient')+'</div>';
+              }).join('')+
+              (dayApts.length>3?'<div style="font-size:9px;color:#94a3b8">+' +(dayApts.length-3)+' more</div>':'')+
+            '</div>';
+          }).join('')+
+        '</div>';
+      }).join('')+
+    '</div>';
+  }
+
+  /* YEAR VIEW */
+  if(calView==='year'){
+    var MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    cal='<div style="flex:1;overflow:auto;padding:12px">'+
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">'+
+      MONTHS.map(function(mn,mi){
+        var mApts=apts.filter(function(a){return a.date&&parseInt(a.date.slice(5,7))-1===mi&&parseInt(a.date.slice(0,4))===calDate.getFullYear()&&a.status!=='cancelled';}).length;
+        var isNow=mi===new Date().getMonth()&&calDate.getFullYear()===new Date().getFullYear();
+        return '<button onclick="_R.calDate=new Date('+calDate.getFullYear()+','+(mi)+',1);_R.calView=\'month\';_rRec()" style="background:'+(isNow?'#f0fdfa':'#fff')+';border:1.5px solid '+(isNow?'#0d9488':'#e2e8f0')+';border-radius:10px;padding:16px;cursor:pointer;font-family:inherit;text-align:left">'+
+          '<div style="font-size:13px;font-weight:700;color:'+(isNow?'#0d9488':'#0f172a')+'">'+mn+'</div>'+
+          '<div style="font-size:22px;font-weight:800;color:'+(mApts>0?'#3b82f6':'#e2e8f0');+';margin-top:6px">'+mApts+'</div>'+
+          '<div style="font-size:11px;color:#94a3b8">appointment'+(mApts===1?'':'s')+'</div>'+
+        '</button>';
+      }).join('')+
+      '</div></div>';
+  }
+
+  /* WEEK VIEW */
+  if(calView==='week'){
+    var mon=new Date(calDate); mon.setDate(calDate.getDate()-((calDate.getDay()+6)%7));
+    var days=[];
+    for(var dd=0;dd<7;dd++){var dt=new Date(mon);dt.setDate(mon.getDate()+dd);days.push(dt);}
+    var today=new Date().toDateString();
+
+    cal='<div style="overflow:auto;flex:1"><table style="width:100%;border-collapse:collapse;min-width:700px">'+
+      '<thead><tr>'+
+        '<th style="width:60px;padding:8px;border-right:1px solid #f1f5f9;border-bottom:1px solid #e2e8f0;font-size:10px;color:#94a3b8"></th>'+
+        days.map(function(d){
+          var isT=d.toDateString()===today;
+          var isSunH=d.getDay()===0;
+          return '<th style="padding:10px 6px;border-left:1px solid #f1f5f9;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:700;color:'+(isT?'#0d9488':isSunH?'#cbd5e1':'#475569')+';background:'+(isT?'#f0fdfa':isSunH?'#f9fafb':'#fff')+'">'+
+            DAYS_ABBR[d.getDay()]+' '+d.getDate()+(isSunH?' <span style="font-size:9px;font-weight:400;color:#e2e8f0">Closed</span>':'')+
+          '</th>';
+        }).join('')+
+      '</tr></thead><tbody>'+
+      HOURS.map(function(h){
+        return '<tr>'+
+          '<td style="padding:4px 8px;border-right:1px solid #f1f5f9;border-top:1px solid #f8fafc;font-size:10px;color:#cbd5e1;vertical-align:top;white-space:nowrap">'+h+'</td>'+
+          days.map(function(d){
+            var dateStr=d.toISOString().slice(0,10);
+            /* Match bookings whose time falls within this hour row */
+            var hNum = parseInt(h);
+            var dayApts = apts.filter(function(a){
+              if (!a.date || a.status==='cancelled') return false;
+              var aDate = a.date.slice(0,10);
+              if (aDate !== dateStr) return false;
+              var aH = parseInt((a.time||'00').split(':')[0]);
+              return aH === hNum;
+            });
+            var isSun = d.getDay()===0;
+            var cellBg = isSun ? 'background:#f9fafb' : '';
+            return '<td style="padding:3px;border-left:1px solid #f1f5f9;border-top:1px solid #f8fafc;vertical-align:top;min-height:36px;'+cellBg+'">'+
+              dayApts.map(function(apt){
+                var typeColors={booked:'#3b82f6',walkin:'#0d9488',emergency:'#dc2626'};
+                var col=typeColors[apt.type]||'#3b82f6';
+                return '<div style="background:'+col+'18;border-left:3px solid '+col+';border-radius:4px;padding:4px 6px;margin-bottom:2px;cursor:pointer" onclick="_rAptEdit(\''+apt.id+'\')">' +
+                  '<div style="font-size:10px;font-weight:700;color:'+col+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(apt.name||'Patient')+'</div>' +
+                  '<div style="font-size:9px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+apt.time+' · '+(apt.dept||'')+'</div>' +
+                '</div>';
+              }).join('') +
+              (isSun && dayApts.length===0 ? '<div style="font-size:9px;color:#e2e8f0;text-align:center;padding-top:8px">—</div>' : '') +
+            '</td>';
+          }).join('')+
+        '</tr>';
+      }).join('')+
+      '</tbody></table></div>';
+  }
+
+  /* Appointments list */
+  var listRows=apts.map(function(a,i){
+    var typeColor={booked:{bg:'#f0fdf4',c:'#16a34a',b:'#86efac'},walkin:{bg:'#eff6ff',c:'#1d4ed8',b:'#bfdbfe'},emergency:{bg:'#fef2f2',c:'#dc2626',b:'#fca5a5'}};
+    var tc=typeColor[a.type]||typeColor.booked;
+    var cancelled=a.status==='cancelled';
+    return '<tr style="background:'+(cancelled?'#f9fafb':i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9;opacity:'+(cancelled?'.55':'1')+'">'+
+      '<td style="padding:9px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#64748b">'+a.ref+'</td>'+
+      '<td style="padding:9px 14px;font-weight:600;font-size:13px">'+(a.name||'—')+'</td>'+
+      '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+(a.dept||'—')+'</td>'+
+      '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+(a.date||'')+' '+a.time+'</td>'+
+      '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+tc.bg+';color:'+tc.c+';border:1px solid '+tc.b+'">'+a.type+'</span></td>'+
+      '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+(cancelled?'#f9fafb':a.verified?'#f0fdf4':'#fffbeb')+';color:'+(cancelled?'#9ca3af':a.verified?'#16a34a':'#b45309')+';border:1px solid '+(cancelled?'#e5e7eb':a.verified?'#86efac':'#fcd34d')+'">'+(cancelled?'Cancelled':a.verified?'Verified':'Pending')+'</span></td>'+
+      '<td style="padding:9px 14px">'+
+        (!cancelled?
+          '<div style="display:flex;gap:5px">'+
+            '<button onclick="_rAptEdit(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #bfdbfe;color:#1d4ed8;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Edit</button>'+
+            '<button onclick="_rAptCancel(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #fca5a5;color:#dc2626;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Cancel</button>'+
+          '</div>':
+          '<span style="font-size:11px;color:#9ca3af">Cancelled</span>')+
+      '</td>'+
+    '</tr>';
+  }).join('');
+
+  return '<div style="display:flex;flex-direction:column;height:100%;overflow:hidden">'+toolbar+
+    (calView==='week'?cal:'')+
+    '<div style="flex-shrink:0;padding:14px 20px 20px">'+
+  (function(){
+      var todayStr = new Date().toISOString().slice(0,10);
+      var todayApts = apts.filter(function(a){return a.date===todayStr&&a.status!=='cancelled';});
+      var todayRows = todayApts.map(function(a,i){
+        var typeColor={booked:{bg:'#f0fdf4',c:'#16a34a',b:'#86efac'},walkin:{bg:'#eff6ff',c:'#1d4ed8',b:'#bfdbfe'},emergency:{bg:'#fef2f2',c:'#dc2626',b:'#fca5a5'}};
+        var tc=typeColor[a.type]||typeColor.booked;
+        return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9">'+
+          '<td style="padding:9px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#64748b">'+a.ref+'</td>'+
+          '<td style="padding:9px 14px;font-weight:600;font-size:13px">'+(a.name||'—')+'</td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+(a.dept||'—')+'</td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+a.time+'</td>'+
+          '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+tc.bg+';color:'+tc.c+';border:1px solid '+tc.b+'">'+a.type+'</span></td>'+
+          '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+(a.verified?'#f0fdf4':'#fffbeb')+';color:'+(a.verified?'#16a34a':'#b45309')+';border:1px solid '+(a.verified?'#86efac':'#fcd34d')+'">'+(a.verified?'Verified':'Pending')+'</span></td>'+
+          '<td style="padding:9px 14px"><div style="display:flex;gap:5px"><button onclick="_rAptEdit(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #bfdbfe;color:#1d4ed8;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Edit</button><button onclick="_rAptCancel(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #fca5a5;color:#dc2626;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Cancel</button></div></td>'+
+        '</tr>';
+      }).join('');
+      return _card('<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:10px">Today\'s Appointments ('+todayApts.length+')</div>'+
+        (todayApts.length?
+          '<table style="width:100%;border-collapse:collapse"><thead><tr>'+['Ref','Patient','Department','Time','Type','Status','Actions'].map(function(h){return '<th style="padding:7px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+todayRows+'</tbody></table>':
+          '<div style="padding:16px;text-align:center;color:#94a3b8;font-size:13px">No appointments scheduled for today</div>'),
+        '0');
+    })()+
+    '</div>'+
+  '</div>';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TAB 6 — EMERGENCY INTAKE
+═══════════════════════════════════════════════════════════════════════ */
+function _rEmergency() {
+  var recent=_R.queue.filter(function(p){return p.priority==='urgent';}).slice(0,5);
+  var em=_R;
+
+  var form=_card(
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">'+
+      '<div style="width:42px;height:42px;border-radius:12px;background:#dc2626;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+_svgIcon('bolt')+'</div>'+
+      '<div><div style="font-size:16px;font-weight:800;color:#0f172a">Emergency Intake</div>'+
+      '<div style="font-size:13px;color:#64748b">Fast-track a patient to the emergency queue</div></div>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'+
+      _inp('em-id','SA ID / Passport','e.g. 8203041234083',em.emId)+
+      _inp('em-name','Patient Name or Description *','e.g. Jane Doe — chest pain',em.emName)+
+    '</div>'+
+    _sel('em-dept','Department',DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};}),em.emDept)+
+    '<div style="margin-top:12px">'+
+      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Chief Complaint</label>'+
+      '<textarea id="em-desc" rows="2" placeholder="Brief emergency description…" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box">'+( em.emDesc||'')+'</textarea>'+
+    '</div>'+
+    '<div style="margin-top:14px">'+
+      _pBtn('Issue Emergency Token','_rEmergencyIssue()','#dc2626')+
+    '</div>'
+  );
+
+  var recentHtml=recent.length
+    ?recent.map(function(p){
+      return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:8px;margin-bottom:6px">'+
+        '<span style="font-family:monospace;font-weight:800;color:#dc2626;font-size:15px">'+p.token+'</span>'+
+        '<div style="flex:1"><div style="font-size:12px;font-weight:600">'+p.name+'</div><div style="font-size:11px;color:#94a3b8">'+p.department+'</div></div>'+
+        _badge('Emergency',{color:'#dc2626',bg:'#fef2f2',border:'#fca5a5'})+
+      '</div>';
+    }).join('')
+    :'<div style="padding:16px;text-align:center;color:#94a3b8;font-size:13px;background:#f8fafc;border-radius:8px;border:1px dashed #e2e8f0">No emergency tokens today</div>';
+
+  return '<div style="padding:20px;max-width:900px">'+
+    '<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:20px">'+
+      form+
+      _card('<div style="font-size:13px;font-weight:700;color:#dc2626;margin-bottom:12px">Today\'s Emergency Tokens</div>'+recentHtml)+
+    '</div>'+
+  '</div>';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TAB 7 — MESSAGING
+═══════════════════════════════════════════════════════════════════════ */
+function _rMessaging() {
+  var recipients=['Clinical team','Dr. T. Mokoena','Dr. N. Sithole','Nurse Station','Lab','Pharmacy','All staff'];
+  var msgHist=_R.messages;
+
+  var sendForm=_card(
+    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:14px">Send Message</div>'+
+    _sel('msg-to','To',recipients.map(function(r){return {v:r,label:r};}),_R.msgTo)+
+    '<div style="margin-top:12px;margin-bottom:12px">'+
+      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Message</label>'+
+      '<textarea id="msg-body" rows="4" placeholder="Type your message…" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;resize:none;outline:none;box-sizing:border-box">'+(_R.msgBody||'')+'</textarea>'+
+    '</div>'+
+    '<button onclick="_rSendMsg()" style="width:100%;padding:11px;border-radius:9px;border:none;background:#0d9488;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Send Message</button>'
+  );
+
+  var histHtml=_card(
+    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:10px">Message History</div>'+
+    (msgHist.length
+      ?'<div style="display:flex;flex-direction:column;gap:0">'+
+        msgHist.map(function(m){
+          return '<div style="padding:12px 14px;border-top:1px solid #f1f5f9;'+(m.read?'':'background:#f0fdfa')+'">'+
+            '<div style="display:flex;justify-content:space-between;margin-bottom:4px">'+
+              '<span style="font-size:12px;font-weight:700;color:#0f172a">'+m.from+'</span>'+
+              '<span style="font-size:11px;color:#94a3b8">'+m.time+'</span>'+
+            '</div>'+
+            '<div style="font-size:13px;color:#475569">'+m.text+'</div>'+
+            (!m.read?'<span style="display:inline-block;margin-top:5px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#f0fdfa;color:#0d9488;border:1px solid #99f6e4">Unread</span>':'')+
+          '</div>';
+        }).join('')+'</div>'
+      :'<div style="padding:20px;text-align:center;color:#94a3b8;font-size:13px">No messages yet</div>'),
+    '0'
+  );
+
+  /* Delay notification form */
+  var delayForm=_card(
+    '<div style="font-size:13px;font-weight:700;color:#b45309;margin-bottom:12px">Notify Patients of Delay</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
+      _sel('delay-dept','Department',[{v:'all',label:'All departments'},...DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};})],'all')+
+      _sel('delay-dur','Duration',[{v:'15',label:'15 minutes'},{v:'30',label:'30 minutes'},{v:'45',label:'45 minutes'},{v:'60',label:'1 hour'}],'30')+
+    '</div>'+
+    _inp('delay-reason','Reason (optional)','e.g. Doctor running late','','text')+
+    '<div style="margin-top:10px">'+
+      '<button onclick="_rSendDelay()" style="display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:9px;border:none;background:#d97706;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'+_svgIcon('clock')+' Send Delay Notification</button>'+
+    '</div>'
+  );
+
+  return '<div style="padding:20px;max-width:1000px">'+
+    '<div style="display:grid;grid-template-columns:1fr 1.2fr;gap:20px;margin-bottom:16px">'+sendForm+histHtml+'</div>'+
+    delayForm+'</div>';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TAB 8 — ANALYTICS
+═══════════════════════════════════════════════════════════════════════ */
+function _rAnalytics() {
+  var q=_R.queue;
+  var done=q.filter(function(p){return p.status==='done';});
+  var avgWait=q.length?Math.round(q.reduce(function(s,p){return s+(Math.floor((new Date()-new Date(p.checkedInAt))/60000));},0)/q.length):0;
+  var noShow=q.filter(function(p){return p.status==='no-show';});
+
+  var kpis=[
+    {label:'Total Patients',value:q.length,      color:'#0d9488'},
+    {label:'Avg Wait (min)', value:avgWait,        color:'#f59e0b'},
+    {label:'Completed',      value:done.length,    color:'#10b981'},
+    {label:'No-shows',       value:noShow.length,  color:'#ef4444'},
+  ];
+
+  var kpiHtml='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">'+
+    kpis.map(function(k){
+      return _card('<div style="text-align:center"><div style="font-size:32px;font-weight:800;margin-bottom:4px;color:'+k.color+'">'+k.value+'</div><div style="font-size:12px;color:#94a3b8">'+k.label+'</div></div>');
+    }).join('')+'</div>';
+
+  /* Hourly bar chart */
+  var hourly=[{h:'07',n:4},{h:'08',n:9},{h:'09',n:14},{h:'10',n:11},{h:'11',n:8},{h:'12',n:6},{h:'13',n:7},{h:'14',n:5},{h:'15',n:3}];
+  var maxN=Math.max.apply(null,hourly.map(function(r){return r.n;}));
+  var barChart=_card(
+    '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">Patients per Hour</div>'+
+    '<div style="display:flex;align-items:flex-end;gap:6px;height:120px">'+
+      hourly.map(function(r){
+        var pct=maxN?Math.round(r.n/maxN*100):0;
+        return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">'+
+          '<div style="font-size:10px;color:#64748b">'+r.n+'</div>'+
+          '<div style="width:100%;background:#0d9488;border-radius:4px 4px 0 0;height:'+pct+'%"></div>'+
+          '<div style="font-size:9px;color:#94a3b8">'+r.h+':00</div>'+
+        '</div>';
+      }).join('')+
+    '</div>'
+  );
+
+  /* Dept breakdown */
+  var deptBreak=DEPARTMENTS.map(function(d){
+    var n=q.filter(function(p){return p.department===d.name;}).length;
+    var pct=q.length?Math.round(n/q.length*100):0;
+    return {name:d.name,n:n,pct:pct,color:d.color};
+  }).filter(function(d){return d.n>0;}).sort(function(a,b){return b.n-a.n;});
+
+  var deptChart=_card(
+    '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">Patients by Department</div>'+
+    (deptBreak.length
+      ?deptBreak.map(function(d){
+        return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
+          '<span style="width:8px;height:8px;border-radius:50%;background:'+d.color+';flex-shrink:0"></span>'+
+          '<span style="flex:1;font-size:12px;color:#475569">'+d.name+'</span>'+
+          '<span style="font-size:12px;font-weight:700;color:#0f172a;width:24px;text-align:right">'+d.n+'</span>'+
+          '<div style="width:80px;height:5px;border-radius:3px;background:#f1f5f9;overflow:hidden">'+
+            '<div style="height:100%;background:'+d.color+';border-radius:3px;width:'+d.pct+'%"></div>'+
+          '</div>'+
+        '</div>';
+      }).join('')
+      :'<div style="font-size:13px;color:#94a3b8;text-align:center;padding:16px">No data yet</div>')
+  );
+
+  /* Wait time distribution */
+  var waitBuckets=[['<5 min',0,'#10b981'],['5–10 min',0,'#3b82f6'],['10–20 min',0,'#f59e0b'],['20+ min',0,'#ef4444']];
+  q.forEach(function(p){
+    var w=Math.floor((new Date()-new Date(p.checkedInAt))/60000);
+    if(w<5) waitBuckets[0][1]++;
+    else if(w<10) waitBuckets[1][1]++;
+    else if(w<20) waitBuckets[2][1]++;
+    else waitBuckets[3][1]++;
+  });
+  var waitChart=_card(
+    '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">Wait Time Distribution</div>'+
+    (q.length
+      ?waitBuckets.map(function(b){
+        var pct=q.length?Math.round(b[1]/q.length*100):0;
+        return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
+          '<span style="font-size:12px;color:#475569;width:70px;flex-shrink:0">'+b[0]+'</span>'+
+          '<div style="flex:1;height:8px;border-radius:4px;background:#f1f5f9;overflow:hidden">'+
+            '<div style="height:100%;background:'+b[2]+';border-radius:4px;width:'+pct+'%"></div>'+
+          '</div>'+
+          '<span style="font-size:12px;font-weight:700;color:#0f172a;width:20px;text-align:right">'+b[1]+'</span>'+
+        '</div>';
+      }).join('')
+      :'<div style="font-size:13px;color:#94a3b8;text-align:center;padding:16px">No queue data yet</div>')
+  );
+
+  return '<div style="padding:20px;max-width:1100px">'+
+    kpiHtml+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">'+barChart+deptChart+waitChart+'</div>'+
+  '</div>';
+}
+
+function _rAptEditPage() {
+  var apt = _R._editApt;
+  if(!apt) { _R.tab='appointments'; _rRec(); return ''; }
+  var back = '<button onclick="_rTab(\'appointments\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Appointments</button>';
+  var todayIso = new Date().toISOString().slice(0,10);
+  var SLOTS = ['07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30'];
+  return '<div style="padding:28px 32px">'+back+
+    '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:4px">Edit Appointment</div>'+
+    '<div style="font-size:15px;color:#64748b;margin-bottom:24px">Ref: <strong>'+apt.ref+'</strong> · Patient: <strong>'+(apt.name||'—')+'</strong></div>'+
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px;max-width:640px">'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+
+        _frmSel('ae-dept','DEPARTMENT *',DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};}),apt.dept)+
+        '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">DATE *</label>'+
+          '<input id="ae-date" type="date" min="'+todayIso+'" value="'+(apt.date||todayIso)+'" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box"></div>'+
+      '</div>'+
+      '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:8px">NEW TIME SLOT</label>'+
+        '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">'+
+          SLOTS.map(function(t){
+            var sel=apt.time===t;
+            return '<button data-edit-slot="'+t+'" style="padding:8px 4px;border-radius:7px;border:1.5px solid '+(sel?'#3b82f6':'#e2e8f0')+';background:'+(sel?'#eff6ff':'#fff')+';color:'+(sel?'#1d4ed8':'#0f172a')+';font-size:13px;font-weight:'+(sel?'700':'400')+';cursor:pointer;font-family:inherit">'+t+'</button>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+      '<div id="ae-selected-slot" style="margin-top:10px;font-size:13px;color:#0d9488;font-weight:600">'+(apt.time?'Selected: '+apt.time:'')+'</div>'+
+    '</div>'+
+    '<div style="display:flex;gap:10px;margin-top:14px">'+
+      '<button onclick="_rAptSaveEdit()" style="padding:14px 28px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Save changes</button>'+
+      '<button onclick="_rAptCancel(\''+apt.id+'\')" style="padding:14px 20px;border-radius:10px;border:1.5px solid #fca5a5;background:#fff;color:#dc2626;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel appointment</button>'+
+      '<button onclick="_rTab(\'appointments\')" style="padding:14px 20px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;cursor:pointer;font-family:inherit">Discard</button>'+
+    '</div>'+
+  '</div>';
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   REGISTER NEW PATIENT (standalone page)
+═══════════════════════════════════════════════════════════════════════ */
+function _rRegisterNew() {
+  var back='<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
+  return '<div style="padding:28px 32px">'+back+
+    '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">'+
+      '<div>'+
+        '<div style="margin-bottom:24px">'+
+          '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Register New Patient</div>'+
+          '<div style="font-size:15px;color:#64748b">Add a new patient profile to the NIHMS database.</div>'+
+        '</div>'+
+        '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">'+
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#0d9488">'+
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>'+
+            '<span style="font-size:13px;font-weight:700">Patient details</span>'+
+          '</div>'+
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'+
+            _frmInp('nr-fn','FIRST NAME *','Nomsa')+ _frmInp('nr-ln','LAST NAME *','Dlamini')+
+            _frmInp('nr-id','SA ID / PASSPORT *','e.g. 8203041234083')+ _frmInp('nr-dob','DATE OF BIRTH','','date')+
+            _frmSel('nr-gen','GENDER',[{v:'',label:'— Select —'},{v:'Female',label:'Female'},{v:'Male',label:'Male'},{v:'Other',label:'Other'}])+
+            _frmSel('nr-blood','BLOOD TYPE',[{v:'',label:'— Unknown —'},{v:'A+',label:'A+'},{v:'A-',label:'A-'},{v:'B+',label:'B+'},{v:'B-',label:'B-'},{v:'AB+',label:'AB+'},{v:'AB-',label:'AB-'},{v:'O+',label:'O+'},{v:'O-',label:'O-'}])+
+            _frmInp('nr-ph','PHONE NUMBER *','+27820000000','tel')+ _frmInp('nr-em','EMAIL','patient@email.com','email')+
+          '</div>'+
+          '<div style="margin-top:14px">'+_frmInp('nr-addr','ADDRESS','Street address, suburb, city')+'</div>'+
+        '</div>'+
+        '<div style="display:flex;gap:10px;margin-top:14px">'+
+          '<button onclick="_rSaveNewPatient()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>'+
+            'Register patient'+
+          '</button>'+
+          '<button onclick="_rTab(\'overview\')" style="padding:14px 24px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+        '</div>'+
+      '</div>'+
+      '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:18px">'+
+        '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:12px">Recently registered</div>'+
+        (NIHMS_PATIENTS.length
+          ? NIHMS_PATIENTS.slice(-5).reverse().map(function(p){
+              return '<div style="padding:8px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:8px">' +
+                '<div style="width:30px;height:30px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">' +
+                  ((p.firstName||'?')[0]+(p.lastName||'?')[0]).toUpperCase() +
+                '</div>' +
+                '<div style="flex:1;min-width:0">' +
+                  '<div style="font-size:12px;font-weight:600;color:#0f172a">'+(p.firstName||'')+' '+(p.lastName||'')+'</div>' +
+                  '<div style="font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.id+(p.phone?' · '+p.phone:'')+'</div>' +
+                '</div>' +
+                '<button onclick="_rOpenPatientFile(\''+p.id+'\')" style="padding:3px 8px;border-radius:5px;border:1px solid #e2e8f0;background:#fff;font-size:10px;color:#0d9488;cursor:pointer;font-family:inherit;flex-shrink:0">View</button>' +
+              '</div>';
+            }).join('')
+          : '<div style="padding:14px;text-align:center;font-size:12px;color:#94a3b8">No patients registered yet</div>')+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+window._rSaveNewPatient = async function() {
+  function _v(id){ var el=document.getElementById(id); return el?el.value.trim():''; }
+  var fn=_v('nr-fn'),ln=_v('nr-ln'),id=_v('nr-id'),ph=_v('nr-ph');
+  var dob=_v('nr-dob'),gen=_v('nr-gen'),blood=_v('nr-blood'),em=_v('nr-em'),addr=_v('nr-addr');
+  if(!fn){ UI.showToast('First name required','err'); return; }
+  if(!ln){ UI.showToast('Last name required','err'); return; }
+  if(!id){ UI.showToast('SA ID or Passport required','err'); return; }
+  if(!ph){ UI.showToast('Phone number required','err'); return; }
+  if(NIHMS_PATIENTS.find(function(p){return p.id===id;})){
+    UI.showToast('A patient with this ID already exists','err'); return;
+  }
+  var newPt={id:id,nationalId:id,firstName:fn,lastName:ln,name:fn+' '+ln,dob:dob,gender:gen,bloodType:blood,phone:ph,email:em,address:addr};
+  NIHMS_PATIENTS.push(newPt);
+  try {
+    await API._fetchDirect('/patients',{method:'POST',body:JSON.stringify({firstName:fn,lastName:ln,nationalId:id,dateOfBirth:dob,gender:gen,phone:ph,email:em,bloodType:blood,address:addr})}).catch(function(){});
+  } catch(_){}
+  UI.showToast(fn+' '+ln+' registered successfully','ok');
+  _rTab('overview');
+};
+
+
+/* ── Appointment edit/cancel ──────────────────────────────────────────── */
+window._rAptEdit = function(id) {
+  var apt = _R.appointments.find(function(a){return a.id===id;});
+  if(!apt){ UI.showToast('Appointment not found','err'); return; }
+  /* Show a simple inline edit modal via prompt-style UI */
+  _R._editApt = apt;
+  _R.tab = 'apt-edit';
+  _rRec();
+};
+
+window._rAptCancel = function(id) {
+  var apt = _R.appointments.find(function(a){return a.id===id;});
+  if(!apt) return;
+  if(!confirm('Cancel appointment '+apt.ref+' for '+apt.name+'?')) return;
+  apt.status = 'cancelled';
+  apt.verified = false;
+  /* Notify patient */
+  var msg = 'NIHMS: Your appointment '+apt.ref+' on '+apt.date+' at '+apt.time+' ('+apt.dept+') has been cancelled. Please contact us to reschedule.';
+  try{
+    if(apt.phone||apt.patientPhone) API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:apt.phone||apt.patientPhone,message:msg})}).catch(function(){});
+    if(apt.email||apt.patientEmail) API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:apt.email||apt.patientEmail,subject:'NIHMS — Appointment cancelled: '+apt.ref,html:'<p>'+msg+'</p>'})}).catch(function(){});
+  }catch(_){}
+  _rRec();
+  UI.showToast('Appointment '+apt.ref+' cancelled','ok');
+};
+
+/* ── Add apt-edit tab ─────────────────────────────────────────────────── */
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PATIENT FILE — Search · View · Edit
+═══════════════════════════════════════════════════════════════════════ */
+function _rPatientFile() {
+  var pf = _R.patientFile || { step:'search', id:'', patient:null, notFound:false, editing:false };
+  if (!_R.patientFile) _R.patientFile = pf;
+
+  var back = '<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
+
+  /* ── EDIT MODE ── */
+  if (pf.editing && pf.patient) {
+    var pt = pf.patient;
+    return '<div style="padding:28px 32px">' + back +
+      '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
+        '<div>' +
+          '<div style="margin-bottom:24px">' +
+            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:4px">Edit Patient Profile</div>' +
+            '<div style="font-size:14px;color:#64748b">Update the details for <strong>'+(pt.firstName||'')+' '+(pt.lastName||'')+'</strong> · '+pt.id+'</div>' +
+          '</div>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
+              _frmInp('pf-fn',  'FIRST NAME *',    '', 'text', pt.firstName||'') +
+              _frmInp('pf-ln',  'LAST NAME *',     '', 'text', pt.lastName||'')  +
+              _frmInp('pf-id',  'SA ID / PASSPORT','', 'text', pt.id||'')        +
+              _frmInp('pf-dob', 'DATE OF BIRTH',   '', 'date', pt.dob||'')       +
+              _frmSel('pf-gen', 'GENDER', [{v:'',label:'— Select —'},{v:'Female',label:'Female'},{v:'Male',label:'Male'},{v:'Other',label:'Other'}], pt.gender||'') +
+              _frmSel('pf-blood','BLOOD TYPE',[{v:'',label:'— Unknown —'},{v:'A+',label:'A+'},{v:'A-',label:'A-'},{v:'B+',label:'B+'},{v:'B-',label:'B-'},{v:'AB+',label:'AB+'},{v:'AB-',label:'AB-'},{v:'O+',label:'O+'},{v:'O-',label:'O-'}],pt.bloodType||'') +
+              _frmInp('pf-ph',  'PHONE NUMBER',    '', 'tel',  pt.phone||'')     +
+              _frmInp('pf-em',  'EMAIL',           '', 'email',pt.email||'')     +
+            '</div>' +
+            '<div style="margin-top:14px">' + _frmInp('pf-addr','ADDRESS','', 'text', pt.address||'') + '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:10px;margin-top:14px">' +
+            '<button onclick="_rPfSave()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">Save changes</button>' +
+            '<button onclick="_R.patientFile.editing=false;_rRec()" style="padding:14px 20px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;cursor:pointer;font-family:inherit">Cancel</button>' +
+          '</div>' +
+        '</div>' +
+        _pfSidePanel(pt) +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ── VIEW MODE ── */
+  if (pf.patient && !pf.editing) {
+    var pt = pf.patient;
+    var initials = (((pt.firstName||'?')[0])+((pt.lastName||'?')[0])).toUpperCase();
+    var ptApts = _R.appointments.filter(function(a){ return a.patientId===pt.id||a.patientId===pt.nationalId; }).sort(function(a,b){ return (b.date||'') > (a.date||'') ? 1 : -1; });
+
+    return '<div style="padding:28px 32px">' + back +
+      '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
+        '<div>' +
+          /* Profile card */
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px;margin-bottom:16px">' +
+            '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">' +
+              '<div style="width:52px;height:52px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex-shrink:0">'+initials+'</div>' +
+              '<div style="flex:1">' +
+                '<div style="font-size:20px;font-weight:800;color:#0f172a">'+(pt.firstName||'')+' '+(pt.lastName||'')+'</div>' +
+                '<div style="font-size:13px;color:#64748b;margin-top:2px">🪪 '+pt.id+(pt.gender?' · '+pt.gender:'')+(pt.dob?' · DOB: '+pt.dob:'')+'</div>' +
+              '</div>' +
+              '<button onclick="_R.patientFile.editing=true;_rRec()" style="display:flex;align-items:center;gap:6px;padding:9px 16px;border-radius:8px;border:none;background:#0d9488;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">' +
+                '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
+                'Edit profile' +
+              '</button>' +
+            '</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+              [['Phone', pt.phone||'—'],['Email', pt.email||'—'],['Blood type', pt.bloodType||'—'],['Address', pt.address||'—']].map(function(r){
+                return '<div style="padding:10px 12px;background:#f8fafc;border-radius:8px">' +
+                  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:3px">'+r[0]+'</div>' +
+                  '<div style="font-size:13px;font-weight:600;color:#0f172a">'+r[1]+'</div>' +
+                '</div>';
+              }).join('') +
+            '</div>' +
+          '</div>' +
+          /* Appointment history */
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
+            '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">' +
+              '<div style="font-size:13px;font-weight:700;color:#0f172a">Appointment History ('+ptApts.length+')</div>' +
+              '<button onclick="_rTab(\'book\');_R.bk.step=\'search\';_R.bk.id=\''+pt.id+'\';_rRec()" style="font-size:12px;color:#3b82f6;border:none;background:transparent;cursor:pointer;font-family:inherit">+ Book new appointment</button>' +
+            '</div>' +
+            (ptApts.length
+              ? '<table style="width:100%;border-collapse:collapse">' +
+                  '<thead><tr>'+['Ref','Dept','Date','Time','Status'].map(function(h){ return '<th style="padding:7px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8">'+h+'</th>'; }).join('')+'</tr></thead>' +
+                  '<tbody>' +
+                  ptApts.map(function(a,i){
+                    var cancelled=a.status==='cancelled';
+                    return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9;opacity:'+(cancelled?.55:1)+'">' +
+                      '<td style="padding:8px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#64748b">'+a.ref+'</td>' +
+                      '<td style="padding:8px 14px;font-size:12px;color:#0f172a">'+(a.dept||'—')+'</td>' +
+                      '<td style="padding:8px 14px;font-size:12px;color:#64748b">'+(a.date||'—')+'</td>' +
+                      '<td style="padding:8px 14px;font-size:12px;color:#64748b">'+(a.time||'—')+'</td>' +
+                      '<td style="padding:8px 14px"><span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:'+(cancelled?'#f9fafb':a.verified?'#f0fdf4':'#fffbeb')+';color:'+(cancelled?'#9ca3af':a.verified?'#16a34a':'#b45309')+';border:1px solid '+(cancelled?'#e5e7eb':a.verified?'#86efac':'#fcd34d')+'">'+( cancelled?'Cancelled':a.verified?'Verified':'Pending')+'</span></td>' +
+                    '</tr>';
+                  }).join('') +
+                  '</tbody></table>'
+              : '<div style="padding:16px;text-align:center;font-size:13px;color:#94a3b8">No appointment history</div>') +
+          '</div>' +
+        '</div>' +
+        _pfSidePanel(pt) +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ── SEARCH MODE ── */
+  return '<div style="padding:28px 32px">' + back +
+    '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
+      '<div>' +
+        '<div style="margin-bottom:24px">' +
+          '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Patient Files</div>' +
+          '<div style="font-size:15px;color:#64748b">Search by SA ID or passport number to find and manage a patient profile.</div>' +
+        '</div>' +
+        '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px;margin-bottom:14px">' +
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:10px">SA ID / PASSPORT NUMBER</div>' +
+          '<div style="display:flex;gap:10px">' +
+            '<input id="pf-search-id" type="text" value="'+(pf.id||'')+'" placeholder="e.g. 8203041234083" ' +
+            'style="flex:1;padding:12px 16px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;font-family:inherit;outline:none;color:#0f172a" ' +
+            'onfocus="this.style.borderColor=\"#0d9488\"" onblur="this.style.borderColor=\"#e2e8f0\"">' +
+            '<button onclick="_rPfSearch()" style="display:flex;align-items:center;gap:8px;padding:12px 24px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Search' +
+            '</button>' +
+          '</div>' +
+          (pf.notFound
+            ? '<div style="padding:14px 16px;background:#fef2f2;border-radius:10px;border:1px solid #fecaca;margin-top:14px">' +
+                '<div style="font-size:14px;font-weight:700;color:#dc2626;margin-bottom:4px">Patient not found</div>' +
+                '<div style="font-size:13px;color:#ef4444">No profile found for <strong>'+pf.id+'</strong>.</div>' +
+              '</div>' +
+              '<button onclick="_rTab(\'register\')" style="margin-top:10px;width:100%;padding:14px;border-radius:10px;border:2px dashed #0d9488;background:transparent;color:#0d9488;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
+                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
+                'Register new patient →' +
+              '</button>'
+            : '') +
+        '</div>' +
+        /* All patients list */
+        '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
+          '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">All Registered Patients ('+NIHMS_PATIENTS.length+')</div>' +
+          NIHMS_PATIENTS.map(function(p,i){
+            return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid #f8fafc;background:'+(i%2===0?'#fff':'#f8fafc')+'">' +
+              '<div style="width:32px;height:32px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(((p.firstName||'?')[0])+((p.lastName||'?')[0])).toUpperCase()+'</div>' +
+              '<div style="flex:1;min-width:0">' +
+                '<div style="font-size:13px;font-weight:600;color:#0f172a">'+(p.firstName||'')+' '+(p.lastName||'')+'</div>' +
+                '<div style="font-size:11px;color:#94a3b8">'+p.id+(p.phone?' · '+p.phone:'')+'</div>' +
+              '</div>' +
+              '<button onclick="_rOpenPatientFile(\''+p.id+'\')" style="padding:5px 12px;border-radius:6px;border:1px solid #e2e8f0;background:#fff;font-size:12px;color:#0d9488;cursor:pointer;font-family:inherit;font-weight:600">Open file</button>' +
+            '</div>';
+          }).join('') +
+        '</div>' +
+      '</div>' +
+      '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:16px">' +
+        '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:12px">Quick tips</div>' +
+        '<div style="font-size:12px;color:#64748b;line-height:1.7">' +
+          '• Search by SA ID or passport number<br>' +
+          '• Click <strong>Open file</strong> to view a patient record<br>' +
+          '• Click <strong>Edit profile</strong> to update contact details<br>' +
+          '• View full appointment history from the patient file<br>' +
+          '• Book a new appointment directly from the patient file' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+/* Side panel for patient file — shows their upcoming appointments */
+function _pfSidePanel(pt) {
+  var ptApts = _R.appointments.filter(function(a){
+    return (a.patientId===pt.id||a.patientId===pt.nationalId) && a.status!=='cancelled';
+  }).sort(function(a,b){ return (a.date||'') < (b.date||'') ? -1 : 1; }).slice(0,5);
+  var today = new Date().toISOString().slice(0,10);
+  return '<div style="display:flex;flex-direction:column;gap:14px">' +
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
+      '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Upcoming for this patient</div>' +
+      (ptApts.filter(function(a){return (a.date||'').slice(0,10)>=today;}).length
+        ? ptApts.filter(function(a){return (a.date||'').slice(0,10)>=today;}).map(function(a){
+            return '<div style="padding:9px 14px;border-bottom:1px solid #f8fafc">' +
+              '<div style="font-size:12px;font-weight:700;color:#0f172a">'+a.ref+'</div>' +
+              '<div style="font-size:11px;color:#64748b">'+(a.dept||'')+'</div>' +
+              '<div style="font-size:11px;color:#94a3b8">'+(a.date||'')+' @ '+(a.time||'')+'</div>' +
+            '</div>';
+          }).join('')
+        : '<div style="padding:14px;text-align:center;font-size:12px;color:#94a3b8">No upcoming appointments</div>') +
+    '</div>' +
+    '<div style="background:#f0fdfa;border-radius:14px;border:1px solid #99f6e4;padding:14px">' +
+      '<div style="font-size:12px;font-weight:700;color:#0d9488;margin-bottom:6px">Patient summary</div>' +
+      '<div style="font-size:12px;color:#475569">'+_R.appointments.filter(function(a){return a.patientId===pt.id||a.patientId===pt.nationalId;}).length+' total appointments</div>' +
+      '<div style="font-size:12px;color:#475569">'+_R.appointments.filter(function(a){return (a.patientId===pt.id||a.patientId===pt.nationalId)&&a.verified;}).length+' verified</div>' +
+    '</div>' +
+  '</div>';
+}
+
+/* Search handler */
+window._rPfSearch = function() {
+  var id = (document.getElementById('pf-search-id')||{value:''}).value.trim();
+  if (!id) { UI.showToast('Please enter an ID or passport number','err'); return; }
+  _R.patientFile = { step:'search', id:id, patient:null, notFound:false, editing:false };
+  var pt = NIHMS_PATIENTS.find(function(p){ return p.id.trim()===id.trim() || (p.nationalId||'').trim()===id.trim() || (p.passport||'').trim()===id.trim(); }) || null;
+  if (!pt) {
+    /* Try API */
+    API._fetchDirect('/patients?nationalId='+encodeURIComponent(id)+'&limit=1',{method:'GET'}).then(function(res){
+      var apiPt = res&&res.data&&res.data[0];
+      if (apiPt) {
+        var apiId=(apiPt.nationalId||apiPt.idNumber||apiPt.id||'').trim();
+        if(apiId===id){ NIHMS_PATIENTS.push(apiPt); _R.patientFile.patient=apiPt; }
+        else _R.patientFile.notFound=true;
+      } else _R.patientFile.notFound=true;
+      _rRec();
+    }).catch(function(){ _R.patientFile.notFound=true; _rRec(); });
+    return;
+  }
+  _R.patientFile.patient = pt;
+  _rRec();
+};
+
+/* Open patient file directly from any button */
+window._rOpenPatientFile = function(id) {
+  var pt = NIHMS_PATIENTS.find(function(p){ return p.id===id || (p.nationalId||'')===id; }) || null;
+  _R.patientFile = { step:'view', id:id, patient:pt, notFound:!pt, editing:false };
+  _R.tab = 'patient-file';
+  _rRec();
+};
+
+/* Save edits */
+window._rPfSave = async function() {
+  var pt = _R.patientFile && _R.patientFile.patient;
+  if (!pt) return;
+  function _v(id){ var el=document.getElementById(id); return el?el.value.trim():''; }
+  var fn=_v('pf-fn'), ln=_v('pf-ln'), id=_v('pf-id'), dob=_v('pf-dob');
+  var gen=_v('pf-gen'), blood=_v('pf-blood'), ph=_v('pf-ph'), em=_v('pf-em'), addr=_v('pf-addr');
+  if(!fn){UI.showToast('First name required','err');return;}
+  if(!ln){UI.showToast('Last name required','err');return;}
+  /* Update in-memory */
+  pt.firstName=fn; pt.lastName=ln; pt.name=fn+' '+ln;
+  if(id) pt.id=id;
+  if(dob) pt.dob=dob;
+  if(gen) pt.gender=gen;
+  if(blood) pt.bloodType=blood;
+  if(ph) pt.phone=ph;
+  if(em) pt.email=em;
+  if(addr) pt.address=addr;
+  /* Update matching appointments */
+  _R.appointments.forEach(function(a){ if(a.patientId===pt.id) a.name=fn+' '+ln; });
+  /* Save to backend */
+  try {
+    await API._fetchDirect('/patients/'+(pt._id||pt.id),{
+      method:'PATCH',
+      body:JSON.stringify({firstName:fn,lastName:ln,nationalId:id||pt.id,dateOfBirth:dob,gender:gen,bloodType:blood,phone:ph,email:em,address:addr})
+    }).catch(function(){});
+  } catch(_){}
+  _R.patientFile.editing=false;
+  _rRec();
+  UI.showToast(fn+' '+ln+' profile updated','ok');
+};
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ACTION HANDLERS
+═══════════════════════════════════════════════════════════════════════ */
+
+/* Check-in */
+window._rCheckinSearch = async function() {
+  var id=(document.getElementById('ci-id')||{value:''}).value.trim();
+  if(!id){ UI.showToast('Please enter a National ID or Passport number.','err'); return; }
+  _R.ci.id=id;
+  _R.ci.notFound=false;
+
+  var patient=null;
+  try {
+    var res=await API._fetchDirect('/patients?nationalId='+encodeURIComponent(id)+'&limit=1',{method:'GET'}).catch(function(){return null;});
+    var apiPt=res&&res.data&&res.data[0];
+    /* ── CRITICAL: only accept the API result if the ID actually matches ── */
+    if(apiPt) {
+      var apiId=(apiPt.nationalId||apiPt.idNumber||apiPt.id||'').trim();
+      var apiPP=(apiPt.passport||apiPt.passportNumber||'').trim();
+      if(apiId===id||apiPP===id) patient=apiPt;
+    }
+    if(!patient){
+      var res2=await API._fetchDirect('/patients?passport='+encodeURIComponent(id)+'&limit=1',{method:'GET'}).catch(function(){return null;});
+      var apiPt2=res2&&res2.data&&res2.data[0];
+      if(apiPt2){
+        var apiId2=(apiPt2.nationalId||apiPt2.idNumber||apiPt2.id||'').trim();
+        var apiPP2=(apiPt2.passport||apiPt2.passportNumber||'').trim();
+        if(apiId2===id||apiPP2===id) patient=apiPt2;
+      }
+    }
+  } catch(_){}
+
+  /* Local mock DB — strict exact ID match only */
+  if(!patient) patient=NIHMS_PATIENTS.find(function(p){return p.id.trim()===id.trim();})||null;
+
+  if(!patient){
+    /* Show not found error inline — stay on search step */
+    _R.ci.notFound=true;
+    _rRec();
+    return;
+  }
+
+  var appt=_R.appointments.find(function(a){return a.patientId===id;})||null;
+  _R.ci={ step:'slot', id:id, patient:patient, appt:appt, dept:appt?appt.dept:'General Consultation', result:null, notFound:false, selectedSlot:null };
+  _rRec();
+};
+
+window._rCiRegister = function() {
+  function _val(id, fallback) {
+    var el = document.getElementById(id);
+    return el ? el.value.trim() : (fallback || '');
+  }
+  var fn    = _val('ci-reg-fn');
+  var ln    = _val('ci-reg-ln');
+  var id    = _val('ci-reg-id') || _R.ci.id || '';
+  var dob   = _val('ci-reg-dob');
+  var gen   = _val('ci-reg-gen');
+  var blood = _val('ci-reg-blood');
+  var ph    = _val('ci-reg-ph');
+  var em    = _val('ci-reg-em');
+  var addr  = _val('ci-reg-addr');
+
+  /* Show specific error for each missing required field */
+  if (!fn)  { UI.showToast('First name is required','err'); document.getElementById('ci-reg-fn')&&document.getElementById('ci-reg-fn').focus(); return; }
+  if (!ln)  { UI.showToast('Last name is required','err');  document.getElementById('ci-reg-ln')&&document.getElementById('ci-reg-ln').focus(); return; }
+  if (!id)  { UI.showToast('SA ID or Passport number is required','err'); return; }
+  if (!ph)  { UI.showToast('Phone number is required','err'); document.getElementById('ci-reg-ph')&&document.getElementById('ci-reg-ph').focus(); return; }
+
+  var newPt = {
+    id:        id,
+    nationalId:id,
+    firstName: fn,
+    lastName:  ln,
+    name:      fn + ' ' + ln,
+    dob:       dob,
+    gender:    gen || 'Unknown',
+    bloodType: blood,
+    phone:     ph,
+    email:     em,
+    address:   addr,
+  };
+
+  /* Save to local mock DB */
+  NIHMS_PATIENTS.push(newPt);
+
+  /* Also try to save to backend API */
+  try {
+    API._fetchDirect('/patients', {
+      method:'POST',
+      body: JSON.stringify({
+        firstName:fn, lastName:ln, nationalId:id,
+        dateOfBirth:dob, gender:gen, phone:ph, email:em,
+        bloodType:blood, address:addr
+      })
+    }).catch(function(){});
+  } catch(_){}
+
+  _R.ci.patient      = newPt;
+  _R.ci.step         = 'slot';
+  _R.ci.selectedSlot = null;
+  _R.ci.id           = id;
+  _rRec();
+  UI.showToast(fn + ' ' + ln + ' registered successfully','ok');
+};
+
+window._rCheckinIssue = async function() {
+  var ci=_R.ci;
+  if(!ci.patient) return;
+  /* Validate slot selected and date chosen */
+  if (!ci.selectedSlot) { UI.showToast('Please select a time slot','err'); return; }
+  if (!ci.selectedDate) { UI.showToast('Please select a date','err'); return; }
+
+  /* Check-in only allowed on appointment day */
+  var todayStr = new Date().toISOString().slice(0,10);
+  if (ci.selectedDate !== todayStr) {
+    UI.showToast('Check-in is only allowed on the appointment day ('+ci.selectedDate+')','err');
+    return;
+  }
+
+  var dept=(document.getElementById('ci-slot-dept')||document.getElementById('ci-dept')||{value:ci.dept}).value||ci.dept;
+  _R.ci.dept = dept; /* persist selection */
+  var token=_genToken(dept);
+
+  _R.queue.push({ token:token, id:ci.patient.id, name:(ci.patient.firstName||ci.patient.name||'')+(ci.patient.lastName?' '+ci.patient.lastName:''), department:dept, priority:'normal', status:'waiting', checkedInAt:new Date().toISOString() });
+
+  /* Notify nurse */
+  var req={ id:'REQ-'+token, patientId:ci.patient._id||ci.patient.id, patientName:(ci.patient.firstName||'')+(ci.patient.lastName?' '+ci.patient.lastName:''), age:ci.patient.age||'—', sex:ci.patient.sex||ci.patient.gender||'—', complaint:'Walk-in queue check-in', priority:'Normal', requestedBy:'Reception', requestedAt:_fmtTime(), notes:'Patient '+token+' checked in at '+dept+'. Directed to nurses station for vitals.', seen:false };
+  if(window._nurseAddRequest) window._nurseAddRequest(req);
+  else { if(!window._NURSE_REQUESTS) window._NURSE_REQUESTS=[]; window._NURSE_REQUESTS.push(req); }
+
+  /* ── Send SMS + Email notifications ── */
+  var sms=false, email=false;
+  var ptName = (ci.patient.firstName||'') + ' ' + (ci.patient.lastName||'');
+  var apptDate = ci.selectedDate || new Date().toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  var apptTime = ci.selectedSlot || _fmtTime();
+
+  var smsMsg = 'NIHMS CHECK-IN CONFIRMATION. ' +
+    'Dear ' + ptName.trim() + '. ' +
+    'Your queue token: ' + token + '. ' +
+    'Department: ' + dept + '. ' +
+    'Date: ' + apptDate + ' at ' + apptTime + '. ' +
+    'Please proceed to the Nurses Station for vitals. ' +
+    'Emergencies: call 10177.';
+
+  var emailHtml =
+    '<div style="font-family:Arial,sans-serif;max-width:540px;margin:0 auto">' +
+      '<div style="background:linear-gradient(135deg,#0d9488,#0f766e);padding:24px;border-radius:12px 12px 0 0;text-align:center">' +
+        '<img src="https://nihms.netlify.app/favicon.ico" style="width:36px;height:36px;margin-bottom:10px" onerror="this.style.display=&quot;none&quot;">' +
+        '<h1 style="color:#fff;margin:0;font-size:22px">Check-In Confirmed</h1>' +
+        '<p style="color:rgba(255,255,255,.85);margin:6px 0 0;font-size:14px">National Integrated Healthcare Management System</p>' +
+      '</div>' +
+      '<div style="background:#f8fafc;padding:28px;border-radius:0 0 12px 12px">' +
+        '<p style="font-size:15px;color:#475569;margin:0 0 20px">Dear <strong>' + ptName.trim() + '</strong>,</p>' +
+        '<div style="background:#fff;border-radius:12px;padding:20px;text-align:center;border:2px solid #99f6e4;margin-bottom:20px">' +
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#94a3b8;margin-bottom:8px">Your Queue Token</div>' +
+          '<div style="font-size:56px;font-weight:900;font-family:monospace;color:#0d9488;line-height:1">' + token + '</div>' +
+        '</div>' +
+        '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
+          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#94a3b8;width:40%">Department</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#0f172a">' + dept + '</td></tr>' +
+          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#94a3b8">Date</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#0f172a">' + apptDate + '</td></tr>' +
+          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#94a3b8">Time</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#0f172a">' + apptTime + '</td></tr>' +
+          '<tr><td style="padding:10px 14px;font-size:13px;color:#94a3b8">Checked in at</td><td style="padding:10px 14px;font-size:13px;font-weight:600;color:#0f172a">' + _fmtTime() + '</td></tr>' +
+        '</table>' +
+        '<div style="background:#eff6ff;border-radius:10px;padding:14px 16px;margin-bottom:20px;font-size:13px;color:#1d4ed8">' +
+          '<strong>Next step:</strong> Please proceed to the <strong>Nurses Station</strong> for your vitals check before your consultation.' +
+        '</div>' +
+        '<div style="background:#fff3cd;border-radius:10px;padding:12px 16px;font-size:12px;color:#856404">' +
+          '🏥 Johannesburg CHC · Mon–Fri 07:00–17:00 · Sat 07:00–13:00<br>' +
+          'Emergency: call <strong>10177</strong>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  try {
+    if (ci.patient.phone) {
+      await API._fetchDirect('/notifications/sms', {
+        method:'POST',
+        body: JSON.stringify({ to: ci.patient.phone, message: smsMsg })
+      }).catch(function(){});
+      sms = true;
+    }
+    if (ci.patient.email) {
+      await API._fetchDirect('/notifications/email', {
+        method:'POST',
+        body: JSON.stringify({
+          to:      ci.patient.email,
+          subject: 'NIHMS — Check-in confirmed · Token ' + token,
+          html:    emailHtml,
+          text:    smsMsg
+        })
+      }).catch(function(){});
+      email = true;
+    }
+  } catch(_){}
+
+  _R.ci={ step:'done', id:ci.id, patient:ci.patient, appt:ci.appt, dept:dept, notFound:false, result:{ token:token, dept:dept, name:(ci.patient.firstName||'')+(ci.patient.lastName?' '+ci.patient.lastName:''), phone:ci.patient.phone||'', email:ci.patient.email||'', smsSent:sms, emailSent:email } };
+  _rRec();
+  UI.showToast('Token '+token+' issued — patient directed to nurses station','ok');
+};
+
+/* Book */
+window._rBookSearch = async function() {
+  var id=(document.getElementById('bk-id')||{value:''}).value.trim();
+  var err=document.getElementById('bk-err');
+  if(!id){if(err){err.style.display='block';err.textContent='Please enter a National ID or Passport number.';}return;}
+  if(err) err.style.display='none';
+  _R.bk.id=id;
+
+  var patient=null;
+  try {
+    var res=await API._fetchDirect('/patients?nationalId='+encodeURIComponent(id)+'&limit=1',{method:'GET'}).catch(function(){return null;});
+    var bkPt=res&&res.data&&res.data[0];
+    if(bkPt){
+      var bkId=(bkPt.nationalId||bkPt.idNumber||bkPt.id||'').trim();
+      var bkPP=(bkPt.passport||bkPt.passportNumber||'').trim();
+      if(bkId===id||bkPP===id) patient=bkPt;
+    }
+  } catch(_){}
+  if(!patient) patient=NIHMS_PATIENTS.find(function(p){return p.id.trim()===id.trim();})||null;
+
+  if(!patient){ _R.bk.notFound=true; _rRec(); return; }
+  _R.bk.patient=patient; _R.bk.step='slot'; _rRec();
+};
+
+/* _rBookRegisterNew — used by the new booking form (bk-reg-* field IDs) */
+window._rBookRegisterNew = function() {
+  function _v(id){ var el=document.getElementById(id); return el?el.value.trim():''; }
+  var fn=_v('bk-reg-fn'), ln=_v('bk-reg-ln'), id=_v('bk-reg-id')||_R.bk.id||'';
+  var dob=_v('bk-reg-dob'), gen=_v('bk-reg-gen'), blood=_v('bk-reg-blood');
+  var ph=_v('bk-reg-ph'), em=_v('bk-reg-em'), addr=_v('bk-reg-addr');
+  if(!fn){UI.showToast('First name required','err');return;}
+  if(!ln){UI.showToast('Last name required','err');return;}
+  if(!id){UI.showToast('SA ID or Passport required','err');return;}
+  if(!ph){UI.showToast('Phone number required','err');return;}
+  var newPt={id:id,nationalId:id,firstName:fn,lastName:ln,name:fn+' '+ln,dob:dob,gender:gen,bloodType:blood,phone:ph,email:em,address:addr};
+  NIHMS_PATIENTS.push(newPt);
+  try{ API._fetchDirect('/patients',{method:'POST',body:JSON.stringify({firstName:fn,lastName:ln,nationalId:id,dateOfBirth:dob,gender:gen,phone:ph,email:em,bloodType:blood,address:addr})}).catch(function(){}); }catch(_){}
+  _R.bk.patient=newPt; _R.bk.step='slot'; _R.bk.selectedSlot=null; _R.bk.id=id;
+  _rRec();
+  UI.showToast(fn+' '+ln+' registered — now select a slot','ok');
+};
+window._rBookRegister = window._rBookRegisterNew; /* alias for old calls */
+
+window._rBookConfirm = async function() {
+  var bk = _R.bk;
+  if (!bk.patient) { UI.showToast('No patient selected','err'); return; }
+  if (!bk.selectedSlot) { UI.showToast('Please select a time slot','err'); return; }
+  if (!bk.selectedDate) { UI.showToast('Please select a date','err'); return; }
+  var dept = (document.getElementById('bk-visit-type')||{value:bk.dept||'General Consultation'}).value || bk.dept || 'General Consultation';
+  var type = (document.getElementById('bk-visit-type')||{value:'Consultation'}).value;
+  var ref  = 'APT-'+Date.now().toString().slice(-5);
+  var pt   = bk.patient;
+  var name = (pt.firstName||'')+(pt.lastName?' '+pt.lastName:'');
+  var apt  = { id:ref, ref:ref, patientId:pt.id||bk.id, name:name, dept:dept, clinician:dept,
+    date:bk.selectedDate, time:bk.selectedSlot, type:type, verified:false, status:'active',
+    phone:pt.phone||'', email:pt.email||'' };
+  _R.appointments.push(apt);
+
+  /* Notify patient */
+  var smsMsg = 'NIHMS APPOINTMENT CONFIRMED. Dear '+name.trim()+', your appointment ('+ref+') is booked at '+dept+' on '+bk.selectedDate+' at '+bk.selectedSlot+'. Please arrive 10 min early. Clinic: 07:00-17:00. Emergencies: 10177.';
+  var emailHtml = '<div style="font-family:Arial;max-width:520px;margin:0 auto"><div style="background:linear-gradient(135deg,#3b82f6,#2563eb);padding:24px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Confirmed</h2></div><div style="background:#f8fafc;padding:24px;border-radius:0 0 10px 10px"><p>Dear <strong>'+name.trim()+'</strong>,</p><table style="width:100%;border-collapse:collapse;margin:16px 0"><tr><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#94a3b8;font-size:13px">Reference</td><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#3b82f6">'+ref+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#94a3b8;font-size:13px">Department</td><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-weight:600">'+dept+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#94a3b8;font-size:13px">Date</td><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-weight:600">'+bk.selectedDate+'</td></tr><tr><td style="padding:8px 12px;color:#94a3b8;font-size:13px">Time</td><td style="padding:8px 12px;font-weight:600">'+bk.selectedSlot+'</td></tr></table><p style="font-size:13px;color:#475569">Please arrive 10 minutes before your appointment time.</p><p style="font-size:12px;color:#94a3b8">Johannesburg CHC · Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Emergencies: 10177</p></div></div>';
+  try {
+    if(pt.phone) await API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:pt.phone,message:smsMsg})}).catch(function(){});
+    if(pt.email) await API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:pt.email,subject:'NIHMS — Appointment confirmed: '+ref,html:emailHtml})}).catch(function(){});
+  } catch(_) {}
+
+  _R.bk = { step:'done', id:bk.id, patient:pt, slot:null, slotIdx:null, notFound:false,
+    selectedSlot:null, selectedDate:'', dept:'General Consultation',
+    result:{ name:name, ref:ref, dept:dept, date:bk.selectedDate, time:bk.selectedSlot, phone:pt.phone, email:pt.email }};
+  _rRec();
+  UI.showToast('Appointment '+ref+' confirmed','ok');
+};
+
+/* Queue */
+window._rQueueAdvance = function(token, newStatus) {
+  var p=_R.queue.find(function(q){return q.token===token;});
+  if(!p) return;
+  /* Telemedicine: skip nurse station */
+  if(p.department==='Telemedicine' && newStatus==='at-nurse') newStatus='with-doctor';
+  p.status=newStatus;
+  /* Push to nurse if going to nurse station */
+  if(newStatus==='at-nurse') {
+    var req={id:'REQ-'+token+'-adv',patientId:p.id,patientName:p.name,age:p.age||'—',sex:p.sex||'—',
+      complaint:p.complaint||'Queue check-in',priority:p.priority==='urgent'?'Emergency':'Normal',
+      requestedBy:'Reception',requestedAt:_fmtTime(),notes:'Patient '+token+' sent to nurse station from queue.',seen:false};
+    if(window._nurseAddRequest) window._nurseAddRequest(req);
+    else{if(!window._NURSE_REQUESTS)window._NURSE_REQUESTS=[];window._NURSE_REQUESTS.push(req);}
+  }
+  _rRec();
+  var labels={'at-nurse':'sent to nurses station','with-doctor':p.department==='Telemedicine'?'sent to telemedicine queue':'sent to doctor','done':'marked complete'};
+  UI.showToast(p.name+' '+(labels[newStatus]||newStatus),'ok');
+};
+
+window._rQueueDelayModal = function() {
+  UI.showToast('Notify delay feature — use the Messaging tab to send a delay notice','warn');
+  _R.tab='messaging'; _rRec();
+};
+
+/* Emergency */
+window._rEmergencyIssue = function() {
+  var id=(document.getElementById('em-id')||{value:''}).value.trim();
+  var name=(document.getElementById('em-name')||{value:''}).value.trim();
+  var dept=(document.getElementById('em-dept')||{value:'General Consultation'}).value;
+  var desc=(document.getElementById('em-desc')||{value:''}).value.trim();
+  if(!name){UI.showToast('Patient name or description is required','err');return;}
+  var token='E-'+String(_R.queue.filter(function(p){return p.priority==='urgent';}).length+1).padStart(3,'0');
+  if(!id) id='WALK-'+Date.now().toString().slice(-4);
+  var emQEntry = { token:token, id:id, name:name, department:dept, priority:'urgent', status:'waiting', checkedInAt:new Date().toISOString(), complaint:desc };
+  _R.queue.push(emQEntry);
+
+  /* Push URGENT request to nurse — triggers incoming emergency alert */
+  var emReq={id:'REQ-'+token, patientId:id, patientName:name, age:'—', sex:'—',
+    complaint:desc||'Emergency intake', priority:'Emergency',
+    requestedBy:'Reception — EMERGENCY', requestedAt:_fmtTime(),
+    notes:'⚡ EMERGENCY fast-track. Token: '+token+'. Dept: '+dept+(desc?'. Chief complaint: '+desc:'')+'. Patient directed to nurse station immediately.',
+    seen:false, isEmergency:true };
+  if(window._nurseAddRequest) window._nurseAddRequest(emReq);
+  else { if(!window._NURSE_REQUESTS) window._NURSE_REQUESTS=[]; window._NURSE_REQUESTS.push(emReq); }
+
+  /* Also add to nurse _N.patients directly if nurse page is open */
+  if(window._N && window._N.patients) {
+    window._N.patients.unshift({
+      id:token, name:name, age:0, sex:'U', complaint:desc||'Emergency intake',
+      priority:'Emergency', status:'Awaiting Vitals', vitalStatus:'Pending',
+      arrivalTime:_fmtTime(), triageTime:null, waitMins:0, room:null,
+      emergencyClass:'Critical', vitals:null, flags:[], aiRisk:'Emergency intake — immediate vitals required',
+      acceptedAt:_fmtTime(),
+    });
+    /* Trigger alert dismissed = false so banner shows */
+    window._N.alertDismissed = false;
+    if(window._nurseRender) window._nurseRender();
+  }
+
+  _R.emId=''; _R.emName=''; _R.emDesc='';
+  _rRec();
+  UI.showToast('⚡ Emergency token '+token+' issued — nurse station notified','ok');
+};
+
+/* Messaging */
+window._rSendMsg = function() {
+  var to=(document.getElementById('msg-to')||{value:''}).value;
+  var body=(document.getElementById('msg-body')||{value:''}).value.trim();
+  if(!body||!to){UI.showToast('Please select a recipient and enter a message','err');return;}
+  _R.messages.unshift({id:Date.now(),from:'Receptionist → '+to,to:to,text:body,time:_fmtTime(),read:true});
+  _R.msgTo=''; _R.msgBody='';
+  _rRec(); UI.showToast('Message sent to '+to,'ok');
+};
+
+window._rSendDelay = function() {
+  var dept=(document.getElementById('delay-dept')||{value:'all'}).value;
+  var dur=(document.getElementById('delay-dur')||{value:'30'}).value;
+  var reason=(document.getElementById('delay-reason')||{value:''}).value.trim();
+  var text=dur+'-minute delay expected'+(dept!=='all'?' in '+dept:'')+'.'+( reason?' Reason: '+reason:'')+ ' We apologise for the inconvenience.';
+  _R.messages.unshift({id:Date.now(),from:'Reception — Delay Notice',to:dept==='all'?'All patients':'Patients in '+dept,text:text,time:_fmtTime(),read:true});
+  _rRec(); UI.showToast('Delay notification sent','ok');
+};
+
+/* Bind events */
+
+function _bindAptEditGrid() {
+  var grid = document.querySelector('[data-edit-slot]');
+  if (!grid) return;
+  var container = grid.parentElement;
+  if (!container || container._bound) return;
+  container._bound = true;
+  container.addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-edit-slot]');
+    if (!btn) return;
+    var t = btn.getAttribute('data-edit-slot');
+    if (_R._editApt) _R._editApt._newTime = t;
+    container.querySelectorAll('[data-edit-slot]').forEach(function(b) {
+      var sel = b.getAttribute('data-edit-slot') === t;
+      b.style.border     = '1.5px solid ' + (sel ? '#3b82f6' : '#e2e8f0');
+      b.style.background = sel ? '#eff6ff' : '#fff';
+      b.style.color      = sel ? '#1d4ed8' : '#0f172a';
+      b.style.fontWeight = sel ? '700' : '400';
+    });
+    var lbl = document.getElementById('ae-selected-slot');
+    if (lbl) lbl.textContent = 'Selected: ' + t;
+  });
+}
+
+function _rBind() {
+  /* Bind slot grids */
+  _bindSlotGrid();
+  _bindBkGrids();
+  /* Bind apt-edit slot grid */
+  _bindAptEditGrid();
+  /* Update tab nav highlights */
+  document.querySelectorAll('[id^="rn-"]').forEach(function(btn){
+    var t=btn.id.replace('rn-','');
+    btn.style.borderBottomColor=t===_R.tab?'#0d9488':'transparent';
+    btn.style.color=t===_R.tab?'#0d9488':'#64748b';
+    btn.style.fontWeight=t===_R.tab?'700':'500';
+  });
+  /* Enter on ID inputs */
+  ['ci-id','bk-id','pf-search-id'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.addEventListener('keydown',function(e){ if(e.key==='Enter'){if(id==='ci-id')window._rCheckinSearch();else if(id==='bk-id')window._rBookSearch();else window._rPfSearch();} });
+  });
+}
+
+/* Expose */
+window._rTab=_rTab;
+window._rRec=_rRec;
+
+window._rAptSaveEdit = function() {
+  var apt = _R._editApt;
+  if(!apt) return;
+  var dept = (document.getElementById('ae-dept')||{value:apt.dept}).value;
+  var date = (document.getElementById('ae-date')||{value:apt.date}).value;
+  var slot = apt.time; /* updated by _bindAptEditGrid */
+  if(!date){ UI.showToast('Please select a date','err'); return; }
+  var oldDept=apt.dept, oldDate=apt.date, oldTime=apt.time;
+  apt.dept=dept; apt.date=date;
+  if(apt._newTime) { apt.time=apt._newTime; slot=apt._newTime; }
+  apt.verified=false;
+  /* Notify patient of change */
+  var msg='NIHMS: Your appointment '+apt.ref+' has been updated. New details: '+dept+' on '+date+(slot?' at '+slot:'')+'. Please confirm with reception.';
+  try{
+    if(apt.phone||apt.patientPhone) API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:apt.phone||apt.patientPhone,message:msg})}).catch(function(){});
+    if(apt.email||apt.patientEmail) API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:apt.email||apt.patientEmail,subject:'NIHMS — Appointment updated: '+apt.ref,html:'<p>'+msg+'</p>'})}).catch(function(){});
+  }catch(_){}
+  _R._editApt=null;
+  _rTab('appointments');
+  UI.showToast('Appointment '+apt.ref+' updated','ok');
+};
+
+/* ── Upgrade delay notification to send SMS + email + portal ─────────── */
+window._rSendDelay = async function() {
+  var dept=(document.getElementById('delay-dept')||{value:'all'}).value;
+  var dur=(document.getElementById('delay-dur')||{value:'30'}).value;
+  var reason=(document.getElementById('delay-reason')||{value:''}).value.trim();
+  var text=dur+'-minute delay expected'+(dept!=='all'?' in '+dept:'')+'.'+( reason?' Reason: '+reason:'')+ ' We apologise for the inconvenience.';
+
+  /* Post to notice board */
+  _R.messages.unshift({id:Date.now(),from:'Reception — Delay Notice',to:dept==='all'?'All patients':'Patients in '+dept,text:text,time:_fmtTime(),read:true});
+
+  /* Send to affected patients via SMS + email */
+  var affected = _R.appointments.filter(function(a){
+    return (dept==='all'||a.dept===dept) && a.status!=='cancelled' &&
+           (a.date===new Date().toISOString().slice(0,10));
+  });
+
+  var sent=0;
+  for(var i=0;i<affected.length;i++){
+    var a=affected[i];
+    var smsMsg='NIHMS DELAY NOTICE: '+dur+' min delay'+(dept!=='all'?' for '+dept:'')+'. '+( reason?'Reason: '+reason+'. ':'')+'We apologise for the inconvenience.';
+    var emailHtml='<div style="font-family:Arial;max-width:500px;margin:0 auto"><div style="background:#d97706;padding:20px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Delay Notice</h2></div><div style="background:#fffbeb;padding:20px;border-radius:0 0 10px 10px"><p><strong>Dear patient,</strong></p><p>There is a <strong>'+dur+' minute delay</strong>'+(dept!=='all'?' for <strong>'+dept+'</strong>':'')+' today.</p>'+(reason?'<p>Reason: '+reason+'</p>':'')+'<p style="color:#92400e">Ref: '+a.ref+' · '+a.dept+' · '+a.time+'</p><p>We apologise for the inconvenience.</p></div></div>';
+    try{
+      if(a.phone||a.patientPhone){ await API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:a.phone||a.patientPhone,message:smsMsg})}).catch(function(){}); sent++; }
+      if(a.email||a.patientEmail){ await API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:a.email||a.patientEmail,subject:'NIHMS — Delay notice for your appointment',html:emailHtml})}).catch(function(){}); }
+    }catch(_){}
+  }
+
+  _rRec();
+  UI.showToast('Delay notice sent to '+sent+' patient'+(sent!==1?'s':'')+' via SMS & email','ok');
+};
+

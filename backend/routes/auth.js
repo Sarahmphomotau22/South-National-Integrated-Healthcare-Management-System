@@ -5,8 +5,6 @@ const router   = express.Router();
 const ctrl     = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
 const validate = require('../middleware/validate');
-const jwt = require('jsonwebtoken');
-const SECRET = process.env.JWT_SECRET;
 
 const pwdRules = [
   body('password')
@@ -187,20 +185,34 @@ router.post('/chat', async (req, res, next) => {
       req.end();
     });
 
-    const sys = systemPrompt || `You are NOMI, the NIHMS (National Integrated Healthcare Management System) health assistant for South Africa.
+    /* Use provided systemPrompt (clinical or patient) or detect role */
+    const userRole = req.user?.role || 'patient';
+    const isClinical = systemPrompt && systemPrompt.includes('PATIENT CONTEXT');
 
-CRITICAL RULES — follow these exactly:
-- NEVER show your thinking process, reasoning steps, analysis, or numbered plans
-- NEVER use markdown formatting — no asterisks, no hashes, no bullet dashes
-- Reply ONLY with the final answer, written in plain conversational text
-- Use short paragraphs separated by blank lines
-- Write in simple, clear language suitable for all literacy levels
-- Always give practical, actionable health information
-- Include emergency guidance when relevant (call 10177 for emergencies)
-- Mention consulting a doctor or clinic for personal medical decisions
-- Tailor advice to the South African public health context (NHI, public clinics, CHCs)
-- Never refuse to answer a health question — always provide helpful information
-- Keep replies under 400 words`;
+    const sys = systemPrompt || (
+      ['doctor','nurse','facility_admin'].includes(userRole)
+      ? `You are a clinical decision support AI for NIHMS South Africa, assisting qualified healthcare professionals.
+RULES:
+- Structure responses with: ASSESSMENT / DIFFERENTIAL DIAGNOSIS (with ICD-10) / RECOMMENDED INVESTIGATIONS / TREATMENT CONSIDERATIONS / RED FLAGS
+- Use SA clinical guidelines (SAMF, DOH, NHI formulary)
+- Use "consider", "consistent with", "suggestive of" — never diagnose definitively
+- Include ICD-10 codes for all diagnoses
+- Flag drug interactions when relevant
+- Plain text only, no markdown asterisks or hashes
+- End every response with: "Final clinical decision rests with the attending physician."
+- Keep responses evidence-based and concise`
+      : `You are NOMI, the NIHMS health assistant for South Africa.
+RULES:
+- NEVER show thinking process, reasoning steps, or numbered plans
+- Reply in plain conversational text — no asterisks, no hashes
+- Short paragraphs, simple language for all literacy levels
+- Give practical actionable health information
+- Include emergency guidance when relevant (call 10177)
+- Mention consulting a doctor for personal medical decisions
+- Tailor advice to SA public health context (NHI, public clinics)
+- Never refuse to answer a health question
+- Keep replies under 400 words`
+    );
 
     // ── 1. Try Ollama (local, free, no API key) ──
     const ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
@@ -242,16 +254,12 @@ CRITICAL RULES — follow these exactly:
     if (process.env.GROQ_API_KEY) {
       // Try models in order until one works (handles decommissioned models)
       // Current live Groq models as of Aug 2026 — verified from Groq API
-      // Prefer Llama-4 — clean output, no thinking tokens leaked
-      // Qwen models are last resort: they expose <think>...</think> in replies
+      // Models confirmed working — qwen first (known working on this account)
       const groqModels = [
-        process.env.GROQ_MODEL,
-        'meta-llama/llama-4-maverick-17b-128e-instruct',
-        'meta-llama/llama-4-scout-17b-16e-instruct',
-        'llama-3.3-70b-versatile',
-        'llama-3.1-8b-instant',
-        'qwen/qwen3.6-27b',
-        'qwen/qwen3-32b',
+        process.env.GROQ_MODEL,           // .env override — always first
+        'qwen/qwen3.6-27b',               // confirmed working
+        'qwen/qwen3-32b',                 // fallback
+        'meta-llama/llama-4-maverick-17b-128e-instruct', // try if available
       ].filter(Boolean);
 
       let groqSuccess = false;
@@ -364,7 +372,9 @@ CRITICAL RULES — follow these exactly:
       reply: [
               'Hello! I am NOMI, the NIHMS Health Assistant.',
               '',
-          
+              'I am currently having trouble connecting to the AI service.',
+              'This usually means the API key needs to be refreshed.',
+              '',
               'Please speak to a nurse or doctor at your clinic for health questions.',
               'For emergencies, call 10177 immediately.'
              ].join('\n')
