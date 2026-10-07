@@ -1,0 +1,296 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   NIHMS — Shared Design System  ·  Used by all role portals
+   receptionist.js · nurse.js · doctor.js · pharmacy.js
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Reset & Base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: 'Inter', system-ui, -apple-system, Arial, sans-serif; }
+body { background: #f8fafc; color: #0f172a; font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+
+/* ── Design Tokens ─────────────────────────────────────────────────────────── */
+:root {
+  /* Brand */
+  --nihms-teal:       #0d9488;
+  --nihms-teal-dark:  #0f766e;
+  --nihms-teal-light: #f0fdfa;
+  --nihms-teal-bd:    #99f6e4;
+
+  /* Semantic */
+  --success:    #16a34a;  --success-lt: #f0fdf4;  --success-bd: #86efac;
+  --warning:    #d97706;  --warning-lt: #fffbeb;  --warning-bd: #fcd34d;
+  --danger:     #dc2626;  --danger-lt:  #fef2f2;  --danger-bd:  #fca5a5;
+  --info:       #2563eb;  --info-lt:    #eff6ff;  --info-bd:    #bfdbfe;
+  --purple:     #7c3aed;  --purple-lt:  #f5f3ff;
+
+  /* ML accent */
+  --ml-blue:    #1d4ed8;  --ml-blue-lt: #dbeafe;
+
+  /* Neutral */
+  --text:       #0f172a;
+  --text-mid:   #475569;
+  --text-light: #94a3b8;
+  --border:     #e2e8f0;
+  --surface:    #f8fafc;
+  --white:      #ffffff;
+
+  /* Layout */
+  --sidebar-w:  240px;
+  --topbar-h:   56px;
+
+  /* Radii */
+  --r-sm:   6px;
+  --r-md:   10px;
+  --r-lg:   14px;
+  --r-xl:   18px;
+  --r-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.05);
+  --shadow-md: 0 4px 12px rgba(0,0,0,.08);
+}
+
+/* ── Shell Layout (shared across all portals) ─────────────────────────────── */
+.nihms-shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  font-family: inherit;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+.nihms-sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: var(--white);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.nihms-sidebar-logo {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nihms-sidebar-logo .logo-mark {
+  width: 36px; height: 36px;
+  border-radius: var(--r-md);
+  background: var(--nihms-teal);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+
+.nihms-sidebar-logo .logo-text { font-size: 13px; font-weight: 700; color: var(--text); }
+.nihms-sidebar-logo .logo-sub  { font-size: 10px; color: var(--text-light); margin-top: 1px; }
+
+/* Nav sections */
+.nihms-nav-section { padding: 14px 10px 6px; }
+.nihms-nav-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-light);
+  padding: 0 8px; margin-bottom: 4px;
+}
+
+/* Nav items */
+.nihms-nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: var(--r-md);
+  cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-mid);
+  border: none; background: transparent; width: 100%;
+  text-align: left; font-family: inherit;
+  transition: background .15s, color .15s;
+}
+.nihms-nav-item:hover { background: var(--surface); color: var(--text); }
+.nihms-nav-item.active {
+  background: var(--nihms-teal-light);
+  color: var(--nihms-teal);
+  font-weight: 700;
+}
+.nihms-nav-item .nav-badge {
+  margin-left: auto;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: var(--r-full);
+  background: var(--nihms-teal);
+  color: #fff; font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.nihms-nav-item .nav-badge.urgent { background: var(--danger); }
+
+/* Sidebar footer */
+.nihms-sidebar-footer {
+  margin-top: auto;
+  padding: 12px 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Main area ───────────────────────────────────────────────────────────── */
+.nihms-main {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* ── Top bar ────────────────────────────────────────────────────────────── */
+.nihms-topbar {
+  height: var(--topbar-h);
+  padding: 0 24px;
+  display: flex; align-items: center; gap: 14px;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.nihms-topbar .page-title   { font-size: 16px; font-weight: 700; color: var(--text); }
+.nihms-topbar .page-sub     { font-size: 12px; color: var(--text-light); margin-top: 1px; }
+.nihms-topbar .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+
+/* ── Scrollable content area ─────────────────────────────────────────────── */
+.nihms-content { flex: 1; overflow-y: auto; padding: 24px; }
+
+/* ── Role accent bars ────────────────────────────────────────────────────── */
+.role-accent-receptionist { border-left: 3px solid var(--nihms-teal); }
+.role-accent-nurse        { border-left: 3px solid var(--info); }
+.role-accent-doctor       { border-left: 3px solid var(--success); }
+.role-accent-pharmacy     { border-left: 3px solid var(--warning); }
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+.nihms-card {
+  background: var(--white);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
+.nihms-card-header {
+  font-size: 13px; font-weight: 700; color: var(--text);
+  margin-bottom: 14px;
+}
+
+/* ── Stat tiles ───────────────────────────────────────────────────────────── */
+.nihms-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.nihms-stat {
+  background: var(--white);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+}
+.nihms-stat .stat-val  { font-size: 28px; font-weight: 800; color: var(--text); line-height: 1; }
+.nihms-stat .stat-lbl  { font-size: 11px; font-weight: 600; color: var(--text-light); margin-top: 4px; text-transform: uppercase; letter-spacing: .06em; }
+.nihms-stat .stat-sub  { font-size: 11px; color: var(--text-light); margin-top: 2px; }
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.nihms-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 10px 20px;
+  border-radius: var(--r-md); border: none;
+  font-size: 13px; font-weight: 700; font-family: inherit;
+  cursor: pointer; transition: opacity .15s;
+}
+.nihms-btn:hover { opacity: .88; }
+.nihms-btn-primary   { background: var(--nihms-teal); color: #fff; }
+.nihms-btn-danger    { background: var(--danger);     color: #fff; }
+.nihms-btn-secondary { background: var(--white); color: var(--text-mid); border: 1.5px solid var(--border); }
+.nihms-btn-ghost     { background: transparent; color: var(--nihms-teal); border: 1.5px solid var(--nihms-teal); }
+.nihms-btn-sm        { padding: 6px 14px; font-size: 12px; }
+.nihms-btn-lg        { padding: 14px 28px; font-size: 15px; }
+.nihms-btn-block     { width: 100%; justify-content: center; }
+
+/* ── Badges / chips ─────────────────────────────────────────────────────── */
+.nihms-badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 10px; border-radius: var(--r-full);
+  font-size: 11px; font-weight: 600;
+}
+.nihms-badge-green  { background: var(--success-lt); color: var(--success); border: 1px solid var(--success-bd); }
+.nihms-badge-amber  { background: var(--warning-lt); color: var(--warning); border: 1px solid var(--warning-bd); }
+.nihms-badge-red    { background: var(--danger-lt);  color: var(--danger);  border: 1px solid var(--danger-bd); }
+.nihms-badge-blue   { background: var(--info-lt);    color: var(--info);    border: 1px solid var(--info-bd); }
+.nihms-badge-teal   { background: var(--nihms-teal-light); color: var(--nihms-teal); border: 1px solid var(--nihms-teal-bd); }
+.nihms-badge-purple { background: var(--purple-lt);  color: var(--purple); }
+.nihms-badge-ml     { background: var(--ml-blue-lt); color: var(--ml-blue); border: 1px solid #93c5fd; }
+
+/* ── Risk badges ────────────────────────────────────────────────────────── */
+.risk-HIGH   { background: #fef2f2; color: #dc2626; border: 1.5px solid #fca5a5; font-weight: 700; }
+.risk-MEDIUM { background: #fffbeb; color: #d97706; border: 1.5px solid #fcd34d; font-weight: 700; }
+.risk-LOW    { background: #f0fdf4; color: #16a34a; border: 1.5px solid #86efac; font-weight: 700; }
+
+/* ── Notification banners ───────────────────────────────────────────────── */
+.nihms-banner { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--r-lg); margin-bottom: 14px; }
+.nihms-banner-green  { background: var(--success-lt); border: 1.5px solid var(--success-bd); }
+.nihms-banner-amber  { background: var(--warning-lt); border: 1.5px solid var(--warning-bd); }
+.nihms-banner-red    { background: var(--danger-lt);  border: 1.5px solid var(--danger-bd); }
+.nihms-banner-blue   { background: var(--info-lt);    border: 1.5px solid var(--info-bd); }
+.nihms-banner .banner-icon { font-size: 20px; flex-shrink: 0; margin-top: 2px; }
+.nihms-banner .banner-title { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+.nihms-banner .banner-text  { font-size: 12px; }
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+.nihms-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.nihms-table th {
+  padding: 9px 14px; text-align: left; font-size: 10px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-light); border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.nihms-table td { padding: 11px 14px; border-bottom: 1px solid #f1f5f9; color: var(--text); }
+.nihms-table tr:last-child td { border-bottom: none; }
+.nihms-table tr:hover td { background: #f8fafc; }
+
+/* ── Form elements ───────────────────────────────────────────────────────── */
+.nihms-label {
+  display: block; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-mid); margin-bottom: 5px;
+}
+.nihms-input, .nihms-select {
+  width: 100%; padding: 10px 14px;
+  border: 1.5px solid var(--border); border-radius: var(--r-md);
+  font-size: 14px; font-family: inherit; color: var(--text);
+  background: var(--white); outline: none;
+  transition: border-color .15s;
+}
+.nihms-input:focus, .nihms-select:focus { border-color: var(--nihms-teal); }
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+.nihms-toast {
+  position: fixed; bottom: 24px; right: 24px;
+  padding: 12px 18px; border-radius: var(--r-lg);
+  font-size: 13px; font-weight: 600; font-family: inherit;
+  box-shadow: var(--shadow-md); z-index: 9999;
+  max-width: 360px; opacity: 0;
+  transform: translateY(8px);
+  transition: opacity .25s, transform .25s;
+}
+.nihms-toast.show   { opacity: 1; transform: translateY(0); }
+.nihms-toast.ok     { background: var(--success); color: #fff; }
+.nihms-toast.err    { background: var(--danger);  color: #fff; }
+.nihms-toast.warn   { background: var(--warning); color: #fff; }
+
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+
+/* ── Utility ─────────────────────────────────────────────────────────────── */
+.flex         { display: flex; }
+.flex-col     { display: flex; flex-direction: column; }
+.items-center { align-items: center; }
+.gap-2        { gap: 8px; }
+.gap-3        { gap: 12px; }
+.gap-4        { gap: 16px; }
+.mt-auto      { margin-top: auto; }
+.truncate     { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.text-sm      { font-size: 12px; }
+.text-xs      { font-size: 11px; }
+.font-bold    { font-weight: 700; }
+.text-muted   { color: var(--text-light); }
+.text-mid     { color: var(--text-mid); }
+

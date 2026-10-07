@@ -19,7 +19,6 @@ window.Router = (() => {
         { id: 'facilities',  icon: 'ti-building-hospital', label: 'Facilities' },
         { id: 'users',       icon: 'ti-users',             label: 'All users & roles' },
         { id: 'overview',    icon: 'ti-chart-bar',         label: 'Analytics' },
-        { id: 'assistant',   icon: 'ti-robot',             label: 'AI Assistant' },
       ]
     },
 
@@ -34,7 +33,6 @@ window.Router = (() => {
         { id: 'users',       icon: 'ti-users',             label: 'Users & roles' },
         { id: 'overview',    icon: 'ti-chart-bar',         label: 'Analytics' },
         { id: 'flow',        icon: 'ti-route',             label: 'Patient flow' },
-        { id: 'assistant',   icon: 'ti-robot',             label: 'AI Assistant' },
       ]
     },
 
@@ -46,13 +44,11 @@ window.Router = (() => {
         { id: 'receptionist',    icon: 'ti-layout-dashboard', label: 'Reception desk' },
         { section: 'Facility' },
         { id: 'facility_admin',  icon: 'ti-building-hospital',label: 'Facility dashboard' },
-        { id: 'queue_dashboard', icon: 'ti-list-numbers',     label: 'Queue management' },
         { section: 'Management' },
         { id: 'users',           icon: 'ti-users-group',      label: 'Staff management' },
         { id: 'facilities',      icon: 'ti-building',         label: 'Facility settings' },
         { id: 'overview',        icon: 'ti-chart-bar',        label: 'Analytics' },
         { id: 'flow',            icon: 'ti-route',            label: 'Patient flow' },
-        { id: 'assistant',       icon: 'ti-robot',            label: 'AI Assistant' },
       ]
     },
 
@@ -61,15 +57,25 @@ window.Router = (() => {
       default: 'doc_dashboard',
       nav: [
         { section: 'Today' },
-        { id: 'doc_dashboard',  icon: 'ti-layout-dashboard', label: 'My dashboard' },
-        { id: 'queue_dashboard',icon: 'ti-list-numbers',     label: 'Queue management' },
-        { id: 'queue',          icon: 'ti-users',            label: 'Patient queue' },
-        { section: 'Clinical' },
-        { id: 'consult',        icon: 'ti-stethoscope',      label: 'Consultation' },
-        { id: 'patients',       icon: 'ti-user-search',      label: 'Patient search' },
-        { id: 'lab',            icon: 'ti-flask',            label: 'Lab orders' },
-        { id: 'telemedicine',   icon: 'ti-video',            label: 'Telemedicine' },
-        { id: 'assistant',      icon: 'ti-robot',            label: 'AI Assistant' },
+        { id: 'doc_dashboard',   icon: 'ti-layout-dashboard', label: 'My dashboard'     },
+        { id: 'appointments',    icon: 'ti-calendar',         label: 'Appointments'      },
+        { id: 'doc_tasks',       icon: 'ti-check',            label: 'Clinical tasks'    },
+        { section: 'Patients' },
+        { id: 'patients',        icon: 'ti-users',            label: 'Patient 360°'      },
+        { id: 'consult',         icon: 'ti-stethoscope',      label: 'Consultations'     },
+        { id: 'medical_notes',   icon: 'ti-notes',            label: 'Medical notes'     },
+        { section: 'Orders & Results' },
+        { id: 'prescriptions',   icon: 'ti-pill',             label: 'Prescriptions'     },
+        { id: 'lab',             icon: 'ti-flask',            label: 'Lab orders'        },
+        { id: 'lab_results',     icon: 'ti-chart-bar',        label: 'Lab results'       },
+        { id: 'radiology',       icon: 'ti-scan',             label: 'Radiology'         },
+        { id: 'referrals',       icon: 'ti-arrows-exchange',  label: 'Referrals'         },
+        { section: 'Communication' },
+        { id: 'telemedicine',    icon: 'ti-video',            label: 'Telemedicine'      },
+        { id: 'messages',        icon: 'ti-message',          label: 'Messages'          },
+        { id: 'notifications',   icon: 'ti-bell',             label: 'Notifications'     },
+        { section: 'Documents' },
+        { id: 'med_certs',       icon: 'ti-file-certificate', label: 'Medical certs'     },
       ]
     },
 
@@ -95,8 +101,6 @@ window.Router = (() => {
       nav: [
         { section: 'Laboratory' },
         { id: 'lab_dashboard',   icon: 'ti-layout-dashboard', label: 'Lab dashboard' },
-        { id: 'queue_dashboard', icon: 'ti-list-numbers',     label: 'Queue' },
-        { id: 'assistant',       icon: 'ti-robot',            label: 'AI Assistant' },
       ]
     },
 
@@ -124,7 +128,6 @@ window.Router = (() => {
         { section: 'Finance' },
         { id: 'overview',    icon: 'ti-chart-bar',        label: 'Overview' },
         { id: 'flow',        icon: 'ti-route',            label: 'Patient flow' },
-        { id: 'assistant',   icon: 'ti-robot',            label: 'AI Assistant' },
       ]
     },
 
@@ -137,7 +140,6 @@ window.Router = (() => {
         { id: 'myrecords',   icon: 'ti-clipboard-list',    label: 'Medical records' },
         { id: 'appointments',icon: 'ti-calendar-event',    label: 'My appointments' },
         { id: 'billing',     icon: 'ti-credit-card',       label: 'Billing & medical aid' },
-        { id: 'assistant',   icon: 'ti-robot',             label: 'AI Assistant' },
       ]
     }
   };

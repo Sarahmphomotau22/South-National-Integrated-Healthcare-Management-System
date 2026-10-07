@@ -103,6 +103,7 @@ app.use('/api/v1/queue2',             require('./routes/queue2'));
 app.use('/api/v1/consultation-notes', require('./routes/consultationNotes'));
 app.use('/api/v1/surveys',            require('./routes/surveys'));
 app.use('/api/v1/ml',                 require('./routes/ml'));
+app.use('/api/v1/ml', require('./routes/ml_triage'));
 // Notifications route (SMS + email)
 try {
   app.use('/api/v1/notifications', require('./routes/notifications'));

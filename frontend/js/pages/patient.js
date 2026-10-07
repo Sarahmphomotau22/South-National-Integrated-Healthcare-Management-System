@@ -26,6 +26,16 @@ async function _mhLoad() {
   var wrap = document.getElementById('mh-body');
   if (!wrap) return;
 
+  /* ── Inject pulse CSS for queue card (once) ── */
+  if (!document.getElementById('nihms-queue-anim')) {
+    var s = document.createElement('style');
+    s.id  = 'nihms-queue-anim';
+    s.textContent =
+      '@keyframes _nihms-pulse{0%{box-shadow:0 0 0 0 rgba(13,148,136,.5)}70%{box-shadow:0 0 0 10px rgba(13,148,136,0)}100%{box-shadow:0 0 0 0 rgba(13,148,136,0)}}' +
+      '.nihms-token-pulse{animation:_nihms-pulse 1.8s infinite;}';
+    document.head.appendChild(s);
+  }
+
   /* Facility alerts */
   try {
     var u = API.getStoredUser();
@@ -62,7 +72,7 @@ async function _mhLoad() {
     }
 
     /* Update topbar avatar */
-    var profUrl = p.profilePicture && p.profilePicture.url ? 'http://localhost:5000' + p.profilePicture.url : null;
+    var profUrl = p.profilePicture && p.profilePicture.url ? 'https://nihms-backend.onrender.com' + p.profilePicture.url : null;
     var initials = ((p.firstName||'U')[0] + (p.lastName||'S')[0]).toUpperCase();
     var avatarEl = document.getElementById('topbar-avatar');
     if (avatarEl) {
@@ -80,11 +90,59 @@ async function _mhLoad() {
 
     var results = await Promise.allSettled([
       API._fetchDirect('/queue2/my-token?patientId='+p._id+'&facilityId='+(p.primaryFacility && p.primaryFacility._id || (API.getStoredUser() && (API.getStoredUser().facilityId || API.getStoredUser().facility))), {method:'GET'}),
-      API.appointments.list({ patient: p._id, limit: 10 })
+      API.appointments.list({ patient: p._id, limit: 10 }),
+      API._fetchDirect('/messages?recipientRole=PATIENT&patientId='+p._id+'&limit=20', {method:'GET'}).catch(function(){ return null; }),
+      /* Also try /queue/token endpoint from receptionist portal */
+      API._fetchDirect('/queue?patientId='+p._id+'&status=waiting&limit=1', {method:'GET'}).catch(function(){ return null; }),
     ]);
 
     var qTok  = results[0].value && results[0].value.data;
     var appts = results[1].value && results[1].value.data || [];
+    var msgs  = (results[2] && results[2].value && results[2].value.data) || [];
+
+    /* ── Fallback: read token from localStorage if API returned nothing ── */
+    if (!qTok || ['completed','cancelled','skipped'].includes(qTok.status)) {
+      try {
+        var lsRaw = localStorage.getItem('nihms_patient_token');
+        if (lsRaw) {
+          var lsTok = JSON.parse(lsRaw);
+          var today = new Date().toISOString().slice(0,10);
+          if (lsTok.token && (lsTok.date === today || !lsTok.date)) {
+            /* Try to enrich from queue API result */
+            var queueRes = results[3] && results[3].value && results[3].value.data;
+            var queueEntry = queueRes && queueRes[0];
+            qTok = {
+              token:         lsTok.token,
+              status:        (queueEntry && queueEntry.status) || lsTok.status || 'waiting',
+              dept:          lsTok.dept,
+              aheadCount:    queueEntry ? queueEntry.position - 1 : null,
+              estimatedWait: queueEntry ? queueEntry.waitMinutes : null,
+              tokenType:     (queueEntry && queueEntry.type) || lsTok.type || 'normal',
+              checkedAt:     lsTok.checkedAt,
+              date:          lsTok.date,
+              time:          lsTok.time,
+              fromLocalStorage: true,
+            };
+          }
+        }
+      } catch(_) {}
+    }
+
+    /* ── Also load messages from receptionist localStorage bridge ── */
+    try {
+      var lsMsgs = JSON.parse(localStorage.getItem('nihms_patient_messages') || '[]');
+      if (lsMsgs.length) {
+        /* Merge with API messages, deduplicate by id */
+        var merged = lsMsgs.concat(msgs);
+        var seen = {};
+        msgs = merged.filter(function(m) {
+          var key = m.id || m._id || m.text;
+          if (seen[key]) return false;
+          seen[key] = true;
+          return true;
+        });
+      }
+    } catch(_) {}
     var now   = new Date();
     var upcoming = appts.filter(function(a){ return new Date(a.scheduledAt) > now && ['confirmed','pending'].includes(a.status); })
                        .sort(function(a,b){ return new Date(a.scheduledAt) - new Date(b.scheduledAt); });
@@ -126,27 +184,87 @@ async function _mhLoad() {
         '</div>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
-        '<div class="card"' + (qTok&&qTok.status==='called'?' style="border:2px solid var(--green)"':'') + '>' +
-          '<div class="card-title"><i class="ti ti-list-numbers"></i>Queue status</div>' +
+        '<div class="card" id="mh-queue-card" style="' + (qTok&&qTok.status==='called'?'border:2px solid var(--green);box-shadow:0 0 0 4px rgba(13,148,136,.15)':'') + '">' +
+          '<div class="card-title" style="display:flex;align-items:center;justify-content:space-between">' +
+            '<span><i class="ti ti-ticket"></i>My queue ticket</span>' +
+            (qTok ? '<span style="font-size:10px;font-weight:500;color:var(--text-muted);background:var(--bg-surface);padding:2px 8px;border-radius:99px">Auto-refreshes</span>' : '') +
+          '</div>' +
+
           (qTok && !['completed','cancelled','skipped'].includes(qTok.status) ?
-            (qTok.status==='called' ? '<div style="padding:8px 12px;background:var(--green);color:#fff;border-radius:8px;font-weight:700;font-size:13px;margin-bottom:10px;text-align:center">🔔 IT\'S YOUR TURN</div>' : '') +
-            '<div style="text-align:center;padding:12px 0">' +
-              '<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-hint)">Your token</div>' +
-              '<div style="font-size:64px;font-weight:900;font-family:var(--mono);color:'+tokenBg+';line-height:1.1">'+(qTok&&qTok.token)+'</div>' +
-              '<div style="display:flex;justify-content:center;gap:24px;margin:10px 0;font-size:13px">' +
-                '<div><strong style="font-size:20px">'+(qTok&&qTok.aheadCount!=null?qTok.aheadCount:'—')+'</strong><br><span style="color:var(--text-muted)">ahead</span></div>' +
-                '<div><strong style="font-size:20px">'+(qTok&&qTok.estimatedWait!=null?qTok.estimatedWait:'—')+'</strong><br><span style="color:var(--text-muted)">min wait</span></div>' +
-              '</div>' +
-              '<div style="font-size:12px;color:var(--text-muted)">'+tokenStatusMsg+'</div>' +
+
+            /* ── Active token ── */
+            (qTok.status==='called' ?
+              '<div style="padding:10px 14px;background:var(--green);color:#fff;border-radius:10px;font-weight:700;font-size:14px;margin-bottom:12px;text-align:center;animation:_nihms-pulse 1.5s infinite">' +
+                '🔔 IT\'S YOUR TURN — Please proceed now' +
+              '</div>'
+            : '') +
+
+            /* Token display */
+            '<div style="text-align:center;padding:14px 0 10px">' +
+              '<div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-hint);margin-bottom:4px">Your token</div>' +
+              '<div style="font-size:72px;font-weight:900;font-family:var(--mono);color:'+tokenBg+';line-height:1;letter-spacing:.04em">'+(qTok.token||'—')+'</div>' +
+              /* Department badge */
+              (qTok.dept ? '<div style="display:inline-block;margin-top:8px;padding:3px 12px;background:var(--green-light);color:var(--green-dark);border-radius:99px;font-size:11px;font-weight:700">'+qTok.dept+'</div>' : '') +
             '</div>' +
-            (['lab','pharmacy'].includes(qTok&&qTok.status) ? '<div class="alert-box alert-info" style="margin-top:8px"><i class="ti ti-'+(qTok.status==='lab'?'flask':'pill')+'"></i> Please go to the <strong>'+(qTok.status==='lab'?'Laboratory':'Pharmacy')+'</strong></div>' : '') +
-            (qTok&&qTok.status==='completed' ? '<div style="text-align:center;margin-top:12px">' +
-              '<div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Your visit is complete — share your experience</div>' +
-              '<button class="btn btn-green" style="width:100%;padding:10px" onclick="_launchSurvey(\''+qTok._id+'\',null)"><i class="ti ti-star"></i>Patient Experience Survey</button>' +
-              '</div>' : '')
+
+            /* Now serving / Est. wait tiles — matches screenshot */
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">' +
+              '<div style="background:var(--bg-surface);border-radius:10px;padding:10px;text-align:center">' +
+                '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:4px">Now serving</div>' +
+                '<div style="font-size:20px;font-weight:800;color:var(--text)">'+(qTok.aheadCount!=null && qTok.aheadCount>=0 ? (qTok.aheadCount===0?qTok.token:'—') : '—')+'</div>' +
+              '</div>' +
+              '<div style="background:var(--bg-surface);border-radius:10px;padding:10px;text-align:center">' +
+                '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:4px">Est. wait</div>' +
+                '<div style="font-size:20px;font-weight:800;color:var(--text)">'+(qTok.estimatedWait!=null?qTok.estimatedWait+'<span style="font-size:12px;font-weight:500"> min</span>':'—')+'</div>' +
+              '</div>' +
+            '</div>' +
+
+            /* Status message */
+            '<div style="padding:8px 12px;background:var(--bg-surface);border-radius:8px;font-size:12px;color:var(--text-muted);text-align:center;margin-bottom:8px">' +
+              tokenStatusMsg +
+            '</div>' +
+
+            /* Ahead count */
+            (qTok.aheadCount!=null && qTok.aheadCount > 0 ?
+              '<div style="font-size:12px;color:var(--text-muted);text-align:center;margin-bottom:8px">' +
+                '<strong style="color:var(--text)">' + qTok.aheadCount + '</strong> patient' + (qTok.aheadCount===1?'':'s') + ' ahead of you' +
+              '</div>'
+            : '') +
+
+            /* Special routing */
+            (['lab','pharmacy'].includes(qTok.status) ?
+              '<div class="alert-box alert-info" style="margin-top:8px">' +
+                '<i class="ti ti-' + (qTok.status==='lab'?'flask':'pill') + '"></i> Please go to the <strong>' + (qTok.status==='lab'?'Laboratory':'Pharmacy') + '</strong>' +
+              '</div>'
+            : '') +
+
+            /* Checked-in time */
+            (qTok.checkedAt ?
+              '<div style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:6px">' +
+                'Checked in at ' + new Date(qTok.checkedAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}) +
+              '</div>'
+            : '') +
+
+            /* Survey on completion */
+            (qTok.status==='completed' ?
+              '<div style="text-align:center;margin-top:12px">' +
+                '<div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Your visit is complete!</div>' +
+                '<button class="btn btn-green" style="width:100%;padding:10px" onclick="_launchSurvey(\''+qTok._id+'\',null)">' +
+                  '<i class="ti ti-star"></i>Rate your experience' +
+                '</button>' +
+              '</div>'
+            : '')
+
           :
-            '<div style="text-align:center;padding:16px;color:var(--text-muted)"><i class="ti ti-checks" style="font-size:32px;opacity:.25;display:block;margin-bottom:8px"></i>Not in queue today</div>' +
-            '<button class="btn btn-green" style="width:100%" onclick="Router.setPage(\'checkin\')"><i class="ti ti-login"></i>Check in to queue</button>'
+            /* ── No active token ── */
+            '<div style="text-align:center;padding:20px 10px">' +
+              '<div style="font-size:40px;margin-bottom:8px;opacity:.3">🎫</div>' +
+              '<div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:4px">No queue ticket today</div>' +
+              '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Your token will appear here after the receptionist checks you in</div>' +
+              '<a href="https://nihms.netlify.app/patient" style="display:block;padding:10px;background:var(--green);color:#fff;border-radius:10px;font-size:13px;font-weight:700;text-decoration:none;text-align:center" target="_blank">' +
+                '<i class="ti ti-external-link"></i> View token dashboard' +
+              '</a>' +
+            '</div>'
           ) +
         '</div>' +
         '<div class="card" id="mh-next-appt-card">' +
@@ -171,7 +289,60 @@ async function _mhLoad() {
           '</div>' +
           '<div id="mh-followup-section"></div>' +
         '</div>' +
-      '</div>';
+      '</div>' +
+
+      /* ── Messages from Reception ── */
+      (msgs && msgs.length ?
+        '<div class="card" style="margin-top:14px">' +
+          '<div class="card-title" style="display:flex;align-items:center;justify-content:space-between">' +
+            '<span><i class="ti ti-message-2"></i>Messages from Reception</span>' +
+            '<span style="background:var(--green);color:#fff;border-radius:99px;font-size:10px;font-weight:700;padding:2px 8px;min-width:18px;text-align:center">' +
+              msgs.filter(function(m){ return !m.read; }).length +
+            '</span>' +
+          '</div>' +
+          '<div style="display:flex;flex-direction:column;gap:0">' +
+            msgs.slice(0,5).map(function(m,i) {
+              var isUnread = !m.read;
+              var timeStr  = m.sentAt
+                ? new Date(m.sentAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'})
+                : (m.time || '');
+              var dateStr  = m.sentAt
+                ? new Date(m.sentAt).toLocaleDateString('en-ZA',{day:'numeric',month:'short'})
+                : '';
+              return '<div style="padding:12px 14px;border-bottom:' + (i<msgs.length-1?'1px solid var(--border)':'none') + ';' + (isUnread?'background:#f0fdf4':'') + ';display:flex;align-items:flex-start;gap:10px">' +
+                '<div style="width:34px;height:34px;border-radius:50%;background:' + (isUnread?'var(--green)':'var(--bg-surface)') + ';display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;border:1.5px solid ' + (isUnread?'var(--green)':'var(--border)') + '">' +
+                  (isUnread ? '📩' : '📬') +
+                '</div>' +
+                '<div style="flex:1;min-width:0">' +
+                  '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">' +
+                    '<span style="font-size:12px;font-weight:' + (isUnread?'700':'600') + ';color:' + (isUnread?'var(--green-dark)':'var(--text)') + '">' +
+                      (m.from || m.senderName || 'Reception') +
+                    '</span>' +
+                    (isUnread ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>' : '') +
+                    '<span style="margin-left:auto;font-size:10px;color:var(--text-muted);white-space:nowrap">' + (dateStr ? dateStr + ' · ' : '') + timeStr + '</span>' +
+                  '</div>' +
+                  '<div style="font-size:13px;color:var(--text);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">' +
+                    (m.text || m.body || m.message || '') +
+                  '</div>' +
+                '</div>' +
+              '</div>';
+            }).join('') +
+          '</div>' +
+          (msgs.length > 5 ?
+            '<div style="padding:10px 14px;text-align:center">' +
+              '<button class="btn btn-xs" onclick="Router.setPage(\'messaging\')"><i class="ti ti-messages"></i>View all ' + msgs.length + ' messages</button>' +
+            '</div>'
+          : '') +
+        '</div>'
+      :
+        '<div class="card" style="margin-top:14px">' +
+          '<div class="card-title"><i class="ti ti-message-2"></i>Messages from Reception</div>' +
+          '<div style="text-align:center;padding:16px;color:var(--text-muted)">' +
+            '<i class="ti ti-message-off" style="font-size:28px;opacity:.25;display:block;margin-bottom:6px"></i>' +
+            '<div style="font-size:13px">No messages from reception yet</div>' +
+          '</div>' +
+        '</div>'
+      );
     /* Load follow-up dates from consultation notes */
     try {
       if (p && p._id) {
@@ -253,10 +424,10 @@ window._uploadAvatarFromTopbar = async function(input) {
   try {
     var token = API.Tokens ? API.Tokens.getAccess() : (localStorage.getItem('nihms_access')||'');
     var form  = new FormData(); form.append('profilePicture', file);
-    var res   = await fetch('http://localhost:5000/api/v1/patients/me/upload-profile', {method:'POST',headers:{'Authorization':'Bearer '+token},body:form});
+    var res   = await fetch('https://nihms-backend.onrender.com/api/v1/patients/me/upload-profile', {method:'POST',headers:{'Authorization':'Bearer '+token},body:form});
     var data  = await res.json();
     if (!data.success) throw new Error(data.message||'Upload failed');
-    var url = 'http://localhost:5000' + data.data.url;
+    var url = 'https://nihms-backend.onrender.com' + data.data.url;
     if (avatarEl) {
       avatarEl.style.opacity='1'; avatarEl.style.padding='0'; avatarEl.style.overflow='hidden';
       avatarEl.innerHTML = '<img src="'+url+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%"><input type="file" id="avatar-file-input" accept=".jpg,.jpeg,.png" style="display:none" onchange="_uploadAvatarFromTopbar(this)">';
@@ -874,7 +1045,7 @@ function _buildProfileForm(p) {
       ? path.split('.').reduce(function(o,k){ return o&&o[k]!=null?o[k]:null; }, p)
       : fb;
   }
-  var profUrl  = p&&p.profilePicture&&p.profilePicture.url ? 'http://localhost:5000'+p.profilePicture.url : null;
+  var profUrl  = p&&p.profilePicture&&p.profilePicture.url ? 'https://nihms-backend.onrender.com'+p.profilePicture.url : null;
   var initials = p ? ((p.firstName||'U')[0]+(p.lastName||'S')[0]).toUpperCase() : '??';
   return '<div class="reg-tabs" style="max-width:620px;margin-bottom:0">' +
     ['Info','Contact','Address','Next of kin','Password','Documents'].map(function(t,i) {
@@ -1042,7 +1213,7 @@ window._uploadIdDoc = async function(input) {
   try {
     var token=API.Tokens?API.Tokens.getAccess():(localStorage.getItem('nihms_access')||'');
     var form=new FormData(); form.append('idDocument',file);
-    var res=await fetch('http://localhost:5000/api/v1/patients/me/upload-id',{method:'POST',headers:{'Authorization':'Bearer '+token},body:form});
+    var res=await fetch('https://nihms-backend.onrender.com/api/v1/patients/me/upload-id',{method:'POST',headers:{'Authorization':'Bearer '+token},body:form});
     var data=await res.json(); if(!data.success) throw new Error(data.message||'Upload failed');
     UI.showToast('ID document uploaded','ok');
     if(status) status.innerHTML='<div class="alert-box alert-ok" style="margin:0;font-size:12px"><i class="ti ti-check"></i>'+file.name+' uploaded</div>';

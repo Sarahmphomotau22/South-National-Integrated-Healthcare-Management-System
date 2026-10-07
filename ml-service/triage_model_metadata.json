@@ -1,0 +1,99 @@
+{
+  "modelVersion": "triage-v2.0",
+  "modelType": "Decision Tree",
+  "dataset": "patients_data_with_alerts.xlsx (50,000 records)",
+  "trainDate": "2026-09-13T18:14:55.540700Z",
+  "features": [
+    "Heart Rate (bpm)",
+    "SpO2 Level (%)",
+    "Systolic Blood Pressure (mmHg)",
+    "Diastolic Blood Pressure (mmHg)",
+    "Body Temperature (\u00b0C)"
+  ],
+  "featureMap": {
+    "Heart Rate (bpm)": "heartRate",
+    "SpO2 Level (%)": "spo2",
+    "Systolic Blood Pressure (mmHg)": "systolicBP",
+    "Diastolic Blood Pressure (mmHg)": "diastolicBP",
+    "Body Temperature (\u00b0C)": "temperature"
+  },
+  "target": "risk_level (LOW/MEDIUM/HIGH \u2014 derived from 4 alert columns)",
+  "labelClasses": [
+    "HIGH",
+    "LOW",
+    "MEDIUM"
+  ],
+  "trainSamples": 40000,
+  "testSamples": 10000,
+  "accuracy": 0.9999,
+  "precision": 0.9999,
+  "recall": 0.9999,
+  "f1Score": 0.9999,
+  "highRiskRecall": 1.0,
+  "highRiskF1": 0.9999,
+  "perClassMetrics": {
+    "HIGH": {
+      "precision": 0.9999,
+      "recall": 1.0,
+      "f1-score": 0.9999,
+      "support": 7267.0
+    },
+    "LOW": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 487.0
+    },
+    "MEDIUM": {
+      "precision": 1.0,
+      "recall": 0.9996,
+      "f1-score": 0.9998,
+      "support": 2246.0
+    }
+  },
+  "selectionReason": "Selected for highest HIGH-risk recall (fewest missed critical cases) and weighted F1",
+  "allModelResults": {
+    "Logistic Regression": {
+      "accuracy": 0.76,
+      "f1": 0.7776,
+      "highRecall": 0.806,
+      "highF1": 0.8671
+    },
+    "Decision Tree": {
+      "accuracy": 0.9999,
+      "f1": 0.9999,
+      "highRecall": 1.0,
+      "highF1": 0.9999
+    },
+    "Random Forest": {
+      "accuracy": 0.9999,
+      "f1": 0.9999,
+      "highRecall": 1.0,
+      "highF1": 0.9999
+    },
+    "Gradient Boosting": {
+      "accuracy": 0.9999,
+      "f1": 0.9999,
+      "highRecall": 0.9999,
+      "highF1": 0.9999
+    }
+  },
+  "safetyNote": "This model is a clinical decision-support tool only. It does not diagnose diseases or replace professional medical judgment.",
+  "datasetColumns": [
+    "Patient Number",
+    "Heart Rate (bpm)",
+    "SpO2 Level (%)",
+    "Systolic Blood Pressure (mmHg)",
+    "Diastolic Blood Pressure (mmHg)",
+    "Body Temperature (\u00b0C)",
+    "Fall Detection",
+    "Predicted Disease",
+    "Data Accuracy (%)",
+    "Heart Rate Alert",
+    "SpO2 Level Alert",
+    "Blood Pressure Alert",
+    "Temperature Alert",
+    "alert_score",
+    "risk_level"
+  ]
+}
