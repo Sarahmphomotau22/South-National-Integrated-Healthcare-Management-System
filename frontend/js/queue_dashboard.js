@@ -11,22 +11,6 @@ Pages['queue'] = () => {
   setTimeout(() => _loadDoctorQueue(), 0);
   return `
   <div id="doctor-dash">
-    <!-- Doctor header -->
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
-      <div style="display:flex;align-items:center;gap:12px">
-        <div style="width:44px;height:44px;border-radius:50%;background:var(--green-light);color:var(--green-dark);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px" id="doc-initials">DM</div>
-        <div>
-          <div style="font-weight:600;font-size:15px" id="doc-name">Loading…</div>
-          <div style="font-size:12px;color:var(--text-muted)" id="doc-sub">—</div>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn" onclick="Router.setPage('telemedicine')"><i class="ti ti-video"></i>Start telemedicine ↗</button>
-        <button class="btn" onclick="_showHandover()"><i class="ti ti-clipboard-list"></i>Handover</button>
-        <button class="btn btn-xs" style="padding:7px 10px" onclick="_loadDoctorQueue()"><i class="ti ti-refresh"></i></button>
-      </div>
-    </div>
-
     <!-- Stats row -->
     <div class="metric-grid metric-grid-4" style="margin-bottom:20px">
       <div class="metric-card"><div class="metric-label">In queue</div><div class="metric-value" id="stat-queue">—</div></div>
@@ -330,14 +314,22 @@ Pages['myhealth'] = () => {
 
   return `
   <div id="patient-home">
-    <div class="page-title">${greet}, ${user?.firstName||''}!</div>
+    <div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);border-radius:16px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:14px">
+      <div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <i class="ti ti-home-heart" style="font-size:22px;color:#fff"></i>
+      </div>
+      <div>
+        <div style="font-size:18px;font-weight:700;color:#fff;margin-bottom:2px">${greet}, ${user?.firstName||''}!</div>
+        <div style="font-size:12px;color:rgba(255,255,255,.75)">Welcome to your NIHMS patient portal</div>
+      </div>
+    </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
 
       <!-- HOME card -->
       <div class="card" style="margin-bottom:0">
         <div class="card-title"><i class="ti ti-home"></i>Home</div>
-        <div id="ph-greeting" style="background:var(--bg-surface);border-radius:var(--radius);padding:12px;margin-bottom:14px">
+        <div id="ph-greeting" style="background:linear-gradient(135deg,rgba(15,110,86,.08),rgba(26,74,155,.08));border:1px solid rgba(15,110,86,.15);border-radius:var(--radius);padding:12px;margin-bottom:14px">
           <div style="font-size:12px;color:var(--text-muted)">${greet}</div>
           <div style="font-weight:600;font-size:15px" id="ph-name">—</div>
           <div style="font-size:12px;color:var(--text-muted)" id="ph-id">ID: —</div>
@@ -345,17 +337,17 @@ Pages['myhealth'] = () => {
 
         <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:8px">Quick actions</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
-          <button onclick="Router.setPage('book')" style="padding:12px 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--blue-light);color:var(--blue);cursor:pointer;font-size:13px;font-weight:500;display:flex;flex-direction:column;align-items:center;gap:6px">
+          <button onclick="Router.setPage('book')" style="padding:12px 8px;border-radius:var(--radius);border:1px solid rgba(15,110,86,.25);background:linear-gradient(135deg,rgba(15,110,86,.1),rgba(26,74,155,.1));color:#0F6E56;cursor:pointer;font-size:13px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all .15s" onmouseover="this.style.background='linear-gradient(135deg,#0F6E56,#1A4A9B)';this.style.color='#fff';this.style.borderColor='transparent'" onmouseout="this.style.background='linear-gradient(135deg,rgba(15,110,86,.1),rgba(26,74,155,.1))';this.style.color='#0F6E56';this.style.borderColor='rgba(15,110,86,.25)'">
             <i class="ti ti-calendar-plus" style="font-size:20px"></i>Book appt
           </button>
-          <button onclick="Router.setPage('telemedicine')" style="padding:12px 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--green-light);color:var(--green-dark);cursor:pointer;font-size:13px;font-weight:500;display:flex;flex-direction:column;align-items:center;gap:6px">
+          <button onclick="Router.setPage('telemedicine')" style="padding:12px 8px;border-radius:var(--radius);border:1px solid rgba(26,74,155,.25);background:linear-gradient(135deg,rgba(26,74,155,.1),rgba(15,110,86,.1));color:#1A4A9B;cursor:pointer;font-size:13px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all .15s" onmouseover="this.style.background='linear-gradient(135deg,#1A4A9B,#0F6E56)';this.style.color='#fff';this.style.borderColor='transparent'" onmouseout="this.style.background='linear-gradient(135deg,rgba(26,74,155,.1),rgba(15,110,86,.1))';this.style.color='#1A4A9B';this.style.borderColor='rgba(26,74,155,.25)'">
             <i class="ti ti-video" style="font-size:20px"></i>See doctor
           </button>
-          <button onclick="Router.setPage('myrx')" style="padding:12px 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-surface);cursor:pointer;font-size:13px;font-weight:500;display:flex;flex-direction:column;align-items:center;gap:6px">
-            <i class="ti ti-pill" style="font-size:20px;color:var(--coral)"></i>Medications
+          <button onclick="Router.setPage('myrecords');setTimeout(function(){window._mrTab&&_mrTab(3);},400)" style="padding:12px 8px;border-radius:var(--radius);border:1px solid rgba(15,110,86,.25);background:linear-gradient(135deg,rgba(15,110,86,.1),rgba(26,74,155,.1));color:#0F6E56;cursor:pointer;font-size:13px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all .15s" onmouseover="this.style.background='linear-gradient(135deg,#0F6E56,#1A4A9B)';this.style.color='#fff';this.style.borderColor='transparent'" onmouseout="this.style.background='linear-gradient(135deg,rgba(15,110,86,.1),rgba(26,74,155,.1))';this.style.color='#0F6E56';this.style.borderColor='rgba(15,110,86,.25)'">
+            <i class="ti ti-pill" style="font-size:20px"></i>Medications
           </button>
-          <button onclick="Router.setPage('myprofile')" style="padding:12px 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-surface);cursor:pointer;font-size:13px;font-weight:500;display:flex;flex-direction:column;align-items:center;gap:6px">
-            <i class="ti ti-clipboard-list" style="font-size:20px;color:var(--blue)"></i>My records
+          <button onclick="Router.setPage('myrecords')" style="padding:12px 8px;border-radius:var(--radius);border:1px solid rgba(26,74,155,.25);background:linear-gradient(135deg,rgba(26,74,155,.1),rgba(15,110,86,.1));color:#1A4A9B;cursor:pointer;font-size:13px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all .15s" onmouseover="this.style.background='linear-gradient(135deg,#1A4A9B,#0F6E56)';this.style.color='#fff';this.style.borderColor='transparent'" onmouseout="this.style.background='linear-gradient(135deg,rgba(26,74,155,.1),rgba(15,110,86,.1))';this.style.color='#1A4A9B';this.style.borderColor='rgba(26,74,155,.25)'">
+            <i class="ti ti-clipboard-list" style="font-size:20px"></i>My records
           </button>
         </div>
 

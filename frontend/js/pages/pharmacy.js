@@ -10,7 +10,7 @@ if (typeof Pages === 'undefined') window.Pages = {};
    SHARED DATA  (mirrors pharmacy-data.ts)
 ═══════════════════════════════════════════════════════════════ */
 var _PH = (function() {
-  var TODAY = new Date('2026-08-08T12:00:00Z');
+  var TODAY = new Date();
   function daysUntil(d) { return Math.round((new Date(d+'T12:00:00Z')-TODAY)/86400000); }
 
   function stockState(i) {
@@ -111,16 +111,27 @@ var _PH = (function() {
 /* ═══════════════════════════════════════════════════════════════
    SHARED UI HELPERS
 ═══════════════════════════════════════════════════════════════ */
+var _phIconMap={
+  'ti-layout-dashboard':'📊','ti-package-search':'📦','ti-shield-check':'✅',
+  'ti-clipboard-check':'📋','ti-users':'👥','ti-history':'🕐','ti-truck':'🚚',
+  'ti-book-lock':'🔒','ti-bell':'🔔','ti-chart-bar':'📈','ti-alert-triangle':'⚠️',
+  'ti-thermometer':'🌡️','ti-trending-up':'📈','ti-scan-line':'📷','ti-qr-code':'📱',
+  'ti-brain-circuit':'🤖','ti-copy-x':'🚫','ti-circle-check':'✅','ti-shield-alert':'🛡️',
+  'ti-search':'🔍','ti-download':'⬇️','ti-send':'📤','ti-printer':'🖨️','ti-pill':'💊',
+  'ti-clock':'⏱️','ti-package-plus':'📦','ti-settings':'⚙️',
+};
+function _phIcon(cls,sz){return '<span style="font-size:'+(sz||'16px')+'">'+(cls?(_phIconMap[cls]||'•'):'')+'</span>';}
+
 function _phCard(icon, title, subtitle, action, body) {
-  return '<div style="background:var(--bg-card);border-radius:16px;border:1px solid var(--border);padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,.06)">' +
+  return '<div style="background:#ffffff;border-radius:16px;border:1px solid #e0e0e0;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,.06)">' +
     '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:20px">' +
       '<div style="display:flex;align-items:flex-start;gap:12px">' +
-        '<span style="display:flex;width:36px;height:36px;align-items:center;justify-content:center;border-radius:8px;background:var(--bg-surface);color:var(--green-dark);flex-shrink:0">' +
-          '<i class="ti '+icon+'" style="font-size:16px"></i>' +
+        '<span style="display:flex;width:36px;height:36px;align-items:center;justify-content:center;border-radius:8px;background:#f4f5f0;color:#0F6E56;flex-shrink:0">' +
+          _phIcon(icon,'16px') +
         '</span>' +
         '<div>' +
           '<h2 style="font-size:15px;font-weight:600;letter-spacing:-.3px;margin:0 0 2px">'+title+'</h2>' +
-          (subtitle?'<p style="font-size:13px;color:var(--text-muted);margin:0">'+subtitle+'</p>':'') +
+          (subtitle?'<p style="font-size:13px;color:#777777;margin:0">'+subtitle+'</p>':'') +
         '</div>' +
       '</div>' +
       (action?'<div style="flex-shrink:0">'+action+'</div>':'') +
@@ -132,7 +143,7 @@ function _phBadge(text, style) {
     green:  'background:#EDFBF3;color:#0F6E56',
     red:    'background:#FEF2F2;color:#E24B4A',
     amber:  'background:#FFF9E6;color:#7A5C10',
-    gray:   'background:var(--bg-surface);color:var(--text-muted)',
+    gray:   'background:#f4f5f0;color:#777777',
     blue:   'background:#EEF7FF;color:#1A4A9B',
     success:'background:#EDFBF3;color:#0F6E56',
   };
@@ -140,8 +151,8 @@ function _phBadge(text, style) {
 }
 
 function _phProgress(val, color) {
-  color = color || 'var(--green-dark)';
-  return '<div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden">' +
+  color = color || '#0F6E56';
+  return '<div style="height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden">' +
     '<div style="width:'+Math.min(100,Math.max(0,val))+'%;height:100%;background:'+color+';border-radius:3px;transition:width .3s"></div></div>';
 }
 
@@ -149,9 +160,9 @@ function _phBtn(label, icon, variant, onclick) {
   var isPrimary = variant === 'primary' || !variant;
   var base = 'display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:1.5px solid;font-family:inherit;transition:opacity .15s';
   var style = isPrimary
-    ? base+';background:var(--green-dark);color:#fff;border-color:var(--green-dark)'
-    : base+';background:transparent;color:var(--text);border-color:var(--border)';
-  return '<button style="'+style+'" onclick="'+onclick+'" onmouseover="this.style.opacity=\'.85\'" onmouseout="this.style.opacity=\'1\'">'+(icon?'<i class="ti '+icon+'" style="font-size:14px"></i>':'')+label+'</button>';
+    ? base+';background:#0F6E56;color:#fff;border-color:#0F6E56'
+    : base+';background:transparent;color:#111111;border-color:#e0e0e0';
+  return '<button style="'+style+'" onclick="'+onclick+'" onmouseover="this.style.opacity=\'.85\'" onmouseout="this.style.opacity=\'1\'">'+(icon?_phIcon(icon,'14px'):'')+label+'</button>';
 }
 
 function _phShell(activeId, title, desc, content) {
@@ -167,15 +178,25 @@ function _phShell(activeId, title, desc, content) {
     {id:'ph-reminders',  icon:'ti-bell',             label:'Reminders'},
     {id:'ph-analytics',  icon:'ti-chart-bar',        label:'Analytics'},
   ];
-  var tabBar = '<div style="display:flex;gap:2px;overflow-x:auto;padding-bottom:2px;margin-bottom:20px;border-bottom:2px solid var(--border);flex-wrap:wrap">' +
+  var tabBar = '<div style="display:flex;gap:2px;overflow-x:auto;padding-bottom:2px;margin-bottom:20px;border-bottom:2px solid #e0e0e0;flex-wrap:wrap">' +
     nav.map(function(n){
       var a = n.id === activeId;
-      return '<button onclick="Router.setPage(\''+n.id+'\')" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:none;border-bottom:2px solid '+(a?'var(--green-dark)':'transparent')+';margin-bottom:-2px;background:transparent;font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;color:'+(a?'var(--green-dark)':'var(--text-muted)')+';font-weight:'+(a?'700':'400')+'">'+
-        '<i class="ti '+n.icon+'" style="font-size:13px"></i>'+n.label+'</button>';
+      return '<button onclick="Router.setPage(\''+n.id+'\')" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:none;border-bottom:2px solid '+(a?'#0F6E56':'transparent')+';margin-bottom:-2px;background:transparent;font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;color:'+(a?'#0F6E56':'#777777')+';font-weight:'+(a?'700':'400')+'">'+
+        _phIcon(n.icon,'13px')+n.label+'</button>';
     }).join('') + '</div>';
-  return '<div class="page-title">'+title+'</div>' +
-    '<p style="font-size:13px;color:var(--text-muted);margin:-14px 0 16px">'+(desc||'Dispensary 2 · Johannesburg CHC')+'</p>' +
-    tabBar + content;
+  var gradHeader =
+    '<div style="display:flex;align-items:center;justify-content:space-between;' +
+      'background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);' +
+      'padding:18px 24px;margin-bottom:20px;border-radius:14px;box-shadow:0 2px 10px rgba(15,110,86,.18)">' +
+      '<div>' +
+        '<div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:-.01em;margin-bottom:2px">'+title+'</div>' +
+        '<div style="font-size:13px;color:rgba(255,255,255,.78)">'+( desc||'Dispensary 2 · Johannesburg CHC')+'</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:12px;background:rgba(255,255,255,.18);border:1.5px solid rgba(255,255,255,.28)">' +
+        '<span style="font-size:24px">💊</span>' +
+      '</div>' +
+    '</div>';
+  return gradHeader + tabBar + content;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -196,13 +217,13 @@ Pages['rx-queue'] = () => {
 
   var kpiHTML = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">' +
     kpis.map(function(k){
-      return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:18px 20px;box-shadow:0 1px 3px rgba(0,0,0,.05)">' +
+      return '<div style="background:#ffffff;border:1px solid #e0e0e0;border-radius:16px;padding:18px 20px;box-shadow:0 1px 3px rgba(0,0,0,.05)">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
-          '<span style="font-size:13px;color:var(--text-muted)">'+k.label+'</span>' +
-          '<i class="ti '+k.icon+'" style="font-size:16px;color:var(--green-dark)"></i>' +
+          '<span style="font-size:13px;color:#777777">'+k.label+'</span>' +
+          _phIcon(k.icon,'16px') +
         '</div>' +
         '<div style="font-size:30px;font-weight:700;letter-spacing:-.5px">'+k.value+'</div>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">'+k.delta+'</div>' +
+        '<div style="font-size:11px;color:#777777;margin-top:4px">'+k.delta+'</div>' +
       '</div>';
     }).join('') + '</div>';
 
@@ -211,12 +232,12 @@ Pages['rx-queue'] = () => {
     '<ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px">' +
     critical.map(function(i){
       return '<li style="display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(226,75,74,.2);background:#FEF2F2;border-radius:10px;padding:12px 14px">' +
-        '<div><div style="font-size:13px;font-weight:500">'+i.drug+'</div><div style="font-size:11px;color:var(--text-muted)">'+i.quantity+' left · reorder at '+i.reorderLevel+' · '+i.supplier+'</div></div>' +
+        '<div><div style="font-size:13px;font-weight:500">'+i.drug+'</div><div style="font-size:11px;color:#777777">'+i.quantity+' left · reorder at '+i.reorderLevel+' · '+i.supplier+'</div></div>' +
         _phBadge('Low stock','red')+'</li>';
     }).join('') +
     expiring.map(function(i){
       return '<li style="display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(234,179,8,.3);background:#FFF9E6;border-radius:10px;padding:12px 14px">' +
-        '<div><div style="font-size:13px;font-weight:500">'+i.drug+'</div><div style="font-size:11px;color:var(--text-muted)">Batch '+i.batch+' expires in '+_PH.daysUntil(i.expiry)+' days</div></div>' +
+        '<div><div style="font-size:13px;font-weight:500">'+i.drug+'</div><div style="font-size:11px;color:#777777">Batch '+i.batch+' expires in '+_PH.daysUntil(i.expiry)+' days</div></div>' +
         _phBadge('Expiring','amber')+'</li>';
     }).join('') + '</ul>'
   );
@@ -225,13 +246,13 @@ Pages['rx-queue'] = () => {
     '<ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px">' +
     _PH.coldChain.map(function(f){
       var breach = f.temp<f.min||f.temp>f.max;
-      return '<li style="border:1px solid var(--border);border-radius:10px;padding:12px 14px">' +
+      return '<li style="border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px">' +
         '<div style="display:flex;align-items:center;justify-content:space-between">' +
           '<span style="font-size:13px;font-weight:500">'+f.unit+'</span>' +
-          '<span style="font-size:13px;font-weight:700;color:'+(breach?'var(--red)':'#1D9E75')+'">'+f.temp.toFixed(1)+'°C</span>' +
+          '<span style="font-size:13px;font-weight:700;color:'+(breach?'#dc2626':'#0F6E56')+'">'+f.temp.toFixed(1)+'°C</span>' +
         '</div>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin:4px 0">Range '+f.min+'–'+f.max+'°C · checked '+f.lastCheck+(breach?' · escalate to facility manager':'')+'</div>' +
-        _phProgress(Math.min(100,f.temp/12*100), breach?'var(--red)':'#1D9E75') +
+        '<div style="font-size:11px;color:#777777;margin:4px 0">Range '+f.min+'–'+f.max+'°C · checked '+f.lastCheck+(breach?' · escalate to facility manager':'')+'</div>' +
+        _phProgress(Math.min(100,f.temp/12*100), breach?'#dc2626':'#0F6E56') +
       '</li>';
     }).join('') + '</ul>'
   );
@@ -240,9 +261,9 @@ Pages['rx-queue'] = () => {
     _phBtn('Manage','ti-settings','outline','Router.setPage(\'ph-reminders\')'),
     '<ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px">' +
     dueRefills.map(function(r){
-      return '<li style="display:flex;align-items:center;justify-content:space-between;border-radius:8px;background:var(--bg-surface);padding:8px 12px;font-size:13px">' +
-        '<span>'+r.patient+' · <span style="color:var(--text-muted)">'+r.drug+'</span></span>' +
-        '<span style="font-size:11px;color:var(--text-muted)">'+(r.dueIn<0?(-r.dueIn)+'d overdue':r.dueIn===0?'Due today':'in '+r.dueIn+'d')+'</span>' +
+      return '<li style="display:flex;align-items:center;justify-content:space-between;border-radius:8px;background:#f4f5f0;padding:8px 12px;font-size:13px">' +
+        '<span>'+r.patient+' · <span style="color:#777777">'+r.drug+'</span></span>' +
+        '<span style="font-size:11px;color:#777777">'+(r.dueIn<0?(-r.dueIn)+'d overdue':r.dueIn===0?'Due today':'in '+r.dueIn+'d')+'</span>' +
       '</li>';
     }).join('') + '</ul>'
   );
@@ -255,8 +276,8 @@ Pages['rx-queue'] = () => {
       {page:'ph-queue',label:'Call next patient',icon:'ti-users'},
       {page:'ph-suppliers',label:'Place an order',icon:'ti-trending-up'},
     ].map(function(a){
-      return '<button onclick="Router.setPage(\''+a.page+'\')" style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-surface);padding:12px 14px;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;transition:background .15s" onmouseover="this.style.background=\'var(--bg-card)\'" onmouseout="this.style.background=\'var(--bg-surface)\'">' +
-        '<i class="ti '+a.icon+'" style="font-size:15px;color:var(--green-dark)"></i>'+a.label+'</button>';
+      return '<button onclick="Router.setPage(\''+a.page+'\')" style="display:flex;align-items:center;gap:10px;border:1px solid #e0e0e0;border-radius:10px;background:#f4f5f0;padding:12px 14px;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;transition:background .15s" onmouseover="this.style.background=\'#ffffff\'" onmouseout="this.style.background=\'#f4f5f0\'">' +
+        _phIcon(a.icon,'15px')+a.label+'</button>';
     }).join('') + '</div>'
   );
 
@@ -287,27 +308,27 @@ Pages['stock'] = () => {
 
   var tableRows = rows.map(function(r){
     var m=stateMeta[r.state], i=r.item, days=_PH.daysUntil(i.expiry);
-    return '<tr style="border-bottom:1px solid var(--border);background:'+m.rowBg+'">' +
-      '<td style="padding:10px 12px"><div style="font-weight:500;font-size:13px">'+i.drug+'</div><div style="font-size:11px;color:var(--text-muted)">'+i.form+'</div></td>' +
+    return '<tr style="border-bottom:1px solid #e0e0e0;background:'+m.rowBg+'">' +
+      '<td style="padding:10px 12px"><div style="font-weight:500;font-size:13px">'+i.drug+'</div><div style="font-size:11px;color:#777777">'+i.form+'</div></td>' +
       '<td style="padding:10px 12px;font-family:monospace;font-size:12px">'+i.batch+'</td>' +
-      '<td style="padding:10px 12px"><div style="font-size:13px">'+i.expiry+'</div><div style="font-size:11px;color:'+(days<=45?'#7A5C10':'var(--text-muted)')+'">'+( days<0?'expired '+(-days)+'d ago':'in '+days+' days')+'</div></td>' +
-      '<td style="padding:10px 12px;text-align:right"><div style="font-size:13px;font-weight:600">'+i.quantity+'</div><div style="font-size:11px;color:var(--text-muted)">min '+i.reorderLevel+'</div></td>' +
+      '<td style="padding:10px 12px"><div style="font-size:13px">'+i.expiry+'</div><div style="font-size:11px;color:'+(days<=45?'#7A5C10':'#777777')+'">'+( days<0?'expired '+(-days)+'d ago':'in '+days+' days')+'</div></td>' +
+      '<td style="padding:10px 12px;text-align:right"><div style="font-size:13px;font-weight:600">'+i.quantity+'</div><div style="font-size:11px;color:#777777">min '+i.reorderLevel+'</div></td>' +
       '<td style="padding:10px 12px">'+_phBadge(m.label,m.badge)+'</td>' +
-      '<td style="padding:10px 12px;font-size:12px;color:var(--text-muted)">'+i.supplier+'</td>' +
+      '<td style="padding:10px 12px;font-size:12px;color:#777777">'+i.supplier+'</td>' +
       '<td style="padding:10px 12px;text-align:right">'+_phBtn('Reorder','ti-truck',r.state==='ok'?'outline':'primary','UI.showToast(\'Reorder request sent to '+i.supplier+'\',\'ok\')')+'</td>' +
     '</tr>';
   }).join('');
 
   var body =
-    '<div style="margin-bottom:14px"><input id="stock-search" placeholder="Search drug, batch or supplier" oninput="_phFilterStockTable(this.value)" style="padding:9px 14px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;width:280px;outline:none;font-family:inherit"></div>' +
-    '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;overflow-x:auto">' +
+    '<div style="margin-bottom:14px"><input id="stock-search" placeholder="Search drug, batch or supplier" oninput="_phFilterStockTable(this.value)" style="padding:9px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;width:280px;outline:none;font-family:inherit"></div>' +
+    '<div style="border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;overflow-x:auto">' +
     '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
-    '<thead><tr style="background:var(--bg-surface)">' +
-    ['Drug','Batch','Expiry','Qty','Status','Supplier','Action'].map(function(h,i){ return '<th style="padding:10px 12px;text-align:'+(i===3||i===6?'right':'left')+';font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);font-weight:600">'+h+'</th>'; }).join('') +
+    '<thead><tr style="background:#f4f5f0">' +
+    ['Drug','Batch','Expiry','Qty','Status','Supplier','Action'].map(function(h,i){ return '<th style="padding:10px 12px;text-align:'+(i===3||i===6?'right':'left')+';font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#777777;font-weight:600">'+h+'</th>'; }).join('') +
     '</tr></thead><tbody id="stock-tbody">'+tableRows+'</tbody></table></div>';
 
   var content = _phCard('ti-package-search','Stock management','Live inventory · synced 2 minutes ago',
-    '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;background:#FFF9E6;color:#7A5C10;font-size:11px;font-weight:600"><i class="ti ti-alert-triangle" style="font-size:12px"></i>'+alerts+' alerts</span>',
+    '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;background:#FFF9E6;color:#7A5C10;font-size:11px;font-weight:600"><span style="font-size:12px">⚠️</span>'+alerts+' alerts</span>',
     body);
   return _phShell('stock','Stock management','Live inventory · Johannesburg CHC', content);
 };
@@ -343,28 +364,28 @@ function _phRenderValidation() {
   var body =
     '<form onsubmit="event.preventDefault();_phValSearch(document.getElementById(\'val-q\').value)" style="display:flex;gap:8px;margin-bottom:20px">' +
       '<div style="position:relative;flex:1">' +
-        '<i class="ti ti-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:15px;color:var(--text-muted);pointer-events:none"></i>' +
-        '<input id="val-q" placeholder="Patient ID (PT-004083) or prescription code (RX-4417-ZA)" style="width:100%;padding:9px 14px 9px 38px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box">' +
+        '<span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:15px;color:#777777;pointer-events:none">🔍</span>' +
+        '<input id="val-q" placeholder="Patient ID (PT-004083) or prescription code (RX-4417-ZA)" style="width:100%;padding:9px 14px 9px 38px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box">' +
       '</div>' +
       _phBtn('Validate','','primary','_phValSearch(document.getElementById(\'val-q\').value)') +
     '</form>' +
-    '<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">' +
+    '<div style="background:#f4f5f0;border:1px solid #e0e0e0;border-radius:12px;padding:16px;margin-bottom:14px">' +
       '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:14px">' +
-        '<div><div style="font-weight:600;font-size:15px">'+rx.patientName+'</div><div style="font-size:12px;color:var(--text-muted)">'+rx.patientId+' · '+rx.code+'</div></div>' +
+        '<div><div style="font-weight:600;font-size:15px">'+rx.patientName+'</div><div style="font-size:12px;color:#777777">'+rx.patientId+' · '+rx.code+'</div></div>' +
         _phBadge(isValid?'Valid prescription':'Not dispensable', isValid?'green':'red') +
       '</div>' +
       '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;font-size:13px;margin-bottom:14px">' +
         [['Prescribing doctor',rx.doctor],['Facility',rx.facility],['Issued',rx.issued],['Valid until',rx.validUntil]].map(function(f){
-          return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:2px">'+f[0]+'</div><div style="font-weight:500">'+f[1]+'</div></div>';
+          return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777777;margin-bottom:2px">'+f[0]+'</div><div style="font-weight:500">'+f[1]+'</div></div>';
         }).join('') +
       '</div>' +
-      '<div style="border-top:1px solid var(--border);padding-top:14px">' +
+      '<div style="border-top:1px solid #e0e0e0;padding-top:14px">' +
         '<div style="font-size:13px;font-weight:500;margin-bottom:8px">Prescribed items</div>' +
         '<div style="display:flex;flex-direction:column;gap:8px">' +
         rx.items.map(function(it){
-          return '<div style="background:var(--bg-card);border-radius:8px;padding:10px 12px;font-size:13px">' +
+          return '<div style="background:#ffffff;border-radius:8px;padding:10px 12px;font-size:13px">' +
             '<div style="font-weight:500">'+it.drug+'</div>' +
-            '<div style="color:var(--text-muted)">'+it.dosage+' · '+it.duration+'</div>' +
+            '<div style="color:#777777">'+it.dosage+' · '+it.duration+'</div>' +
           '</div>';
         }).join('') + '</div>' +
       '</div>' +
@@ -372,30 +393,30 @@ function _phRenderValidation() {
 
     (rx.duplicateWarning ?
       '<div style="display:flex;gap:12px;border:1px solid rgba(226,75,74,.3);background:#FEF2F2;border-radius:12px;padding:14px;margin-bottom:14px">' +
-        '<i class="ti ti-copy-x" style="font-size:18px;color:var(--red);flex-shrink:0;margin-top:2px"></i>' +
-        '<div><div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:3px">Possible duplicate collection</div><div style="font-size:13px">'+rx.duplicateWarning+'</div></div>' +
+        '<span style="font-size:18px;color:#dc2626;flex-shrink:0;margin-top:2px">🚫</span>' +
+        '<div><div style="font-size:13px;font-weight:600;color:#dc2626;margin-bottom:3px">Possible duplicate collection</div><div style="font-size:13px">'+rx.duplicateWarning+'</div></div>' +
       '</div>' :
-      '<div style="display:flex;gap:12px;border:1px solid var(--border);background:#EDFBF3;border-radius:12px;padding:14px;margin-bottom:14px">' +
-        '<i class="ti ti-circle-check" style="font-size:18px;color:#1D9E75;flex-shrink:0;margin-top:2px"></i>' +
+      '<div style="display:flex;gap:12px;border:1px solid #e0e0e0;background:#EDFBF3;border-radius:12px;padding:14px;margin-bottom:14px">' +
+        '<span style="font-size:18px;color:#0F6E56;flex-shrink:0;margin-top:2px">✅</span>' +
         '<div style="font-size:13px">No duplicate collections found across linked clinics.</div>' +
       '</div>') +
 
-    '<div style="border:1px solid var(--border);border-radius:12px;padding:14px">' +
+    '<div style="border:1px solid #e0e0e0;border-radius:12px;padding:14px">' +
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:'+(checked?'12px':'0')+'">' +
-        '<div style="display:flex;align-items:center;gap:8px"><i class="ti ti-brain-circuit" style="font-size:16px;color:var(--green-dark)"></i><span style="font-size:13px;font-weight:500">AI drug interaction checker</span></div>' +
+        '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px;color:#0F6E56">🤖</span><span style="font-size:13px;font-weight:500">AI drug interaction checker</span></div>' +
         _phBtn('Run check','','outline','window._phChecked=true;_phRenderValidation()') +
       '</div>' +
       (checked ? (rx.interactions.length ?
         '<div style="display:flex;flex-direction:column;gap:8px">' +
         rx.interactions.map(function(ix){
           var sev={high:'red',moderate:'amber',low:'green'}[ix.severity];
-          return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px">' +
+          return '<div style="border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;font-size:13px">' +
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'+_phBadge(ix.severity+' risk',sev)+'<span style="font-weight:500">'+ix.pair+'</span></div>' +
-            '<div style="color:var(--text-muted)">'+ix.note+'</div>' +
+            '<div style="color:#777777">'+ix.note+'</div>' +
           '</div>';
         }).join('') + '</div>'
-        : '<div style="font-size:13px;color:var(--text-muted);margin-top:12px">No interactions detected for this prescription.</div>')
-        : '<div style="font-size:13px;color:var(--text-muted);margin-top:10px">Cross-checks the prescription against the patient\'s active medications.</div>') +
+        : '<div style="font-size:13px;color:#777777;margin-top:12px">No interactions detected for this prescription.</div>')
+        : '<div style="font-size:13px;color:#777777;margin-top:10px">Cross-checks the prescription against the patient\'s active medications.</div>') +
     '</div>';
 
   var el = document.getElementById('ph-val-body');
@@ -432,15 +453,15 @@ function _phRenderDispensing() {
   var leftPanel =
     _phCard('ti-scan-line','Scan script or patient card','Barcode / QR scanning removes typing errors at the counter','',
       '<div style="display:flex;gap:8px;margin-bottom:'+(scanned?'14px':'0')+'">' +
-        '<input id="ph-scan-input" placeholder="Scan or type RX code / patient file number" style="flex:1;padding:9px 14px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;outline:none">' +
+        '<input id="ph-scan-input" placeholder="Scan or type RX code / patient file number" style="flex:1;padding:9px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">' +
         _phBtn('Simulate scan','ti-qr-code','primary','_phSimulateScan()') +
       '</div>' +
       (scanned ?
-        '<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:13px">' +
+        '<div style="background:#f4f5f0;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px;font-size:13px">' +
           '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:4px">' +
             '<span style="font-weight:600">Nomsa Dlamini</span>'+_phBadge('PT-004083','gray')+_phBadge('Script valid','green') +
           '</div>' +
-          '<div style="color:var(--text-muted)">Allergies: penicillin · eGFR 58 ml/min — check renal dosing</div>' +
+          '<div style="color:#777777">Allergies: penicillin · eGFR 58 ml/min — check renal dosing</div>' +
         '</div>' : '')
     ) +
     '<div style="margin-top:16px">' +
@@ -449,24 +470,24 @@ function _phRenderDispensing() {
       _PH.dispenseLines.map(function(l){
         var isCk = checked.includes(l.id);
         var days = _PH.daysUntil(l.expiry);
-        return '<li style="display:flex;align-items:flex-start;gap:12px;border:1px solid var(--border);border-radius:10px;padding:12px 14px">' +
+        return '<li style="display:flex;align-items:flex-start;gap:12px;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px">' +
           '<input type="checkbox" '+(isCk?'checked':'')+' onchange="_phToggleDisp(\''+l.id+'\')" style="margin-top:3px;width:16px;height:16px;cursor:pointer">' +
           '<div style="flex:1">' +
             '<div style="font-size:13px;font-weight:500">'+l.drug+' — '+l.qty+' units</div>' +
-            '<div style="font-size:12px;color:var(--text-muted)">'+l.dosage+'</div>' +
+            '<div style="font-size:12px;color:#777777">'+l.dosage+'</div>' +
             '<div style="font-size:12px;margin-top:4px">Batch <span style="font-family:monospace">'+l.batch+'</span> · expires '+l.expiry+' ' +
-              '<span style="color:'+(days<=45?'#7A5C10':'var(--text-muted)')+'">(' +days+' days)</span>' +
+              '<span style="color:'+(days<=45?'#7A5C10':'#777777')+'">(' +days+' days)</span>' +
             '</div>' +
           '</div>' +
         '</li>';
       }).join('') + '</ul>' +
-      '<div style="display:flex;align-items:flex-start;gap:12px;background:var(--bg-surface);border-radius:10px;padding:12px 14px;margin-bottom:10px">' +
+      '<div style="display:flex;align-items:flex-start;gap:12px;background:#f4f5f0;border-radius:10px;padding:12px 14px;margin-bottom:10px">' +
         '<input type="checkbox" '+(counselled?'checked':'')+' onchange="_phDispCounsel()" style="margin-top:3px;width:16px;height:16px;cursor:pointer">' +
         '<label style="font-size:13px;cursor:pointer" onclick="_phDispCounsel()">Patient counselled on dosage, food interactions and side effects</label>' +
       '</div>' +
-      '<textarea placeholder="Counselling / substitution notes for the patient record" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box;margin-bottom:10px"></textarea>' +
+      '<textarea placeholder="Counselling / substitution notes for the patient record" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box;margin-bottom:10px"></textarea>' +
       '<div style="display:flex;gap:8px">' +
-        '<button onclick="if('+String(allChecked&&counselled)+'){UI.showToast(\'Dispensed and recorded — stock decremented\',\'ok\')}else{UI.showToast(\'Tick all items and confirm counselling first\',\'err\')}" style="padding:9px 16px;border-radius:8px;border:none;background:var(--green-dark);color:#fff;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;opacity:'+(allChecked&&counselled?'1':'.5')+'">Complete dispense</button>' +
+        '<button onclick="if('+String(allChecked&&counselled)+'){UI.showToast(\'Dispensed and recorded — stock decremented\',\'ok\')}else{UI.showToast(\'Tick all items and confirm counselling first\',\'err\')}" style="padding:9px 16px;border-radius:8px;border:none;background:#0F6E56;color:#fff;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;opacity:'+(allChecked&&counselled?'1':'.5')+'">Complete dispense</button>' +
         _phBtn('Print labels','ti-printer','outline','UI.showToast(\'Label sent to Dispensary 2 printer\',\'ok\')') +
       '</div>'
     ) + '</div>';
@@ -474,7 +495,7 @@ function _phRenderDispensing() {
   var labelPanel = _phCard('ti-printer','Label preview','Bilingual instructions reduce medication errors','',
     '<div style="display:flex;flex-direction:column;gap:14px">' +
     _PH.dispenseLines.map(function(l){
-      return '<div style="border:2px dashed var(--border);border-radius:10px;padding:14px;font-family:monospace;font-size:12px;line-height:1.8;background:var(--bg-card)">' +
+      return '<div style="border:2px dashed #e0e0e0;border-radius:10px;padding:14px;font-family:monospace;font-size:12px;line-height:1.8;background:#ffffff">' +
         '<div style="font-family:inherit;font-size:14px;font-weight:700;font-family:sans-serif;margin-bottom:4px">'+l.drug+'</div>' +
         '<div>'+l.dosage+'</div>' +
         '<div>Isidingo: thatha njengoba unikeziwe</div>' +
@@ -534,9 +555,9 @@ function _phRenderQueue() {
     var nextBtn = e.state!=='notified'
       ? _phBtn(nextLabel, e.state==='ready'?'ti-bell':'', e.state==='ready'?'primary':'outline','_phAdvanceQueue(\''+e.id+'\')')
       : '';
-    return '<li style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:'+m.bg+'">' +
-      '<div style="width:44px;height:44px;border-radius:8px;background:var(--bg-surface);display:flex;align-items:center;justify-content:center;font-family:monospace;font-size:13px;font-weight:700;flex-shrink:0">'+e.ticket+'</div>' +
-      '<div style="flex:1;min-width:160px"><div style="font-weight:500;font-size:13px">'+e.patient+'</div><div style="font-size:12px;color:var(--text-muted)">'+e.patientId+' · '+e.items+' item'+(e.items>1?'s':'')+' · waiting '+e.waitedMin+' min</div></div>' +
+    return '<li style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px;background:'+m.bg+'">' +
+      '<div style="width:44px;height:44px;border-radius:8px;background:#f4f5f0;display:flex;align-items:center;justify-content:center;font-family:monospace;font-size:13px;font-weight:700;flex-shrink:0">'+e.ticket+'</div>' +
+      '<div style="flex:1;min-width:160px"><div style="font-weight:500;font-size:13px">'+e.patient+'</div><div style="font-size:12px;color:#777777">'+e.patientId+' · '+e.items+' item'+(e.items>1?'s':'')+' · waiting '+e.waitedMin+' min</div></div>' +
       _phBadge(m.label,m.badge) + nextBtn +
     '</li>';
   }).join('');
@@ -631,28 +652,28 @@ function _phRenderHistory() {
   var types   = ['all'].concat([...new Set(_PH.history.map(function(h){return h.type;}))]);
 
   function sel(id, opts, val, field) {
-    return '<select id="'+id+'" onchange="window._phHistFilters.'+field+'=this.value;_phRenderHistory()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
+    return '<select id="'+id+'" onchange="window._phHistFilters.'+field+'=this.value;_phRenderHistory()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
       opts.map(function(o){ return '<option value="'+o+'"'+(val===o?' selected':'')+'>'+( o==='all'?('All '+field+'s'):o)+'</option>'; }).join('')+'</select>';
   }
 
   var statusStyle = {Collected:'green',Partial:'amber',Missed:'red'};
-  var dotColor    = {Collected:'#1D9E75',Partial:'#EF9F27',Missed:'var(--red)'};
+  var dotColor    = {Collected:'#0F6E56',Partial:'#EF9F27',Missed:'#dc2626'};
 
   var timeline = entries.length
-    ? '<ol style="list-style:none;padding:0 0 0 24px;margin:0;border-left:2px solid var(--border);display:flex;flex-direction:column;gap:14px">' +
+    ? '<ol style="list-style:none;padding:0 0 0 24px;margin:0;border-left:2px solid #e0e0e0;display:flex;flex-direction:column;gap:14px">' +
       entries.map(function(e){
         return '<li style="position:relative">' +
-          '<span style="position:absolute;left:-32px;top:6px;width:12px;height:12px;border-radius:50%;background:'+dotColor[e.status]+';border:2px solid var(--bg-card);display:block"></span>' +
-          '<div style="border:1px solid var(--border);border-radius:10px;padding:10px 14px">' +
+          '<span style="position:absolute;left:-32px;top:6px;width:12px;height:12px;border-radius:50%;background:'+dotColor[e.status]+';border:2px solid #ffffff;display:block"></span>' +
+          '<div style="border:1px solid #e0e0e0;border-radius:10px;padding:10px 14px">' +
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">' +
               '<span style="font-weight:500;font-size:13px">'+e.drug+'</span>'+_phBadge(e.status,statusStyle[e.status]) +
             '</div>' +
-            '<div style="font-size:12px;color:var(--text-muted)">'+e.date+' · '+e.doctor+' · '+e.facility+'</div>' +
+            '<div style="font-size:12px;color:#777777">'+e.date+' · '+e.doctor+' · '+e.facility+'</div>' +
             '<div style="margin-top:6px">'+_phBadge(e.type,'gray')+'</div>' +
           '</div>' +
         '</li>';
       }).join('') + '</ol>'
-    : '<div style="border:1.5px dashed var(--border);border-radius:10px;padding:24px;text-align:center;font-size:13px;color:var(--text-muted)">No records match these filters.</div>';
+    : '<div style="border:1.5px dashed #e0e0e0;border-radius:10px;padding:24px;text-align:center;font-size:13px;color:#777777">No records match these filters.</div>';
 
   el.innerHTML = _phCard('ti-history','Patient medication history','Nomsa Dlamini · PT-004083',
     _phBtn('Export for doctor','ti-download','outline','UI.showToast(\''+entries.length+' records prepared as PDF\',\'ok\')'),
@@ -669,33 +690,33 @@ function _phRenderHistory() {
 Pages['ph-suppliers'] = () => {
   var poStatusStyle = {draft:'gray',sent:'gray',confirmed:'green',delivered:'green',overdue:'red'};
 
-  var poTable = '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;overflow-x:auto;margin-bottom:6px"><table style="width:100%;border-collapse:collapse;font-size:13px">' +
-    '<thead><tr style="background:var(--bg-surface)">' +
+  var poTable = '<div style="border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;overflow-x:auto;margin-bottom:6px"><table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '<thead><tr style="background:#f4f5f0">' +
     ['Order','Supplier','Items','Value','Placed','ETA','Status'].map(function(h,i){
-      return '<th style="padding:10px 12px;text-align:'+(i===2||i===3?'right':'left')+';font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);font-weight:600">'+h+'</th>';
+      return '<th style="padding:10px 12px;text-align:'+(i===2||i===3?'right':'left')+';font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#777777;font-weight:600">'+h+'</th>';
     }).join('') + '</tr></thead><tbody>' +
     _PH.purchaseOrders.map(function(po){
-      return '<tr style="border-top:1px solid var(--border)">' +
+      return '<tr style="border-top:1px solid #e0e0e0">' +
         '<td style="padding:10px 12px;font-family:monospace;font-size:12px">'+po.id+'</td>' +
         '<td style="padding:10px 12px;font-weight:500">'+po.supplier+'</td>' +
         '<td style="padding:10px 12px;text-align:right">'+po.items+'</td>' +
         '<td style="padding:10px 12px;text-align:right">R '+po.value.toLocaleString('en-ZA')+'</td>' +
-        '<td style="padding:10px 12px;color:var(--text-muted)">'+po.placed+'</td>' +
-        '<td style="padding:10px 12px;color:var(--text-muted)">'+po.eta+'</td>' +
+        '<td style="padding:10px 12px;color:#777777">'+po.placed+'</td>' +
+        '<td style="padding:10px 12px;color:#777777">'+po.eta+'</td>' +
         '<td style="padding:10px 12px">'+_phBadge(po.status,poStatusStyle[po.status]||'gray')+'</td>' +
       '</tr>';
     }).join('') + '</tbody></table></div>';
 
   var supplierCards = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">' +
     _PH.suppliers.map(function(s){
-      return '<div style="border:1px solid var(--border);border-radius:12px;padding:14px">' +
+      return '<div style="border:1px solid #e0e0e0;border-radius:12px;padding:14px">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px">' +
-          '<div><div style="font-weight:600;font-size:13px">'+s.name+'</div><div style="font-size:11px;color:var(--text-muted)">'+s.contract+'</div></div>' +
+          '<div><div style="font-weight:600;font-size:13px">'+s.name+'</div><div style="font-size:11px;color:#777777">'+s.contract+'</div></div>' +
           _phBadge(s.leadTimeDays+'d lead','gray') +
         '</div>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">On-time delivery '+s.reliability+'%</div>' +
+        '<div style="font-size:11px;color:#777777;margin-bottom:4px">On-time delivery '+s.reliability+'%</div>' +
         _phProgress(s.reliability) +
-        '<div style="font-size:11px;color:var(--text-muted);margin:10px 0 10px">'+s.contact+' · '+s.phone+'</div>' +
+        '<div style="font-size:11px;color:#777777;margin:10px 0 10px">'+s.contact+' · '+s.phone+'</div>' +
         _phBtn('Send order request','','outline','UI.showToast(\'Order request sent to '+s.name+'\',\'ok\')') +
       '</div>';
     }).join('') + '</div>';
@@ -727,14 +748,14 @@ function _phRenderControlled() {
 
   var alert = unsigned.length
     ? '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;border:1px solid rgba(226,75,74,.3);background:#FEF2F2;border-radius:14px;padding:14px 18px;margin-bottom:16px">' +
-        '<i class="ti ti-shield-alert" style="font-size:18px;color:var(--red);flex-shrink:0"></i>' +
+        '<span style="font-size:18px;color:#dc2626;flex-shrink:0">🛡️</span>' +
         '<p style="flex:1;font-size:13px;margin:0"><strong>'+unsigned.length+' entry awaiting a second signature.</strong> Schedule 5 and 6 dispensing requires dual sign-off before the register balances.</p>' +
       '</div>' : '';
 
   var rows = _PH.controlledRegister.map(function(e){
     var isSigned = Boolean(e.witness)||signed.includes(e.id);
-    return '<tr style="border-top:1px solid var(--border);background:'+(isSigned?'':'rgba(226,75,74,.04)')+'">' +
-      '<td style="padding:10px 12px;font-size:12px;color:var(--text-muted);white-space:nowrap">'+e.time+'</td>' +
+    return '<tr style="border-top:1px solid #e0e0e0;background:'+(isSigned?'':'rgba(226,75,74,.04)')+'">' +
+      '<td style="padding:10px 12px;font-size:12px;color:#777777;white-space:nowrap">'+e.time+'</td>' +
       '<td style="padding:10px 12px;font-weight:500;font-size:13px">'+e.drug+'</td>' +
       '<td style="padding:10px 12px">'+_phBadge(e.schedule,e.schedule==='S6'?'red':'amber')+'</td>' +
       '<td style="padding:10px 12px;text-align:right">'+e.quantity+'</td>' +
@@ -751,11 +772,11 @@ function _phRenderControlled() {
 
   el.innerHTML = alert + _phCard('ti-book-lock','Controlled substances register','Tamper-evident log of every S5 / S6 movement with running balances','',
     '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">' +
-    '<thead><tr style="background:var(--bg-surface)">' +
+    '<thead><tr style="background:#f4f5f0">' +
     ['Date & time','Medicine','Schedule','Qty out','Balance','Patient','Pharmacist','Witness'].map(function(h,i){
-      return '<th style="padding:10px 12px;text-align:'+(i===3||i===4?'right':'left')+';font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);font-weight:600">'+h+'</th>';
+      return '<th style="padding:10px 12px;text-align:'+(i===3||i===4?'right':'left')+';font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#777777;font-weight:600">'+h+'</th>';
     }).join('') + '</tr></thead><tbody>'+rows+'</tbody></table></div>' +
-    '<p style="margin-top:14px;font-size:11px;color:var(--text-muted)">Entries cannot be edited or deleted. Discrepancies must be reported to the responsible pharmacist and the provincial inspectorate within 24 hours.</p>'
+    '<p style="margin-top:14px;font-size:11px;color:#777777">Entries cannot be edited or deleted. Discrepancies must be reported to the responsible pharmacist and the provincial inspectorate within 24 hours.</p>'
   );
 }
 
@@ -785,18 +806,18 @@ function _phRenderReminders() {
   var rows = sorted.map(function(r){
     var overdue = r.dueIn < 0;
     var isSent  = sent.includes(r.id);
-    return '<li style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;border:1px solid '+(overdue?'rgba(226,75,74,.3)':'var(--border)')+';background:'+(overdue?'#FEF2F2':'transparent')+';border-radius:10px;padding:12px 16px">' +
+    return '<li style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;border:1px solid '+(overdue?'rgba(226,75,74,.3)':'#e0e0e0')+';background:'+(overdue?'#FEF2F2':'transparent')+';border-radius:10px;padding:12px 16px">' +
       '<div style="flex:1;min-width:200px">' +
         '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:4px">' +
           '<span style="font-size:13px;font-weight:500">'+r.patient+'</span>' +
           _phBadge(r.patientId,'gray') +
           _phBadge(r.channel,'blue') +
         '</div>' +
-        '<div style="font-size:12px;color:var(--text-muted)">'+r.drug+' · '+(overdue?(-r.dueIn)+' days overdue':r.dueIn===0?'due today':'due in '+r.dueIn+' days')+'</div>' +
+        '<div style="font-size:12px;color:#777777">'+r.drug+' · '+(overdue?(-r.dueIn)+' days overdue':r.dueIn===0?'due today':'due in '+r.dueIn+' days')+'</div>' +
       '</div>' +
       '<div style="width:150px">' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Adherence '+r.adherence+'%</div>' +
-        _phProgress(r.adherence, r.adherence>=80?'#1D9E75':r.adherence>=60?'#EF9F27':'var(--red)') +
+        '<div style="font-size:11px;color:#777777;margin-bottom:4px">Adherence '+r.adherence+'%</div>' +
+        _phProgress(r.adherence, r.adherence>=80?'#0F6E56':r.adherence>=60?'#EF9F27':'#dc2626') +
       '</div>' +
       (isSent
         ? _phBtn('Reminder sent','','outline','')
@@ -834,13 +855,13 @@ Pages['ph-analytics'] = () => {
 
   var kpiHTML = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">' +
     stats.map(function(s){
-      return '<div style="border:1px solid var(--border);background:var(--bg-surface);border-radius:12px;padding:16px">' +
-        '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);margin-bottom:8px">' +
-          '<i class="ti '+s.icon+'" style="font-size:14px"></i>' +
+      return '<div style="border:1px solid #e0e0e0;background:#f4f5f0;border-radius:12px;padding:16px">' +
+        '<div style="display:flex;align-items:center;gap:8px;color:#777777;margin-bottom:8px">' +
+          _phIcon(s.icon,'14px') +
           '<span style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">'+s.label+'</span>' +
         '</div>' +
         '<div style="font-size:26px;font-weight:700;margin-bottom:2px">'+s.value+'</div>' +
-        '<div style="font-size:11px;color:var(--text-muted)">'+s.note+'</div>' +
+        '<div style="font-size:11px;color:#777777">'+s.note+'</div>' +
       '</div>';
     }).join('') + '</div>';
 
@@ -850,7 +871,7 @@ Pages['ph-analytics'] = () => {
     _PH.topDrugs.map(function(d){
       return '<div>' +
         '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">' +
-          '<span>'+d.drug+'</span><span style="color:var(--text-muted)">'+d.count+'</span>' +
+          '<span>'+d.drug+'</span><span style="color:#777777">'+d.count+'</span>' +
         '</div>' +
         _phProgress(d.count/maxCount*100) +
       '</div>';

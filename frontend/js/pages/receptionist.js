@@ -1,8 +1,37 @@
+/* ── NIHMS design-system CSS — injected once, mirrors login.html ── */
+(function _nihmsInjectDS() {
+  if (document.getElementById('nihms-ds-css')) return;
+  var s = document.createElement('style');
+  s.id = 'nihms-ds-css';
+  s.textContent = [
+    /* Reset */
+    '*, *::before, *::after { box-sizing: border-box; }',
+    '::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}',
+    /* Background — subtle green/navy mesh matching login header */
+    'body, #app, .page-root { background-color:#f4f5f0 !important; background-image: repeating-linear-gradient(135deg, rgba(15,110,86,.03) 0px, rgba(15,110,86,.03) 1px, transparent 1px, transparent 40px), repeating-linear-gradient(45deg, rgba(26,74,155,.02) 0px, rgba(26,74,155,.02) 1px, transparent 1px, transparent 40px) !important; background-attachment:fixed !important; }',
+    /* Override any inline bg that was set to f8fafc/f1f5f9 */
+    /* Alert colours — exact login.html values */
+    '.nihms-alert-err { background:#FCEBEB !important; color:#A32D2D !important; border-left:3px solid #E24B4A !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    '.nihms-alert-ok  { background:#E1F5EE !important; color:#0F6E56 !important; border-left:3px solid #1D9E75 !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    '.nihms-alert-warn{ background:#FAEEDA !important; color:#854F0B !important; border-left:3px solid #EF9F27 !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    '.nihms-alert-info{ background:#E6F1FB !important; color:#185FA5 !important; border-left:3px solid #378ADD !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    /* Primary button — pill, login-page gradient */
+    'button[style*="background:#0F6E56"], button[style*="background: #0F6E56"] { border-radius:50px !important; }',
+    /* Input focus ring — login-page green */
+    'input:focus, select:focus, textarea:focus { border-color:#0F6E56 !important; box-shadow:0 0 0 3px rgba(15,110,86,.12) !important; outline:none !important; }',
+    /* Card borders */
+    '.nihms-card { background:#fff; border-radius:14px; border:1px solid #e0e0e0; box-shadow:0 1px 3px rgba(0,0,0,.06); }',
+    /* Table header bg */
+    'th[style*="background:#eef2f7"], th[style*="background: #eef2f7"] { background:#f4f5f0 !important; color:#777 !important; }',
+  ].join('\n');
+  document.head.appendChild(s);
+})();
+
 /* ── NIHMS shared design tokens (used across receptionist, nurse, doctor, pharmacy) ── */
 /* These CSS vars are injected into :root by router.js — receptionist reads them here for consistency */
-/* Primary:   #0d9488 (teal-600)  · Surface: #f8fafc  · Border: #e2e8f0 */
+/* Primary:   #0F6E56 (teal-600)  · Surface: #f4f5f0  · Border: #e0e0e0 */
 /* Success:   #16a34a (green-600) · Warning: #d97706  · Danger: #dc2626  */
-/* Text dark: #0f172a             · Text mid: #475569  · Text light: #94a3b8 */
+/* Text dark: #111111             · Text mid: #555555  · Text light: #777777 */
 /* Radius-md: 10px                · Radius-lg: 14px    · Shadow: 0 1px 3px #0001 */
 
 /**
@@ -15,12 +44,12 @@ if (typeof Pages === 'undefined') window.Pages = {};
 
 /* ─── Constants ────────────────────────────────────────────────────── */
 var DEPARTMENTS = [
-  { id:'gen',  name:'General Consultation',    color:'#0d9488', avgWait:18 },
+  { id:'gen',  name:'General Consultation',    color:'#0F6E56', avgWait:18 },
   { id:'tele', name:'Telemedicine',            color:'#3b82f6', avgWait:12 },
   { id:'lab',  name:'Lab / Blood Draw',        color:'#8b5cf6', avgWait:20 },
   { id:'imm',  name:'Immunisation',            color:'#f59e0b', avgWait:10 },
   { id:'mh',   name:'Mental Health',           color:'#ec4899', avgWait:35 },
-  { id:'cc',   name:'Chronic Care Follow-up',  color:'#14b8a6', avgWait:25 },
+  { id:'cc',   name:'Chronic Care Follow-up',  color:'#1D9E75', avgWait:25 },
   { id:'mc',   name:'Maternal & Child Health', color:'#f97316', avgWait:22 },
   { id:'pp',   name:'Pharmacy Pickup',         color:'#6366f1', avgWait:8  },
   { id:'sr',   name:'Specialist Referral',     color:'#0ea5e9', avgWait:40 },
@@ -114,6 +143,43 @@ function _genToken(dept) {
 function _fmtTime(d) {
   return (d||new Date()).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'});
 }
+
+/* ─── Cross-tab nurse broadcast ─────────────────────────────────────────
+   Pushes a nurse request to the nurse page even when it's in a different
+   browser tab. Uses BroadcastChannel (primary) + localStorage event
+   (fallback). Same-tab calls go directly via window._nurseAddRequest.
+─────────────────────────────────────────────────────────────────────── */
+var _nurseBroadcastCh = null;
+try { _nurseBroadcastCh = new BroadcastChannel('nihms_nurse_queue'); } catch(_) {}
+
+function _sendToNurseTab(req) {
+  /* 1. Same-tab direct call */
+  if (typeof window._nurseAddRequest === 'function') {
+    window._nurseAddRequest(req);
+  } else {
+    if (!window._NURSE_REQUESTS) window._NURSE_REQUESTS = [];
+    window._NURSE_REQUESTS.push(req);
+  }
+  /* 2. Persist to localStorage queue so nurse page picks it up even if it
+        loads AFTER the check-in (sequential-tab workflow) */
+  try {
+    var stored = JSON.parse(localStorage.getItem('_NIHMS_NURSE_QUEUE') || '[]');
+    /* Deduplicate by id */
+    if (!stored.find(function(r){ return r.id === req.id; })) {
+      stored.push(req);
+      localStorage.setItem('_NIHMS_NURSE_QUEUE', JSON.stringify(stored));
+    }
+  } catch(_) {}
+  /* 3. Cross-tab live event: BroadcastChannel (fires in open nurse tab) */
+  if (_nurseBroadcastCh) {
+    try { _nurseBroadcastCh.postMessage({ type: 'NURSE_REQ', req: req }); } catch(_) {}
+  }
+  /* 4. Cross-tab live event: localStorage storage event (fallback) */
+  try {
+    localStorage.setItem('_NIHMS_NURSE_REQ', JSON.stringify(req));
+    setTimeout(function(){ try { localStorage.removeItem('_NIHMS_NURSE_REQ'); } catch(_){} }, 200);
+  } catch(_) {}
+}
 function _fmtDate(d) {
   return (d||new Date()).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'});
 }
@@ -163,11 +229,11 @@ function _svgIcon(name) {
 }
 
 function _priCfg(p) {
-  var m = { urgent:{label:'Urgent',color:'#dc2626',bg:'#fef2f2',border:'#fca5a5'}, elderly:{label:'Elderly',color:'#d97706',bg:'#fffbeb',border:'#fcd34d'}, normal:{label:'Normal',color:'#64748b',bg:'#f8fafc',border:'#e2e8f0'} };
+  var m = { urgent:{label:'Urgent',color:'#dc2626',bg:'#fef2f2',border:'#fca5a5'}, elderly:{label:'Elderly',color:'#d97706',bg:'#fffbeb',border:'#fcd34d'}, normal:{label:'Normal',color:'#777777',bg:'#f4f5f0',border:'#e0e0e0'} };
   return m[p]||m.normal;
 }
 function _stCfg(s) {
-  var m = { waiting:{label:'Waiting',color:'#b45309',bg:'#fffbeb',border:'#fcd34d'}, 'at-nurse':{label:'At Nurse',color:'#7c3aed',bg:'#f5f3ff',border:'#c4b5fd'}, 'with-doctor':{label:'With Doctor',color:'#0d9488',bg:'#f0fdfa',border:'#99f6e4'}, done:{label:'Done',color:'#16a34a',bg:'#f0fdf4',border:'#86efac'}, 'no-show':{label:'No-show',color:'#9ca3af',bg:'#f9fafb',border:'#e5e7eb'} };
+  var m = { waiting:{label:'Waiting',color:'#b45309',bg:'#fffbeb',border:'#fcd34d'}, 'at-nurse':{label:'At Nurse',color:'#7c3aed',bg:'#f5f3ff',border:'#c4b5fd'}, 'with-doctor':{label:'With Doctor',color:'#0F6E56',bg:'#f0fdfa',border:'#99f6e4'}, done:{label:'Done',color:'#16a34a',bg:'#f0fdf4',border:'#86efac'}, 'no-show':{label:'No-show',color:'#9ca3af',bg:'#f9fafb',border:'#e5e7eb'} };
   return m[s]||m.waiting;
 }
 
@@ -176,49 +242,49 @@ function _badge(text, cfg) {
 }
 
 function _inp(id, label, placeholder, value, type, required) {
-  return '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">'+label+(required?' *':'')+'</label>'+
+  return '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#555555;margin-bottom:5px">'+label+(required?' *':'')+'</label>'+
     '<input id="'+id+'" type="'+(type||'text')+'" value="'+(value||'')+'" placeholder="'+(placeholder||'')+'" '+
-    'style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box" '+
-    'onfocus="this.style.borderColor=\'#0d9488\'" onblur="this.style.borderColor=\'#e2e8f0\'">'+
+    'style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box" '+
+    'onfocus="this.style.borderColor=\'#0F6E56\'" onblur="this.style.borderColor=\'#e0e0e0\'">'+
   '</div>';
 }
 
 function _sel(id, label, opts, val) {
-  return '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">'+label+'</label>'+
-    '<select id="'+id+'" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;background:#fff">'+
+  return '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#555555;margin-bottom:5px">'+label+'</label>'+
+    '<select id="'+id+'" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;background:#fff">'+
     opts.map(function(o){ return '<option value="'+(o.v||o)+'"'+(((o.v||o)===(val||opts[0].v||opts[0]))||((o.label||o)===val)?' selected':'')+'>'+( o.label||o)+'</option>'; }).join('')+
     '</select></div>';
 }
 
 function _pBtn(label, onclick, color) {
-  color=color||'#0d9488';
-  return '<button onclick="'+onclick+'" style="display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 20px;border-radius:9px;border:none;background:'+color+';color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">'+label+'</button>';
+  color=color||'#0F6E56';
+  return '<button onclick="'+onclick+'" style="display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 20px;border-radius:50px;border:none;background:'+color+';color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">'+label+'</button>';
 }
 function _sBtn(label, onclick) {
-  return '<button onclick="'+onclick+'" style="display:inline-flex;align-items:center;gap:5px;padding:9px 16px;border-radius:9px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">'+label+'</button>';
+  return '<button onclick="'+onclick+'" style="display:inline-flex;align-items:center;gap:5px;padding:9px 16px;border-radius:50px;border:1.5px solid #e0e0e0;background:#fff;color:#555555;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">'+label+'</button>';
 }
 function _tBtn(label, onclick) {
-  return '<button onclick="'+onclick+'" style="display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:7px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">'+label+'</button>';
+  return '<button onclick="'+onclick+'" style="display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:7px;border:1.5px solid #e0e0e0;background:#fff;color:#555555;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">'+label+'</button>';
 }
 
 function _card(content, pad) {
-  return '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:'+(pad||'18px 20px')+'">'+content+'</div>';
+  return '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:'+(pad||'18px 20px')+'">'+content+'</div>';
 }
 
 function _stepBar(steps, current, color) {
-  color=color||'#0d9488';
+  color=color||'#0F6E56';
   var idx=steps.indexOf(current);
   return '<div style="display:flex;align-items:center;gap:0;margin-bottom:24px">'+
     steps.map(function(s,i){
       var done=i<idx,active=i===idx;
       return '<div style="display:flex;align-items:center;flex:1">'+
         '<div style="display:flex;flex-direction:column;align-items:center;flex:1">'+
-          '<div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;margin-bottom:4px;background:'+(done?color:active?color:'#f1f5f9')+';color:'+(done||active?'#fff':'#94a3b8')+'">'+
+          '<div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;margin-bottom:4px;background:'+(done?color:active?color:'#f0f1ec')+';color:'+(done||active?'#fff':'#777777')+'">'+
             (done?_svgIcon('checkW'):(i+1))+
           '</div>'+
-          '<div style="font-size:10px;font-weight:600;text-align:center;color:'+(active?color:done?color+'99':'#94a3b8')+'">'+s+'</div>'+
+          '<div style="font-size:10px;font-weight:600;text-align:center;color:'+(active?color:done?color+'99':'#777777')+'">'+s+'</div>'+
         '</div>'+
-        (i<steps.length-1?'<div style="height:2px;flex:1;margin-bottom:18px;border-radius:2px;background:'+(i<idx?color:'#e2e8f0')+'"></div>':'');
+        (i<steps.length-1?'<div style="height:2px;flex:1;margin-bottom:18px;border-radius:2px;background:'+(i<idx?color:'#e0e0e0')+'"></div>':'');
     }).join('')+
   '</div>';
 }
@@ -249,7 +315,7 @@ function _rRec() {
   _rSaveState();
   var styleEl=document.getElementById('nihms-style');
   if(!styleEl){styleEl=document.createElement('style');styleEl.id='nihms-style';
-  styleEl.textContent='*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}body{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif}';
+  styleEl.textContent='*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#d0d0d0;border-radius:99px}body{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif}';
   document.head.appendChild(styleEl);}
   var el=document.getElementById('rec-body');
   if(!el) return;
@@ -273,7 +339,7 @@ function _rTopBar() {
     el.textContent = new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   }, 1000);
   return '<div style="display:flex;align-items:center;justify-content:space-between;' +
-    'background:linear-gradient(135deg,#0d9488,#0f766e);' +
+    'background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);' +
     'border-radius:14px;padding:14px 22px;margin-bottom:12px;box-shadow:0 2px 10px rgba(13,148,136,.2)">' +
     '<div>' +
       '<div style="font-size:18px;font-weight:800;color:#fff;letter-spacing:-.01em;margin-bottom:2px">'+dateStr+'</div>' +
@@ -375,7 +441,7 @@ Pages['receptionist'] = function() {
 
   return '<div style="display:flex;flex-direction:column;height:calc(100vh - 120px);overflow:hidden">'+
     '<div id="rec-top-bar" style="flex-shrink:0;padding:12px 20px 0"></div>'+
-    '<div id="rec-body" style="flex:1;overflow:auto;background:#f8fafc">Loading…</div>'+
+    '<div id="rec-body" style="flex:1;overflow:auto;background:#f4f5f0">Loading…</div>'+
   '</div>';
 };
 
@@ -383,10 +449,17 @@ Pages['receptionist'] = function() {
    TAB 1 — OVERVIEW
 ═══════════════════════════════════════════════════════════════════════ */
 function _rOverview() {
-  var q=_R.queue;
+  var todayStr=(new Date()).toISOString().slice(0,10);
+  var q=_R.queue.filter(function(p){
+    /* today-only: checkedInAt on today, or no checkedInAt (just arrived) */
+    return !p.checkedInAt || p.checkedInAt.slice(0,10)===todayStr;
+  });
   var waiting=q.filter(function(p){return p.status==='waiting';});
   var atNurse=q.filter(function(p){return p.status==='at-nurse';});
   var done=q.filter(function(p){return p.status==='done';});
+  var aptsToday=_R.appointments.filter(function(a){
+    return (a.date||a.appointmentDate||'').slice(0,10)===todayStr && a.status!=='cancelled';
+  });
   var unreadMsg=_R.messages.filter(function(m){return !m.read;}).length;
 
   /* Live date/time header */
@@ -396,7 +469,7 @@ function _rOverview() {
 
   var timeHeader=
     '<div style="display:flex;align-items:center;justify-content:space-between;' +
-    'background:linear-gradient(135deg,#0d9488 0%,#0f766e 100%);' +
+    'background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);' +
     'border-radius:14px;padding:18px 26px;margin-bottom:20px;box-shadow:0 2px 12px rgba(13,148,136,.2)">' +
       '<div>' +
         '<div style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-.01em;margin-bottom:3px">'+dateStr+'</div>' +
@@ -420,8 +493,8 @@ function _rOverview() {
   },1000);
 
   var kpis=[
-    {label:'Total Patients Today', value:q.length,               sub:waiting.length+' waiting',   color:'#0d9488', icon:_svgIcon('users')},
-    {label:'Appointments Today',   value:_R.appointments.length, sub:_R.appointments.filter(function(a){return a.verified;}).length+' verified', color:'#3b82f6', icon:_svgIcon('cal')},
+    {label:'Total Patients Today', value:q.length,               sub:waiting.length+' waiting',   color:'#0F6E56', icon:_svgIcon('users')},
+    {label:'Appointments Today',   value:aptsToday.length, sub:aptsToday.filter(function(a){return a.verified;}).length+' verified', color:'#3b82f6', icon:_svgIcon('cal')},
     {label:'At Nurses Station',    value:atNurse.length,          sub:'taking vitals',              color:'#7c3aed', icon:_svgIcon('heart')},
     {label:'Completed Today',      value:done.length,             sub:'discharged',                 color:'#10b981', icon:_svgIcon('done')},
   ];
@@ -431,15 +504,15 @@ function _rOverview() {
       return _card(
         '<div style="display:flex;align-items:center;gap:14px">'+
           '<div style="width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:'+k.color+'">'+k.icon+'</div>'+
-          '<div><div style="font-size:26px;font-weight:800;color:#0f172a;line-height:1">'+k.value+'</div>'+
-          '<div style="font-size:11px;color:#94a3b8;margin-top:1px">'+k.label+'</div>'+
+          '<div><div style="font-size:26px;font-weight:800;color:#111111;line-height:1">'+k.value+'</div>'+
+          '<div style="font-size:11px;color:#777777;margin-top:1px">'+k.label+'</div>'+
           '<div style="font-size:11px;font-weight:600;margin-top:2px;color:'+k.color+'">'+k.sub+'</div></div>'+
         '</div>');
     }).join('')+
   '</div>';
 
   var actions=[
-    {label:'Patient Check-in',   sub:'ID scan → issue queue token',        tab:'checkin',     color:'#0d9488', icon:_svgIcon('checkin')},
+    {label:'Patient Check-in',   sub:'ID scan → issue queue token',        tab:'checkin',     color:'#0F6E56', icon:_svgIcon('checkin')},
     {label:'Book Appointment',   sub:'Search patient → pick slot',          tab:'book',        color:'#3b82f6', icon:_svgIcon('cal')},
     {label:'Register New Patient',sub:'Add patient profile to NIHMS',       tab:'register',    color:'#8b5cf6', icon:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>'},
 
@@ -453,41 +526,52 @@ function _rOverview() {
   var actHtml='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">'+
     actions.map(function(a){
       return '<button onclick="_rTab(\''+a.tab+'\')" '+
-        'style="display:flex;align-items:center;gap:14px;background:#fff;border:1.5px solid #e2e8f0;border-radius:14px;padding:16px;cursor:pointer;text-align:left;font-family:inherit;transition:border-color .15s" '+
-        'onmouseover="this.style.borderColor=\''+a.color+'\'" onmouseout="this.style.borderColor=\'#e2e8f0\'">'+
+        'style="display:flex;align-items:center;gap:14px;background:#fff;border:1.5px solid #e0e0e0;border-radius:14px;padding:16px;cursor:pointer;text-align:left;font-family:inherit;transition:border-color .15s" '+
+        'onmouseover="this.style.borderColor=\''+a.color+'\'" onmouseout="this.style.borderColor=\'#e0e0e0\'">'+
         '<div style="width:40px;height:40px;border-radius:10px;background:'+a.color+';display:flex;align-items:center;justify-content:center;flex-shrink:0">'+a.icon+'</div>'+
-        '<div><div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:2px">'+a.label+'</div>'+
-        '<div style="font-size:11px;color:#94a3b8">'+a.sub+'</div></div>'+
+        '<div><div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:2px">'+a.label+'</div>'+
+        '<div style="font-size:11px;color:#777777">'+a.sub+'</div></div>'+
       '</button>';
     }).join('')+
   '</div>';
 
-  /* Live queue snapshot */
-  var liveRows=waiting.slice(0,5).map(function(p,i){
-    var wait=Math.floor((new Date()-new Date(p.checkedInAt))/60000);
-    return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9">'+
-      '<td style="padding:9px 14px;font-family:monospace;font-weight:700;font-size:13px;color:#0d9488">'+p.token+'</td>'+
+  /* Live queue snapshot — today's active patients with location */
+  var todayStr=(new Date()).toISOString().slice(0,10);
+  var activeQ=q.filter(function(p){
+    if(p.status==='done') return false;
+    if(!p.checkedInAt) return true;
+    return p.checkedInAt.slice(0,10)===todayStr;
+  });
+  var locLabels={waiting:'⏳ Waiting Room','at-nurse':'🏥 At Nurse Station','with-doctor':'🩺 In Consultation',done:'✓ Discharged'};
+  var locColors={waiting:'#d97706','at-nurse':'#1A4A9B','with-doctor':'#0F6E56',done:'#16a34a'};
+  var liveRows=activeQ.slice(0,8).map(function(p,i){
+    var checkin=new Date(p.checkedInAt);
+    var wait=isNaN(checkin)?0:Math.floor((new Date()-checkin)/60000);
+    var loc=locLabels[p.status]||p.status;
+    var locCol=locColors[p.status]||'#777777';
+    return '<tr style="background:'+(i%2===0?'#fff':'#f4f5f0')+';border-bottom:1px solid #f0f1ec">'+
+      '<td style="padding:9px 14px;font-family:monospace;font-weight:700;font-size:13px;color:#0F6E56">'+p.token+'</td>'+
       '<td style="padding:9px 14px;font-weight:600;font-size:13px">'+p.name+'</td>'+
-      '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+p.department+'</td>'+
-      '<td style="padding:9px 14px">'+_badge('Waiting',_stCfg('waiting'))+'</td>'+
-      '<td style="padding:9px 14px;font-size:12px;color:'+(wait>20?'#ef4444':'#64748b')+';font-weight:'+(wait>20?'700':'400')+'">'+wait+' min</td>'+
+      '<td style="padding:9px 14px;font-size:12px;color:#777777">'+p.department+'</td>'+
+      '<td style="padding:9px 14px"><span style="font-size:11px;font-weight:700;color:'+locCol+'">'+loc+'</span></td>'+
+      '<td style="padding:9px 14px;font-size:12px;color:'+(wait>20?'#ef4444':'#777777')+';font-weight:'+(wait>20?'700':'400')+'">'+wait+' min</td>'+
     '</tr>';
   }).join('');
 
-  var liveHtml=waiting.length
+  var liveHtml=activeQ.length
     ?'<table style="width:100%;border-collapse:collapse"><thead><tr>'+
-      ['Token','Patient','Department','Status','Wait'].map(function(h){return '<th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8">'+h+'</th>';}).join('')+
+      ['Token','Patient','Department','Stage / Location','Wait Today'].map(function(h){return '<th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#777777">'+h+'</th>';}).join('')+
       '</tr></thead><tbody>'+liveRows+'</tbody></table>'
-    :'<div style="padding:20px;text-align:center;color:#94a3b8;font-size:13px">No patients in queue yet</div>';
+    :'<div style="padding:20px;text-align:center;color:#777777;font-size:13px">No active patients in queue</div>';
 
   /* Notices */
   var noticesHtml=_R.messages.slice(0,3).map(function(m){
-    return '<div style="padding:10px 14px;border-radius:8px;border:1px solid #f1f5f9;background:'+(m.read?'#fff':'#f0fdfa')+'">'+
+    return '<div style="padding:10px 14px;border-radius:8px;border:1px solid #f0f1ec;background:'+(m.read?'#fff':'#f0fdfa')+'">'+
       '<div style="display:flex;justify-content:space-between;margin-bottom:3px">'+
-        '<span style="font-size:12px;font-weight:700;color:#0f172a">'+m.from+'</span>'+
-        '<span style="font-size:11px;color:#94a3b8">'+m.time+'</span>'+
+        '<span style="font-size:12px;font-weight:700;color:#111111">'+m.from+'</span>'+
+        '<span style="font-size:11px;color:#777777">'+m.time+'</span>'+
       '</div>'+
-      '<div style="font-size:12px;color:#475569">'+m.text+'</div>'+
+      '<div style="font-size:12px;color:#555555">'+m.text+'</div>'+
     '</div>';
   }).join('<div style="height:6px"></div>');
 
@@ -495,11 +579,11 @@ function _rOverview() {
     kpiHtml+actHtml+
     '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">'+
       _card('<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'+
-        '<div style="font-size:14px;font-weight:700;color:#0f172a">Live Queue</div>'+
-        '<button onclick="_rTab(\'appointments\')" style="font-size:12px;color:#0d9488;border:none;background:transparent;cursor:pointer">View all →</button>'+
+        '<div style="font-size:14px;font-weight:700;color:#111111">Live Queue</div>'+
+        '<button onclick="_rTab(\'appointments\')" style="font-size:12px;color:#0F6E56;border:none;background:transparent;cursor:pointer">View all →</button>'+
       '</div>'+liveHtml) +
       _card('<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'+
-        '<div style="font-size:14px;font-weight:700;color:#0f172a">Notices</div>'+
+        '<div style="font-size:14px;font-weight:700;color:#111111">Notices</div>'+
         '<button onclick="_rTab(\'messaging\')" style="font-size:12px;color:#8b5cf6;border:none;background:transparent;cursor:pointer">Open →</button>'+
       '</div>'+noticesHtml) +
     '</div>'+
@@ -513,7 +597,7 @@ function _rCheckin() {
   var ci = _R.ci;
   if (!ci) { _R.ci = { step:'search', id:'', patient:null, appt:null, dept:'General Consultation', result:null, notFound:false }; ci = _R.ci; }
 
-  var back = '<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">' +
+  var back = '<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555555;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">' +
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>' +
     'Back to Overview</button>';
 
@@ -522,54 +606,101 @@ function _rCheckin() {
   /* ══════════════════ SUCCESS SCREEN ══════════════════ */
   if (ci.step === 'done' && ci.result) {
     var r = ci.result;
-    return '<div style="padding:28px 32px;max-width:900px">' + back +
-      '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
-        '<div>' +
-          '<div style="background:#fff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden">' +
-            '<div style="background:linear-gradient(135deg,#0d9488,#0f766e);padding:28px;text-align:center">' +
-              '<div style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;margin:0 auto 12px">' +
-                '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
-              '</div>' +
-              '<div style="font-size:20px;font-weight:800;color:#fff;margin-bottom:4px">Check-In Complete</div>' +
-              '<div style="font-size:14px;color:rgba(255,255,255,.8)">' + r.name + ' has been added to the queue.</div>' +
+    /* Build live queue rows for this patient's token */
+    var qEntry = _R.queue.find(function(q){ return q.token === r.token; });
+    var qStatus = qEntry ? (qEntry.status || 'waiting') : 'waiting';
+    var statusColors = { waiting:'#d97706', 'at-nurse':'#1A4A9B', 'with-doctor':'#0F6E56', done:'#16a34a' };
+    var statusLabels = { waiting:'Waiting', 'at-nurse':'At Nurse', 'with-doctor':'With Doctor', done:'Done' };
+    var statusCol   = statusColors[qStatus] || '#777777';
+    var statusLabel = statusLabels[qStatus] || qStatus;
+
+    return '<div style="padding:32px 40px;max-width:700px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:20px">' +
+
+        /* ── Confirmation card ── */
+        '<div style="background:#fff;border-radius:16px;border:1px solid #e0e0e0;overflow:hidden">' +
+          '<div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);padding:28px;text-align:center">' +
+            '<div style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;margin:0 auto 12px">' +
+              '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
             '</div>' +
-            '<div style="padding:24px">' +
-              '<div style="text-align:center;margin-bottom:20px">' +
-                '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#94a3b8;margin-bottom:8px">Queue Token</div>' +
-                '<div style="font-size:64px;font-weight:900;font-family:monospace;color:#0d9488;line-height:1">' + r.token + '</div>' +
-                '<div style="font-size:14px;color:#64748b;margin-top:6px">' + r.dept + '</div>' +
+            '<div style="font-size:20px;font-weight:800;color:#fff;margin-bottom:4px">Check-In Complete</div>' +
+            '<div style="font-size:14px;color:rgba(255,255,255,.8)">' + r.name + ' has been added to the queue.</div>' +
+          '</div>' +
+          '<div style="padding:24px">' +
+            '<div style="text-align:center;margin-bottom:20px">' +
+              '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#777777;margin-bottom:8px">Queue Token</div>' +
+              '<div style="font-size:64px;font-weight:900;font-family:monospace;color:#0F6E56;line-height:1">' + r.token + '</div>' +
+              '<div style="font-size:14px;color:#777777;margin-top:6px">' + r.dept + '</div>' +
+            '</div>' +
+            '<div style="background:#f4f5f0;border-radius:10px;padding:14px 16px;margin-bottom:20px">' +
+              '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px">' +
+                '<span style="color:#777777">Patient</span><strong>' + r.name + '</strong>' +
               '</div>' +
-              '<div style="background:#f8fafc;border-radius:10px;padding:14px 16px;margin-bottom:16px">' +
-                '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px">' +
-                  '<span style="color:#64748b">Patient</span><strong>' + r.name + '</strong>' +
-                '</div>' +
-                '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px">' +
-                  '<span style="color:#64748b">Department</span><strong>' + r.dept + '</strong>' +
-                '</div>' +
-                '<div style="display:flex;justify-content:space-between;font-size:13px">' +
-                  '<span style="color:#64748b">Checked in at</span><strong>' + _fmtTime() + '</strong>' +
-                '</div>' +
+              '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px">' +
+                '<span style="color:#777777">Department</span><strong>' + r.dept + '</strong>' +
               '</div>' +
-              '<div style="padding:12px 14px;background:#eff6ff;border-radius:10px;font-size:13px;color:#1d4ed8;margin-bottom:20px">' +
-                '🏥 Patient directed to <strong>Nurses Station</strong> for vitals before consultation.' +
+              '<div style="display:flex;justify-content:space-between;font-size:13px">' +
+                '<span style="color:#777777">Checked in at</span><strong>' + _fmtTime() + '</strong>' +
               '</div>' +
-              '<div style="display:flex;gap:10px">' +
-                '<button onclick="_R.ci={step:\'search\',id:\'\',patient:null,appt:null,dept:\'General Consultation\',result:null,notFound:false};_rRec()" ' +
-                  'style="flex:1;padding:13px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">' +
-                  'Check in another patient</button>' +
+            '</div>' +
+            '<button onclick="_R.ci={step:\'search\',id:\'\',patient:null,appt:null,dept:\'General Consultation\',result:null,notFound:false};_rRec()" ' +
+              'style="width:100%;padding:13px;border-radius:10px;border:1.5px solid #0F6E56;background:#fff;color:#0F6E56;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">' +
+              'Check in another patient' +
+            '</button>' +
+          '</div>' +
+        '</div>' +
+
+        /* ── Patient Journey card ── */
+        '<div style="background:#fff;border-radius:16px;border:1px solid #e0e0e0;overflow:hidden">' +
+          '<div style="padding:14px 18px;border-bottom:1px solid #f0f1ec;display:flex;align-items:center;justify-content:space-between">' +
+            '<span style="font-size:13px;font-weight:700;color:#111111">Patient Journey</span>' +
+            '<span style="font-size:11px;padding:3px 10px;border-radius:20px;font-weight:700;background:' + statusCol + '22;color:' + statusCol + '">' + statusLabel + '</span>' +
+          '</div>' +
+          /* Journey progress bar */
+          '<div style="padding:16px 18px 10px">' +
+            '<div style="display:flex;align-items:center;gap:0;margin-bottom:18px">' +
+              (function(){
+                var steps=[{k:'waiting',l:'Waiting Room'},{k:'at-nurse',l:'Nurse Station'},{k:'with-doctor',l:'Consultation'},{k:'done',l:'Discharged'}];
+                var curIdx=steps.findIndex(function(s){return s.k===qStatus;});
+                return steps.map(function(s,i){
+                  var active=i<=curIdx;
+                  var isCur=i===curIdx;
+                  return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;position:relative">' +
+                    (i>0?'<div style="position:absolute;top:12px;right:50%;width:100%;height:2px;background:'+(active?'#0F6E56':'#e0e0e0')+'"></div>':'')+
+                    '<div style="width:24px;height:24px;border-radius:50%;background:'+(isCur?'#0F6E56':active?'#1A4A9B':'#e0e0e0')+';display:flex;align-items:center;justify-content:center;z-index:1;flex-shrink:0">' +
+                      (active?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>':'') +
+                    '</div>' +
+                    '<div style="font-size:10px;font-weight:'+(isCur?'700':'400')+';color:'+(isCur?'#0F6E56':active?'#1A4A9B':'#aaaaaa')+';margin-top:5px;text-align:center">' + s.l + '</div>' +
+                  '</div>';
+                }).join('');
+              })()+
+            '</div>' +
+            /* Patient row + redirect control */
+            '<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#f4f5f0;border-radius:10px">' +
+              '<div style="width:40px;height:40px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">' +
+                r.name.split(' ').map(function(w){return w[0]||'';}).join('').slice(0,2).toUpperCase() +
               '</div>' +
+              '<div style="flex:1">' +
+                '<div style="font-weight:700;font-size:14px;color:#111111">' + r.name + '</div>' +
+                '<div style="font-size:12px;color:#777777;margin-top:1px">' + r.token + ' · ' + r.dept + '</div>' +
+              '</div>' +
+              (qStatus === 'done'
+                ? '<span style="font-size:12px;color:#16a34a;font-weight:700">✓ Discharged</span>'
+                : '<div style="display:flex;align-items:center;gap:8px">' +
+                    '<select id="ci-redirect-sel" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none;background:#fff">' +
+                      '<option value="">— Redirect to —</option>' +
+                      (qStatus==='waiting'?'<option value="at-nurse">🏥 Nurse Station</option>':'')+
+                      (qStatus!=='with-doctor'&&qStatus!=='done'?'<option value="with-doctor">🩺 Consultation Room</option>':'')+
+                      (qStatus!=='done'?'<option value="done">✓ Discharge</option>':'')+
+                    '</select>' +
+                    '<button onclick="var s=document.getElementById(\'ci-redirect-sel\').value;if(s)_rQueueAdvance(\''+r.token+'\',s)" ' +
+                      'style="padding:8px 16px;border-radius:8px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Go</button>' +
+                  '</div>'
+              ) +
             '</div>' +
           '</div>' +
         '</div>' +
-        '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
-          '<div style="padding:14px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Notifications sent</div>' +
-          '<div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">' +
-            '<div style="display:flex;align-items:center;gap:10px"><div style="width:32px;height:32px;border-radius:50%;background:' + (r.smsSent ? '#f0fdf4;border:1px solid #86efac' : '#fef2f2;border:1px solid #fca5a5') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="' + (r.smsSent ? '#16a34a' : '#dc2626') + '" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;font-weight:600">' + (r.smsSent ? 'SMS delivered (' + (r.smsElapsed||0) + 'ms)' : 'SMS not sent') + '</div><div style="font-size:11px;color:#94a3b8">' + (r.phone || 'No phone on file') + '</div></div></div>' +
-            '<div style="display:flex;align-items:center;gap:10px"><div style="width:32px;height:32px;border-radius:50%;background:' + (r.emailSent ? '#f0fdf4;border:1px solid #86efac' : '#fef2f2;border:1px solid #fca5a5') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="' + (r.emailSent ? '#16a34a' : '#dc2626') + '" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;font-weight:600">' + (r.emailSent ? 'Email delivered (' + (r.emailElapsed||0) + 'ms)' : 'Email not sent') + '</div><div style="font-size:11px;color:#94a3b8">' + (r.email || 'No email on file') + '</div></div></div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
+
+      '</div>';
   }
 
   /* ══════════════════ STEP 1: SEARCH ══════════════════ */
@@ -578,31 +709,27 @@ function _rCheckin() {
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           '<div style="margin-bottom:24px">' +
-            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Patient Check-in</div>' +
-            '<div style="font-size:15px;color:#64748b">Search by SA ID or passport to find the patient profile.</div>' +
+            '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:6px">Patient Check-in</div>' +
+            '<div style="font-size:15px;color:#777777">Search by SA ID or passport to find the patient profile.</div>' +
           '</div>' +
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
-            '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:10px">SA ID / PASSPORT NUMBER *</div>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">' +
+            '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#555555;margin-bottom:10px">SA ID / PASSPORT NUMBER *</div>' +
             '<div style="display:flex;gap:10px;margin-bottom:' + (ci.notFound ? '14px' : '0') + '">' +
               '<input id="ci-id" type="text" value="' + (ci.id || '') + '" placeholder="e.g. 8203041234083" ' +
-              'style="flex:1;padding:12px 16px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;font-family:inherit;outline:none;color:#0f172a" ' +
-              'onfocus="this.style.borderColor=\"#0d9488\"" onblur="this.style.borderColor=\"#e2e8f0\"">' +
-              '<button onclick="_rCheckinSearch()" style="display:flex;align-items:center;gap:8px;padding:12px 24px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">' +
+              'style="flex:1;padding:12px 16px;border:1.5px solid #e0e0e0;border-radius:10px;font-size:15px;font-family:inherit;outline:none;color:#111111" ' +
+              'onfocus="this.style.borderColor=\"#0F6E56\"" onblur="this.style.borderColor=\"#e0e0e0\"">' +
+              '<button onclick="_rCheckinSearch()" style="display:flex;align-items:center;gap:8px;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">' +
                 '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
                 'Search' +
               '</button>' +
             '</div>' +
             (ci.notFound
-              ? '<div style="padding:14px 16px;background:#fef2f2;border-radius:10px;border:1.5px solid #fca5a5;margin-bottom:14px">' +
-                  '<div style="display:flex;align-items:start;gap:10px">' +
-                    '<div style="font-size:22px;margin-top:2px">🚫</div>' +
-                    '<div style="flex:1">' +
-                      '<div style="font-size:13px;color:#ef4444;margin-bottom:10px">No profile exists for ID <strong>' + ci.id + '</strong> in NIHMS. A patient profile must be created before an appointment can be booked or a check-in issued.</div>' +
-                      '<button onclick="_R.tab=\'register\';_rRec()" ' +
-                        'style="padding:8px 18px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">+ Create Patient Profile</button>' +
-                    '</div>' +
-                  '</div>' +
-                 '</div>'
+              ? '<div style="padding:16px 18px;background:linear-gradient(135deg,rgba(15,110,86,.06) 0%,rgba(26,74,155,.06) 100%);border:1.5px solid rgba(15,110,86,.2);border-radius:12px;margin-top:14px">' +
+                  '<div style="font-size:13px;font-weight:700;color:#0f2942;margin-bottom:5px">Patient Profile Not Found</div>' +
+                  '<div style="font-size:13px;color:#444444;margin-bottom:14px;line-height:1.6">No profile exists for ID <strong style="color:#0f2942">' + ci.id + '</strong> in NIHMS. A patient profile must be created before an appointment can be booked or a check-in issued.</div>' +
+                  '<button onclick="_R.tab=\'register\';_rRec()" ' +
+                    'style="display:inline-flex;align-items:center;gap:7px;padding:10px 22px;border-radius:50px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(15,110,86,.25)">+ Create Patient Profile</button>' +
+                '</div>'
               : '') +
           '</div>' +
         '</div>' +
@@ -617,12 +744,12 @@ function _rCheckin() {
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           '<div style="margin-bottom:24px">' +
-            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Patient Registration</div>' +
-            '<div style="font-size:15px;color:#64748b">Complete the patient profile then proceed to book the appointment.</div>' +
+            '<div style="font-size:28px;font-weight:800;color:#0f2942;margin-bottom:6px">Patient Registration</div>' +
+            '<div style="font-size:15px;color:#777777">Complete the patient profile then proceed to book the appointment.</div>' +
           '</div>' +
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
-            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#0d9488">' +
-              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#0F6E56">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
               '<span style="font-size:13px;font-weight:700">Register new patient</span>' +
             '</div>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
@@ -636,18 +763,18 @@ function _rCheckin() {
               _frmInp('ci-reg-em','EMAIL','patient@email.com','email') +
             '</div>' +
             '<div style="margin-top:14px">' + _frmInp('ci-reg-addr','ADDRESS','Street address, suburb, city') + '</div>' +
-          '<div style="margin-top:16px;background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:16px">' +
+          '<div style="margin-top:16px;background:#fff;border-radius:12px;border:1px solid #e0e0e0;padding:16px">' +
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">' +
-              '<span style="font-size:12px;font-weight:700;color:#0f172a">📄 ID Document</span>' +
-              '<span style="font-size:11px;color:#94a3b8">(optional — JPG/PNG/PDF, max 5MB)</span>' +
+              '<span style="font-size:12px;font-weight:700;color:#111111">📄 ID Document</span>' +
+              '<span style="font-size:11px;color:#777777">(optional — JPG/PNG/PDF, max 5MB)</span>' +
             '</div>' +
             '<div id="nr-id-drop" onclick="document.getElementById(\'nr-id-file\').click()" ' +
-                 'ondragover="event.preventDefault();this.style.borderColor=\'#0d9488\'" ' +
-                 'ondragleave="this.style.borderColor=\'#e2e8f0\'" ' +
+                 'ondragover="event.preventDefault();this.style.borderColor=\'#0F6E56\'" ' +
+                 'ondragleave="this.style.borderColor=\'#e0e0e0\'" ' +
                  'ondrop="_rIdFileDrop(event)" ' +
-                 'style="border:2px dashed #e2e8f0;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#f9fafb">' +
+                 'style="border:2px dashed #e0e0e0;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#f9fafb">' +
               '<div>📄 Click to upload or drag & drop</div>' +
-              '<div style="font-size:11px;color:#94a3b8">JPG · PNG · PDF · Max 5 MB</div>' +
+              '<div style="font-size:11px;color:#777777">JPG · PNG · PDF · Max 5 MB</div>' +
               '<input id="nr-id-file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" ' +
                      'style="display:none" onchange="_rIdFileSelect(this)">' +
             '</div>' +
@@ -655,11 +782,11 @@ function _rCheckin() {
           '</div>' +
           '</div>' +
           '<div style="display:flex;gap:10px;margin-top:14px">' +
-            '<button onclick="_rCiRegister()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
+            '<button onclick="_rCiRegister()" style="flex:1;padding:14px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
               '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
               'Register' +
             '</button>' +
-            '<button onclick="_R.ci.step=\'search\';_rRec()" style="padding:14px 24px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Back</button>' +
+            '<button onclick="_R.ci.step=\'search\';_rRec()" style="padding:14px 24px;border-radius:10px;border:1.5px solid #e0e0e0;background:#fff;color:#555555;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Back</button>' +
           '</div>' +
         '</div>' +
         _ciSidePanel() +
@@ -710,7 +837,7 @@ function _rCheckin() {
 
     var slotGrid = '';
     if (!dateChosen) {
-      slotGrid = '<div style="padding:14px;background:#f8fafc;border-radius:8px;text-align:center;color:#94a3b8;font-size:13px">Select a date first to see available slots</div>';
+      slotGrid = '<div style="padding:14px;background:#f4f5f0;border-radius:8px;text-align:center;color:#777777;font-size:13px">Select a date first to see available slots</div>';
     } else if (isSunday) {
       slotGrid = '<div style="padding:14px;background:#fef2f2;border-radius:8px;text-align:center;color:#dc2626;font-size:13px;font-weight:600">⛔ Clinic is closed on Sundays</div>';
     } else if (availSlots.length === 0) {
@@ -721,9 +848,9 @@ function _rCheckin() {
           var isSel = selSlot === t;
           return '<button data-slot="' + t + '" ' +
             'style="padding:12px 8px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:14px;' +
-            'border:1.5px solid ' + (isSel?'#0d9488':'#e2e8f0') + ';' +
+            'border:1.5px solid ' + (isSel?'#0F6E56':'#e0e0e0') + ';' +
             'background:' + (isSel?'#f0fdfa':'#fff') + ';' +
-            'color:' + (isSel?'#0d9488':'#0f172a') + ';' +
+            'color:' + (isSel?'#0F6E56':'#111111') + ';' +
             'font-weight:' + (isSel?'700':'500') + '">' + t + '</button>';
         }).join('') +
       '</div>';
@@ -737,19 +864,19 @@ function _rCheckin() {
       : 'Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Sun closed';
 
     var slotHtml =
-      '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+      '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px">' +
           _frmSel('ci-slot-dept','DEPARTMENT *', DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};}), ci.dept||'General Consultation') +
           '<div>' +
-            '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">DATE *</label>' +
+            '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#555555;margin-bottom:6px">DATE *</label>' +
             '<input id="ci-slot-date" type="date" min="' + todayIso + '" value="' + selDate + '" ' +
             'onchange="_ciDateChange(this.value)" ' +
-            'style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#0f172a">' +
+            'style="width:100%;padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#111111">' +
           '</div>' +
         '</div>' +
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
-          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569">AVAILABLE TIME SLOTS *</div>' +
-          '<div style="font-size:11px;color:#94a3b8">' + hintText + '</div>' +
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#555555">AVAILABLE TIME SLOTS *</div>' +
+          '<div style="font-size:11px;color:#777777">' + hintText + '</div>' +
         '</div>' +
         slotGrid +
         (!selSlot && dateChosen && !isSunday && availSlots.length > 0
@@ -770,11 +897,11 @@ function _rCheckin() {
         ci.selectedSlot = ci.appt.time;
         selSlot = ci.selectedSlot;
       }
-      if (!ci.dept && ci.appt.dept) ci.dept = ci.appt.dept;
+      if (ci.appt.dept) ci.dept = ci.appt.dept; /* always use appointment's actual dept */
 
       apptBanner =
         '<div style="display:flex;align-items:start;gap:12px;padding:14px 16px;' +
-        'background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;margin-bottom:16px">' +
+        'background:#E1F5EE;border:1px solid #86efac;border-left:4px solid #1D9E75;border-radius:12px;margin-bottom:16px">' +
           '<div style="font-size:20px;margin-top:2px">📋</div>' +
           '<div style="flex:1">' +
             '<div style="font-size:13px;font-weight:700;color:#14532d;margin-bottom:4px">✓ Appointment Found — Case A</div>' +
@@ -792,30 +919,12 @@ function _rCheckin() {
     /* ── Case B: profile found but no appointment ── */
     } else {
       apptBanner =
-        '<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:14px;padding:20px;margin-bottom:16px">' +
-          '<div style="display:flex;align-items:start;gap:12px">' +
-            '<div style="width:36px;height:36px;border-radius:50%;background:#fef2f2;border:1.5px solid #fca5a5;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">📅</div>' +
-            '<div style="flex:1">' +
-              '<div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:6px">' +
-                'We couldn\'t find an upcoming appointment for ' +
-                '<span style="color:#0d9488">' + (pt.firstName||'') + ' ' + (pt.lastName||'') + '</span>.' +
-              '</div>' +
-              '<div style="font-size:13px;color:#475569;margin-bottom:16px;line-height:1.5">' +
-                'You can book a new appointment now.' +
-              '</div>' +
-              '<button onclick="_rCiBkNow()" ' +
-                'style="display:inline-flex;align-items:center;gap:8px;padding:12px 24px;border-radius:10px;border:none;' +
-                'background:#0d9488;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;' +
-                'box-shadow:0 2px 8px rgba(13,148,136,.25)">' +
-                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">' +
-                  '<rect x="3" y="4" width="18" height="18" rx="2"/>' +
-                  '<line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>' +
-                  '<line x1="3" y1="10" x2="21" y2="10"/>' +
-                '</svg>' +
-                'Book Appointment Now' +
-              '</button>' +
-            '</div>' +
+        '<div style="background:linear-gradient(135deg,rgba(15,110,86,.06) 0%,rgba(26,74,155,.06) 100%);border:1.5px solid rgba(15,110,86,.2);border-radius:12px;padding:16px 18px;margin-bottom:16px">' +
+          '<div style="font-size:13px;font-weight:700;color:#0f2942;margin-bottom:5px">' +
+            'No appointment found for <span style="color:#0F6E56">' + (pt.firstName||'') + ' ' + (pt.lastName||'') + '</span>' +
           '</div>' +
+          '<div style="font-size:13px;color:#444444;margin-bottom:14px;line-height:1.6">You can book a new appointment now.</div>' +
+          '<button onclick="_rCiBkNow()" style="display:inline-flex;align-items:center;gap:7px;padding:10px 22px;border-radius:50px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(15,110,86,.25)">+ Book Appointment Now</button>' +
         '</div>';
     }
 
@@ -828,42 +937,88 @@ function _rCheckin() {
             var isSel = selSlot === t;
             return '<button data-slot="' + t + '" ' +
               'style="padding:12px 8px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:14px;' +
-              'border:1.5px solid ' + (isSel?'#0d9488':'#e2e8f0') + ';' +
+              'border:1.5px solid ' + (isSel?'#0F6E56':'#e0e0e0') + ';' +
               'background:' + (isSel?'#f0fdfa':'#fff') + ';' +
-              'color:' + (isSel?'#0d9488':'#0f172a') + ';' +
+              'color:' + (isSel?'#0F6E56':'#111111') + ';' +
               'font-weight:' + (isSel?'700':'500') + '" ' +
               'onclick="_ciSlotPick(\'' + t + '\')">' + t + '</button>';
           }).join('') + '</div>';
       }
     }
 
+    /* ── Case A: Figma-style Prepare for Check-In screen ── */
+    if (ci.appt && !ci.caseB) {
+      var apptDate = ci.appt.date ? new Date(ci.appt.date).toLocaleDateString('en-ZA',{year:'numeric',month:'long',day:'numeric'}) : (ci.appt.date || '—');
+      var apptTime = ci.appt.time || '—';
+      var apptDept = (ci.appt.dept || ci.dept || '—').replace(/\s*-?\s*Case\s*[AB]\s*/gi,'').trim();
+      return '<div style="padding:28px 32px">' + back + '<div style="display:flex;align-items:center;justify-content:center;padding:0">' +
+        '<div style="width:100%;max-width:520px">' +
+          /* Heading */
+          '<div style="text-align:center;margin-bottom:32px">' +
+            '<h1 style="font-size:28px;font-weight:800;color:#0f2942;margin:0 0 10px;font-family:inherit">Prepare for Check-In</h1>' +
+            '<p style="font-size:15px;color:#4a6580;margin:0">Confirm the appointment for <strong>' + (pt.firstName||'') + ' ' + (pt.lastName||'') + '</strong> before check-in.</p>' +
+          '</div>' +
+          /* Patient + appointment card */
+          '<div style="background:#fff;border-radius:20px;border:1px solid #dde8ef;box-shadow:0 4px 24px rgba(0,60,100,.07);padding:24px 28px;margin-bottom:24px">' +
+            /* Patient row */
+            '<div style="display:flex;align-items:center;gap:16px;padding-bottom:20px;border-bottom:1px solid #edf2f6;margin-bottom:20px">' +
+              '<div style="width:56px;height:56px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex-shrink:0">' + initials + '</div>' +
+              '<div>' +
+                '<div style="font-size:20px;font-weight:800;color:#0f2942">' + (pt.firstName||'') + ' ' + (pt.lastName||'') + '</div>' +
+                '<div style="font-size:14px;color:#777777;margin-top:3px">' + (pt.phone||pt.id||'') + '</div>' +
+              '</div>' +
+            '</div>' +
+            /* Appointment details */
+            '<div style="display:flex;flex-direction:column;gap:16px">' +
+              '<div style="display:flex;align-items:center;gap:14px">' +
+                '<div style="width:32px;height:32px;border-radius:8px;background:#f0f9f8;display:flex;align-items:center;justify-content:center;flex-shrink:0">' +
+                  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' +
+                '</div>' +
+                '<span style="font-size:15px;color:#1e3a4f">Appointment Date: <strong>' + apptDate + '</strong></span>' +
+              '</div>' +
+              '<div style="display:flex;align-items:center;gap:14px">' +
+                '<div style="width:32px;height:32px;border-radius:8px;background:#f0f9f8;display:flex;align-items:center;justify-content:center;flex-shrink:0">' +
+                  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 6 12 12 16 14"/></svg>' +
+                '</div>' +
+                '<span style="font-size:15px;color:#1e3a4f">Time: <strong>' + apptTime + '</strong></span>' +
+              '</div>' +
+              '<div style="display:flex;align-items:center;gap:14px">' +
+                '<div style="width:32px;height:32px;border-radius:8px;background:#f0f9f8;display:flex;align-items:center;justify-content:center;flex-shrink:0">' +
+                  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.3.3 0 1 0 .2.3"/><path d="M8 15v1a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6v-4"/><circle cx="20" cy="10" r="2"/></svg>' +
+                '</div>' +
+                '<span style="font-size:15px;color:#1e3a4f">Department: <strong>' + apptDept + '</strong></span>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+          /* Check In button card */
+          '<div style="background:#fff;border-radius:20px;border:1px solid #dde8ef;box-shadow:0 4px 24px rgba(0,60,100,.07);overflow:hidden">' +
+            '<div style="padding:24px">' +
+              '<button onclick="_rCheckinIssue()" style="width:100%;padding:18px;border-radius:50px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:17px;font-weight:800;cursor:pointer;font-family:inherit;letter-spacing:.01em;box-shadow:0 4px 14px rgba(15,110,86,.25)">' +
+                'Check In Patient' +
+              '</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div></div></div>';
+    }
+
+    /* ── Case B / slot picker fallback ── */
     return '<div style="padding:28px 32px">' + back +
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           '<div style="margin-bottom:24px">' +
-            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Check In Patient</div>' +
-            '<div style="font-size:15px;color:#64748b">Review appointment details for <strong>' + (pt.firstName||'') + ' ' + (pt.lastName||'') + '</strong> then confirm.</div>' +
-            (ci.caseB ?
-              '<div style="margin-top:10px;padding:10px 14px;background:#f0fdfa;border-radius:10px;border:1px solid #99f6e4;font-size:12px;color:#0d9488">' +
-                '📅 Booking a new appointment for <strong>' + (pt.firstName||'') + ' ' + (pt.lastName||'') + '</strong>. Select a department, date and time slot below.' +
-              '</div>'
-            : '') +
+            '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:6px">Patient Check-In</div>' +
+            '<div style="font-size:15px;color:#777777">Search by SA ID or passport to find the patient profile.</div>' +
           '</div>' +
           apptBanner +
           '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:#f0fdfa;border-radius:12px;border:1px solid #99f6e4;margin-bottom:16px">' +
-            '<div style="width:38px;height:38px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">' + initials + '</div>' +
-            '<div style="flex:1"><div style="font-weight:700;font-size:14px;color:#0f172a">' + (pt.firstName||'') + ' ' + (pt.lastName||'') + '</div><div style="font-size:12px;color:#64748b">' + (pt.phone||pt.id||'') + '</div></div>' +
-            '<button onclick="_R.ci.step=\'search\';_R.ci.patient=null;_rRec()" style="font-size:13px;color:#0d9488;border:none;background:transparent;cursor:pointer;font-family:inherit;text-decoration:underline">Change</button>' +
+            '<div style="width:38px;height:38px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">' + initials + '</div>' +
+            '<div style="flex:1"><div style="font-weight:700;font-size:14px;color:#111111">' + (pt.firstName||'') + ' ' + (pt.lastName||'') + '</div><div style="font-size:12px;color:#777777">' + (pt.phone||pt.id||'') + '</div></div>' +
+            '<button onclick="_R.ci.step=\'search\';_R.ci.patient=null;_rRec()" style="font-size:13px;color:#0F6E56;border:none;background:transparent;cursor:pointer;font-family:inherit;text-decoration:underline">Change</button>' +
           '</div>' +
-          slotHtml +
+          (ci.appt ? slotHtml : '') +
         '</div>' +
         _ciSidePanel() +
-      '</div>' +
-      '<div style="padding:16px 0 0;margin-top:20px">' +
-        '<button onclick="_rCheckinIssue()" style="width:100%;padding:16px;border-radius:12px;border:none;background:#0d9488;color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:10px">' +
-          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
-          'Confirm Booking & Check In Patient' +
-        '</button>' +
       '</div>' +
     '</div>';
   }
@@ -887,9 +1042,9 @@ function _bindSlotGrid() {
     /* Update styles on all slot buttons */
     grid.querySelectorAll('[data-slot]').forEach(function(b) {
       var sel = b.getAttribute('data-slot') === t;
-      b.style.border     = '1.5px solid ' + (sel ? '#0d9488' : '#e2e8f0');
+      b.style.border     = '1.5px solid ' + (sel ? '#0F6E56' : '#e0e0e0');
       b.style.background = sel ? '#f0fdfa' : '#fff';
-      b.style.color      = sel ? '#0d9488' : '#0f172a';
+      b.style.color      = sel ? '#0F6E56' : '#111111';
       b.style.fontWeight = sel ? '700' : '500';
     });
     /* Hide validation error */
@@ -914,25 +1069,25 @@ window._ciDateChange = function(dateStr) {
 function _ciSidePanel() {
   var recentQ = _R.queue.slice(-4).reverse();
   return '<div style="display:flex;flex-direction:column;gap:14px">' +
-    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
-      '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Dept. Queue Status</div>' +
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;overflow:hidden">' +
+      '<div style="padding:12px 16px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:700;color:#111111">Dept. Queue Status</div>' +
       DEPARTMENTS.slice(0,8).map(function(d) {
         var qd = _R.queue.filter(function(q){return q.department===d.name&&q.status!=='done';}).length;
-        return '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #f8fafc">' +
+        return '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #f4f5f0">' +
           '<span style="width:7px;height:7px;border-radius:50%;background:' + d.color + ';flex-shrink:0"></span>' +
-          '<span style="flex:1;font-size:12px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + d.name + '</span>' +
-          '<span style="font-size:12px;font-weight:700;color:' + (qd > 4 ? '#ef4444' : '#0d9488') + ';margin-right:4px">' + qd + '</span>' +
-          '<span style="font-size:11px;color:#cbd5e1">~' + d.avgWait + 'm</span>' +
+          '<span style="flex:1;font-size:12px;color:#555555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + d.name + '</span>' +
+          '<span style="font-size:12px;font-weight:700;color:' + (qd > 4 ? '#ef4444' : '#0F6E56') + ';margin-right:4px">' + qd + '</span>' +
+          '<span style="font-size:11px;color:#d0d0d0">~' + d.avgWait + 'm</span>' +
         '</div>';
       }).join('') +
     '</div>' +
-    (recentQ.length ? '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
-      '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Recent Check-ins</div>' +
+    (recentQ.length ? '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;overflow:hidden">' +
+      '<div style="padding:12px 16px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:700;color:#111111">Recent Check-ins</div>' +
       recentQ.map(function(p) {
-        return '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #f8fafc">' +
-          '<span style="font-family:monospace;font-size:12px;font-weight:700;color:#0d9488;min-width:52px">' + p.token + '</span>' +
+        return '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #f4f5f0">' +
+          '<span style="font-family:monospace;font-size:12px;font-weight:700;color:#0F6E56;min-width:52px">' + p.token + '</span>' +
           '<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + p.name + '</div>' +
-          '<div style="font-size:10px;color:#94a3b8">' + p.department + '</div></div>' +
+          '<div style="font-size:10px;color:#777777">' + p.department + '</div></div>' +
         '</div>';
       }).join('') +
     '</div>' : '') +
@@ -942,22 +1097,59 @@ function _ciSidePanel() {
 /* Form input/select helpers for checkin */
 function _frmInp(id, label, placeholder, type, value) {
   return '<div id="' + id + '-wrap">' +
-    '<label id="' + id + '-lbl" style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">' + label + '</label>' +
+    '<label id="' + id + '-lbl" style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#555555;margin-bottom:6px">' + label + '</label>' +
     '<input id="' + id + '" type="' + (type || 'text') + '" placeholder="' + (placeholder || '') + '" value="' + (value || '') + '" ' +
-    'style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#0f172a;transition:border-color .15s" ' +
+    'style="width:100%;padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#111111;transition:border-color .15s" ' +
     'oninput="_frmClearErr(\'' + id + '\')" onfocus="_frmClearErr(\'' + id + '\')">' +
     '<div id="' + id + '-err" style="display:none;font-size:11px;color:#dc2626;margin-top:4px;font-weight:600"></div>' +
     '</div>';
 }
 
+/* SA ID / Passport field — extends _frmInp to also call _rIdAutofill on input */
+function _frmInpId() {
+  return '<div id="nr-id-wrap">' +
+    '<label id="nr-id-lbl" style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#555555;margin-bottom:6px">SA ID / PASSPORT *</label>' +
+    '<input id="nr-id" type="text" placeholder="e.g. 8203041234083" value="" ' +
+    'style="width:100%;padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#111111;transition:border-color .15s" ' +
+    'oninput="_frmClearErr(\'nr-id\');_rIdAutofill()">' +
+    '<div id="nr-id-err" style="display:none;font-size:11px;color:#dc2626;margin-top:4px;font-weight:600"></div>' +
+    '</div>';
+}
+
 function _frmSel(id, label, opts, val) {
   return '<div id="' + id + '-wrap">' +
-    '<label id="' + id + '-lbl" style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">' + label + '</label>' +
-    '<select id="' + id + '" onchange="_frmClearErr(\'' + id + '\')" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;background:#fff;color:#0f172a;transition:border-color .15s">' +
+    '<label id="' + id + '-lbl" style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#555555;margin-bottom:6px">' + label + '</label>' +
+    '<select id="' + id + '" onchange="_frmClearErr(\'' + id + '\')" style="width:100%;padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;background:#fff;color:#111111;transition:border-color .15s">' +
     opts.map(function(o){ return '<option value="' + o.v + '"' + (o.v===(val||'')?'  selected':'') + '>' + o.label + '</option>'; }).join('') +
     '</select>' +
     '<div id="' + id + '-err" style="display:none;font-size:11px;color:#dc2626;margin-top:4px;font-weight:600"></div>' +
     '</div>';
+}
+
+/* Auto-fill Date of Birth from SA ID number (first 6 digits = YYMMDD) */
+function _rIdAutofill() {
+  var idEl  = document.getElementById('nr-id');
+  var dobEl = document.getElementById('nr-dob');
+  if (!idEl || !dobEl) return;
+  var val = idEl.value.replace(/\s/g, '');
+  /* Only act when we have exactly 13 digits (SA ID) */
+  if (!/^\d{13}$/.test(val)) return;
+  var yy = parseInt(val.slice(0, 2), 10);
+  var mm = parseInt(val.slice(2, 4), 10);
+  var dd = parseInt(val.slice(4, 6), 10);
+  /* Sanity check month/day */
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return;
+  /* Resolve century: if YY > current 2-digit year, born in 1900s, else 2000s */
+  var curYY = new Date().getFullYear() % 100;
+  var yyyy  = yy > curYY ? 1900 + yy : 2000 + yy;
+  /* Format as YYYY-MM-DD for the date input */
+  var dobStr = yyyy + '-' + String(mm).padStart(2, '0') + '-' + String(dd).padStart(2, '0');
+  /* Only set if the field is currently empty or was previously auto-filled */
+  if (!dobEl.dataset.manuallySet || dobEl.dataset.autoFilled === 'true') {
+    dobEl.value = dobStr;
+    dobEl.dataset.autoFilled = 'true';
+    _frmClearErr('nr-dob');
+  }
 }
 
 /* Mark a field as invalid — red border + inline error message */
@@ -975,9 +1167,9 @@ function _frmClearErr(id) {
   var el  = document.getElementById(id);
   var err = document.getElementById(id + '-err');
   var lbl = document.getElementById(id + '-lbl');
-  if (el)  { el.style.borderColor = '#0d9488'; }
+  if (el)  { el.style.borderColor = '#0F6E56'; }
   if (err) { err.style.display = 'none'; }
-  if (lbl) { lbl.style.color = '#475569'; }
+  if (lbl) { lbl.style.color = '#555555'; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -987,15 +1179,15 @@ function _rBook() {
   var bk = _R.bk;
   if (!bk) { _R.bk = { step:'search', id:'', patient:null, slot:null, slotIdx:null, result:null, notFound:false, selectedSlot:null, selectedDate:'', dept:'General Consultation' }; bk = _R.bk; }
 
-  var back = '<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
+  var back = '<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555555;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
 
   /* ══ SUCCESS ══ */
   if (bk.step === 'done' && bk.result) {
     var r = bk.result;
     return '<div style="padding:28px 32px">' + back +
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
-        '<div style="background:#fff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden">' +
-          '<div style="background:linear-gradient(135deg,#3b82f6,#2563eb);padding:28px;text-align:center">' +
+        '<div style="background:#fff;border-radius:16px;border:1px solid #e0e0e0;overflow:hidden">' +
+          '<div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);padding:28px;text-align:center">' +
             '<div style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;margin:0 auto 12px">' +
               '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
             '</div>' +
@@ -1003,20 +1195,20 @@ function _rBook() {
             '<div style="font-size:14px;color:rgba(255,255,255,.8)">' + r.name + '</div>' +
           '</div>' +
           '<div style="padding:24px">' +
-            '<div style="background:#f8fafc;border-radius:12px;padding:16px;margin-bottom:16px">' +
+            '<div style="background:#f4f5f0;border-radius:12px;padding:16px;margin-bottom:16px">' +
               '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">' +
-                '<div><div style="font-size:10px;color:#94a3b8;margin-bottom:2px">REFERENCE</div><div style="font-weight:700;color:#3b82f6">' + r.ref + '</div></div>' +
-                '<div><div style="font-size:10px;color:#94a3b8;margin-bottom:2px">DEPARTMENT</div><div style="font-weight:700">' + r.dept + '</div></div>' +
-                '<div><div style="font-size:10px;color:#94a3b8;margin-bottom:2px">DATE</div><div style="font-weight:700">' + r.date + '</div></div>' +
-                '<div><div style="font-size:10px;color:#94a3b8;margin-bottom:2px">TIME</div><div style="font-weight:700">' + r.time + '</div></div>' +
+                '<div><div style="font-size:10px;color:#777777;margin-bottom:2px">REFERENCE</div><div style="font-weight:700;color:#0F6E56">' + r.ref + '</div></div>' +
+                '<div><div style="font-size:10px;color:#777777;margin-bottom:2px">DEPARTMENT</div><div style="font-weight:700">' + r.dept + '</div></div>' +
+                '<div><div style="font-size:10px;color:#777777;margin-bottom:2px">DATE</div><div style="font-weight:700">' + r.date + '</div></div>' +
+                '<div><div style="font-size:10px;color:#777777;margin-bottom:2px">TIME</div><div style="font-weight:700">' + r.time + '</div></div>' +
               '</div>' +
             '</div>' +
-            '<div style="padding:12px 14px;background:#eff6ff;border-radius:10px;font-size:13px;color:#1d4ed8;margin-bottom:20px">' +
+            '<div style="padding:12px 14px;background:#E6F1FB;border-radius:10px;font-size:13px;color:#185FA5;margin-bottom:20px">' +
               '📅 Confirmation sent to patient via SMS' + (r.email ? ' & email' : '') + '.' +
             '</div>' +
             '<div style="display:flex;gap:10px">' +
-              '<button onclick="_R.bk={step:\'search\',id:\'\',patient:null,slot:null,slotIdx:null,result:null,notFound:false,selectedSlot:null,selectedDate:\'\',dept:\'General Consultation\'};_rRec()" style="flex:1;padding:13px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Book another appointment</button>' +
-              '<button onclick="_rTab(\'appointments\')" style="padding:13px 20px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">View calendar</button>' +
+              '<button onclick="_R.bk={step:\'search\',id:\'\',patient:null,slot:null,slotIdx:null,result:null,notFound:false,selectedSlot:null,selectedDate:\'\',dept:\'General Consultation\'};_rRec()" style="flex:1;padding:13px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Book another appointment</button>' +
+              '<button onclick="_rTab(\'appointments\')" style="flex:1;padding:13px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center">View calendar</button>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -1031,28 +1223,25 @@ function _rBook() {
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           '<div style="margin-bottom:24px">' +
-            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Book Appointment</div>' +
-            '<div style="font-size:15px;color:#64748b">Search by SA ID or passport to find the patient profile.</div>' +
+            '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:6px">Book Appointment</div>' +
+            '<div style="font-size:15px;color:#777777">Search by SA ID or passport to find the patient profile.</div>' +
           '</div>' +
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
-            '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:10px">SA ID / PASSPORT NUMBER *</div>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">' +
+            '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#555555;margin-bottom:10px">SA ID / PASSPORT NUMBER *</div>' +
             '<div style="display:flex;gap:10px">' +
               '<input id="bk-id" type="text" value="' + (bk.id||'') + '" placeholder="e.g. 8203041234083" ' +
-              'style="flex:1;padding:12px 16px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;font-family:inherit;outline:none;color:#0f172a" ' +
-              'onfocus="this.style.borderColor=\"#3b82f6\"" onblur="this.style.borderColor=\"#e2e8f0\"">' +
-              '<button onclick="_rBookSearch()" style="display:flex;align-items:center;gap:8px;padding:12px 24px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">' +
+              'style="flex:1;padding:12px 16px;border:1.5px solid #e0e0e0;border-radius:10px;font-size:15px;font-family:inherit;outline:none;color:#111111" ' +
+              'onfocus="this.style.borderColor=\"#0F6E56\"" onblur="this.style.borderColor=\"#e0e0e0\"">' +
+              '<button onclick="_rBookSearch()" style="display:flex;align-items:center;gap:8px;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">' +
                 '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Search' +
               '</button>' +
             '</div>' +
             (bk.notFound
-              ? '<div style="padding:14px 16px;background:#fef2f2;border-radius:10px;border:1px solid #fecaca;margin-top:14px">' +
-                  '<div style="font-size:13px;color:#dc2626;margin-bottom:10px">No profile exists for ID <strong>' + bk.id + '</strong> in NIHMS. A patient profile must be created before an appointment can be booked or a check-in issued.</div>' +
-                  '<button onclick="_R.bk.step=\'register\';_rRec()" style="padding:8px 18px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">+ Create Patient Profile</button>' +
-                '</div>' +
-                '<button onclick="_R.bk.step=\'register\';_rRec()" style="margin-top:10px;width:100%;padding:14px;border-radius:10px;border:2px dashed #3b82f6;background:transparent;color:#3b82f6;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
-                  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
-                  'Register new patient →' +
-                '</button>'
+              ? '<div style="padding:16px 18px;background:linear-gradient(135deg,rgba(15,110,86,.06) 0%,rgba(26,74,155,.06) 100%);border:1.5px solid rgba(15,110,86,.2);border-radius:12px;margin-top:14px">' +
+                  '<div style="font-size:13px;font-weight:700;color:#0f2942;margin-bottom:5px">Patient Profile Not Found</div>' +
+                  '<div style="font-size:13px;color:#444444;margin-bottom:14px;line-height:1.6">No profile exists for ID <strong style="color:#0f2942">' + bk.id + '</strong> in NIHMS. A patient profile must be created before an appointment can be booked or a check-in issued.</div>' +
+                  '<button onclick="_R.bk.step=\'register\';_rRec()" style="display:inline-flex;align-items:center;gap:7px;padding:10px 22px;border-radius:50px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(15,110,86,.25)">+ Create Patient Profile</button>' +
+                '</div>'
               : '') +
           '</div>' +
         '</div>' +
@@ -1067,12 +1256,12 @@ function _rBook() {
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           '<div style="margin-bottom:24px">' +
-            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Patient Registration</div>' +
-            '<div style="font-size:15px;color:#64748b">Complete the patient profile then proceed to book the appointment.</div>' +
+            '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:6px">Patient Registration</div>' +
+            '<div style="font-size:15px;color:#777777">Complete the patient profile then proceed to book the appointment.</div>' +
           '</div>' +
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
-            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#3b82f6">' +
-              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#0F6E56">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
               '<span style="font-size:13px;font-weight:700">Register new patient</span>' +
             '</div>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
@@ -1086,18 +1275,18 @@ function _rBook() {
               _frmInp('bk-reg-em','EMAIL','patient@email.com','email') +
             '</div>' +
             '<div style="margin-top:14px">' + _frmInp('bk-reg-addr','ADDRESS','Street address, suburb, city') + '</div>' +
-          '<div style="margin-top:16px;background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:16px">' +
+          '<div style="margin-top:16px;background:#fff;border-radius:12px;border:1px solid #e0e0e0;padding:16px">' +
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">' +
-              '<span style="font-size:12px;font-weight:700;color:#0f172a">📄 ID Document</span>' +
-              '<span style="font-size:11px;color:#94a3b8">(optional — JPG/PNG/PDF, max 5MB)</span>' +
+              '<span style="font-size:12px;font-weight:700;color:#111111">📄 ID Document</span>' +
+              '<span style="font-size:11px;color:#777777">(optional — JPG/PNG/PDF, max 5MB)</span>' +
             '</div>' +
             '<div id="nr-id-drop" onclick="document.getElementById(\'nr-id-file\').click()" ' +
-                 'ondragover="event.preventDefault();this.style.borderColor=\'#0d9488\'" ' +
-                 'ondragleave="this.style.borderColor=\'#e2e8f0\'" ' +
+                 'ondragover="event.preventDefault();this.style.borderColor=\'#0F6E56\'" ' +
+                 'ondragleave="this.style.borderColor=\'#e0e0e0\'" ' +
                  'ondrop="_rIdFileDrop(event)" ' +
-                 'style="border:2px dashed #e2e8f0;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#f9fafb">' +
+                 'style="border:2px dashed #e0e0e0;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#f9fafb">' +
               '<div>📄 Click to upload or drag & drop</div>' +
-              '<div style="font-size:11px;color:#94a3b8">JPG · PNG · PDF · Max 5 MB</div>' +
+              '<div style="font-size:11px;color:#777777">JPG · PNG · PDF · Max 5 MB</div>' +
               '<input id="nr-id-file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" ' +
                      'style="display:none" onchange="_rIdFileSelect(this)">' +
             '</div>' +
@@ -1105,13 +1294,37 @@ function _rBook() {
           '</div>' +
           '</div>' +
           '<div style="display:flex;gap:10px;margin-top:14px">' +
-            '<button onclick="_rBookRegisterNew()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
+            '<button onclick="_rBookRegisterNew()" style="flex:1;padding:14px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
               '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>Register' +
             '</button>' +
-            '<button onclick="_R.bk.step=\'search\';_rRec()" style="padding:14px 24px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Back</button>' +
+            '<button onclick="_R.bk.step=\'search\';_rRec()" style="padding:14px 24px;border-radius:10px;border:1.5px solid #e0e0e0;background:#fff;color:#555555;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Back</button>' +
           '</div>' +
         '</div>' +
         _bkSidePanel() +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ══ STEP 2b: PATIENT FOUND ══ */
+  if (bk.step === 'found' && bk.patient) {
+    var pt0 = bk.patient;
+    var initials0 = (((pt0.firstName||pt0.name||'?')[0])+((pt0.lastName||'?')[0])).toUpperCase();
+    var fullName0 = (pt0.firstName ? (pt0.firstName+' '+(pt0.lastName||'')).trim() : (pt0.name||''));
+    return '<div style="padding:28px 32px">' + back +
+      '<div style="max-width:600px">' +
+        '<div style="background:#f0f0ec;border-radius:14px;border:1px solid #e0e0e0;padding:22px 24px;margin-bottom:16px">' +
+          '<div style="font-size:15px;font-weight:700;color:#111111;margin-bottom:4px">No appointment found for <span style="color:#0F6E56">'+fullName0+'</span></div>' +
+          '<div style="font-size:13px;color:#555555;margin-bottom:18px">You can book a new appointment now.</div>' +
+          '<button onclick="_R.bk.step=\'slot\';_rRec()" style="display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:50px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">' +
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
+            '+ Book Appointment Now' +
+          '</button>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:#fff;border-radius:14px;border:1.5px solid #99f6e4">' +
+          '<div style="width:40px;height:40px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">'+initials0+'</div>' +
+          '<div style="flex:1"><div style="font-size:15px;font-weight:700;color:#111111">'+fullName0+'</div><div style="font-size:13px;color:#555555">'+(pt0.phone||pt0.id||'')+'</div></div>' +
+          '<button onclick="_R.bk.step=\'search\';_R.bk.patient=null;_rRec()" style="font-size:13px;color:#0F6E56;border:none;background:transparent;cursor:pointer;font-family:inherit;text-decoration:underline">Change</button>' +
+        '</div>' +
       '</div>' +
     '</div>';
   }
@@ -1150,7 +1363,7 @@ function _rBook() {
     var hintText = selDate ? (isSat?'Saturday · 07:00–13:00':isSun?'Closed':'Weekday · 07:00–17:00') : 'Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Sun closed';
 
     var slotGrid = !selDate
-      ? '<div style="padding:14px;background:#f8fafc;border-radius:8px;text-align:center;color:#94a3b8;font-size:13px">Select a date to see available slots</div>'
+      ? '<div style="padding:14px;background:#f4f5f0;border-radius:8px;text-align:center;color:#777777;font-size:13px">Select a date to see available slots</div>'
       : isSun
         ? '<div style="padding:14px;background:#fef2f2;border-radius:8px;text-align:center;color:#dc2626;font-size:13px;font-weight:600">⛔ Clinic closed on Sundays</div>'
         : availSlots.length === 0
@@ -1158,7 +1371,7 @@ function _rBook() {
           : '<div id="bk-slot-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">' +
               availSlots.map(function(t){
                 var isSel = selSlot===t;
-                return '<button data-bkslot="'+t+'" style="padding:12px 8px;border-radius:8px;border:1.5px solid '+(isSel?'#3b82f6':'#e2e8f0')+';background:'+(isSel?'#eff6ff':'#fff')+';color:'+(isSel?'#3b82f6':'#0f172a')+';font-size:14px;font-weight:'+(isSel?'700':'500')+';cursor:pointer;font-family:inherit">'+t+'</button>';
+                return '<button data-bkslot="'+t+'" style="padding:12px 8px;border-radius:8px;border:1.5px solid '+(isSel?'#0F6E56':'#e0e0e0')+';background:'+(isSel?'#f0fdfa':'#fff')+';color:'+(isSel?'#0F6E56':'#111111')+';font-size:14px;font-weight:'+(isSel?'700':'500')+';cursor:pointer;font-family:inherit">'+t+'</button>';
               }).join('')+
             '</div>';
 
@@ -1166,27 +1379,27 @@ function _rBook() {
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           '<div style="margin-bottom:24px">' +
-            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Book & Schedule</div>' +
-            '<div style="font-size:15px;color:#64748b">Select a department, date and slot for <strong>'+(pt.firstName||'')+' '+(pt.lastName||'')+'</strong>.</div>' +
+            '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:6px">Book & Schedule</div>' +
+            '<div style="font-size:15px;color:#777777">Select a department, date and slot for <strong>'+(pt.firstName||'')+' '+(pt.lastName||'')+'</strong>.</div>' +
           '</div>' +
 
           /* Patient pill */
-          '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:#eff6ff;border-radius:12px;border:1px solid #bfdbfe;margin-bottom:16px">' +
-            '<div style="width:38px;height:38px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">'+initials+'</div>' +
-            '<div style="flex:1"><div style="font-weight:700;font-size:14px;color:#0f172a">'+(pt.firstName||'')+' '+(pt.lastName||'')+'</div><div style="font-size:12px;color:#64748b">'+(pt.phone||pt.id||'')+'</div></div>' +
-            '<button onclick="_R.bk.step=\'search\';_R.bk.patient=null;_rRec()" style="font-size:13px;color:#3b82f6;border:none;background:transparent;cursor:pointer;font-family:inherit;text-decoration:underline">Change</button>' +
+          '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:#f0fdfa;border-radius:12px;border:1px solid #99f6e4;margin-bottom:16px">' +
+            '<div style="width:38px;height:38px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">'+initials+'</div>' +
+            '<div style="flex:1"><div style="font-weight:700;font-size:14px;color:#111111">'+(pt.firstName||'')+' '+(pt.lastName||'')+'</div><div style="font-size:12px;color:#777777">'+(pt.phone||pt.id||'')+'</div></div>' +
+            '<button onclick="_R.bk.step=\'search\';_R.bk.patient=null;_rRec()" style="font-size:13px;color:#0F6E56;border:none;background:transparent;cursor:pointer;font-family:inherit;text-decoration:underline">Change</button>' +
           '</div>' +
 
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">' +
             /* Date + visit type (dept merged in) */
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">' +
-              '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">DATE *</label>' +
-                '<input id="bk-slot-date" type="date" min="'+todayIso+'" value="'+selDate+'" onchange="_bkDateChange(this.value)" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#0f172a"></div>' +
+              '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#555555;margin-bottom:6px">DATE *</label>' +
+                '<input id="bk-slot-date" type="date" min="'+todayIso+'" value="'+selDate+'" onchange="_bkDateChange(this.value)" style="width:100%;padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#111111"></div>' +
               _frmSel('bk-visit-type','VISIT TYPE / DEPARTMENT', DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};}), bk.dept||'General Consultation') +
             '</div>' +
             '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
-              '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569">AVAILABLE TIME SLOTS *</div>' +
-              '<div style="font-size:11px;color:#94a3b8">'+hintText+'</div>' +
+              '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#555555">AVAILABLE TIME SLOTS *</div>' +
+              '<div style="font-size:11px;color:#777777">'+hintText+'</div>' +
             '</div>' +
             slotGrid +
             (!selSlot && selDate && !isSun && availSlots.length>0
@@ -1197,7 +1410,7 @@ function _rBook() {
         _bkSidePanel() +
       '</div>' +
       '<div style="padding:16px 0 0;margin-top:20px">' +
-        '<button onclick="_rBookConfirm()" style="width:100%;padding:16px;border-radius:12px;border:none;background:#3b82f6;color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:10px">' +
+        '<button onclick="_rBookConfirm()" style="width:100%;padding:16px;border-radius:50px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 4px 14px rgba(15,110,86,.25)">' +
           '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
           'Confirm Appointment' +
         '</button>' +
@@ -1218,30 +1431,30 @@ function _bkSidePanel() {
     .sort(function(a,b){ return ((a.date||'').slice(0,10)+a.time) > ((b.date||'').slice(0,10)+b.time) ? 1 : -1; })
     .slice(0,6);
   return '<div style="display:flex;flex-direction:column;gap:14px">' +
-    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
-      '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Upcoming Appointments</div>' +
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;overflow:hidden">' +
+      '<div style="padding:12px 16px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:700;color:#111111">Upcoming Appointments</div>' +
       (upcoming.length
         ? upcoming.map(function(a){
-            return '<div style="padding:9px 14px;border-bottom:1px solid #f8fafc">' +
+            return '<div style="padding:9px 14px;border-bottom:1px solid #f4f5f0">' +
               '<div style="display:flex;align-items:center;justify-content:space-between">' +
-                '<div style="font-size:12px;font-weight:600;color:#0f172a">'+(a.name||'Patient')+'</div>' +
-                '<div style="font-family:monospace;font-size:11px;color:#3b82f6">'+a.ref+'</div>' +
+                '<div style="font-size:12px;font-weight:600;color:#111111">'+(a.name||'Patient')+'</div>' +
+                '<div style="font-family:monospace;font-size:11px;color:#0F6E56">'+a.ref+'</div>' +
               '</div>' +
-              '<div style="font-size:11px;color:#94a3b8;margin-top:2px">'+a.dept+' · '+(a.date||'')+(a.time?' @ '+a.time:'')+'</div>' +
+              '<div style="font-size:11px;color:#777777;margin-top:2px">'+a.dept+' · '+(a.date||'')+(a.time?' @ '+a.time:'')+'</div>' +
             '</div>';
           }).join('')
-        : '<div style="padding:16px;text-align:center;font-size:13px;color:#94a3b8">No upcoming appointments</div>') +
+        : '<div style="padding:16px;text-align:center;font-size:13px;color:#777777">No upcoming appointments</div>') +
     '</div>' +
-    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:16px">' +
-      '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:10px">Dept. availability</div>' +
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:16px">' +
+      '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:10px">Dept. availability</div>' +
       DEPARTMENTS.slice(0,6).map(function(d){
         var booked = _R.appointments.filter(function(a){return a.dept===d.name&&(a.date||'').slice(0,10)===today&&a.status!=='cancelled';}).length;
         var pct    = Math.min(Math.round(booked/10*100),100);
         return '<div style="margin-bottom:8px">' +
           '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">' +
-            '<span style="color:#475569">'+d.name+'</span><span style="color:#94a3b8">'+booked+' booked</span>' +
+            '<span style="color:#555555">'+d.name+'</span><span style="color:#777777">'+booked+' booked</span>' +
           '</div>' +
-          '<div style="height:4px;background:#f1f5f9;border-radius:2px"><div style="height:4px;background:'+d.color+';border-radius:2px;width:'+pct+'%"></div></div>' +
+          '<div style="height:4px;background:#f0f1ec;border-radius:2px"><div style="height:4px;background:'+d.color+';border-radius:2px;width:'+pct+'%"></div></div>' +
         '</div>';
       }).join('') +
     '</div>' +
@@ -1267,9 +1480,9 @@ function _bindBkGrids() {
       _R.bk.selectedSlot = t;
       slotGrid.querySelectorAll('[data-bkslot]').forEach(function(b){
         var s = b.getAttribute('data-bkslot')===t;
-        b.style.border='1.5px solid '+(s?'#3b82f6':'#e2e8f0');
-        b.style.background=s?'#eff6ff':'#fff';
-        b.style.color=s?'#3b82f6':'#0f172a';
+        b.style.border='1.5px solid '+(s?'#0F6E56':'#e0e0e0');
+        b.style.background=s?'#f0fdfa':'#fff';
+        b.style.color=s?'#0F6E56':'#111111';
         b.style.fontWeight=s?'700':'500';
       });
       var errEl=document.getElementById('bk-slot-error');
@@ -1295,20 +1508,20 @@ function _rQueue() {
   var counts={ waiting:q.filter(function(p){return p.status==='waiting';}).length, 'at-nurse':q.filter(function(p){return p.status==='at-nurse';}).length, 'with-doctor':q.filter(function(p){return p.status==='with-doctor';}).length, done:q.filter(function(p){return p.status==='done';}).length };
 
   var statPills='<div style="display:flex;gap:10px;margin-bottom:14px">'+
-    [['waiting','Waiting','#d97706'],['at-nurse','At Nurse','#7c3aed'],['with-doctor','With Doctor','#0d9488'],['done','Done','#16a34a']].map(function(s){
-      return '<div style="padding:10px 16px;background:#fff;border-radius:10px;border:1px solid #e2e8f0;text-align:center;flex:1">'+
+    [['waiting','Waiting','#d97706'],['at-nurse','At Nurse','#7c3aed'],['with-doctor','With Doctor','#0F6E56'],['done','Done','#16a34a']].map(function(s){
+      return '<div style="padding:10px 16px;background:#fff;border-radius:10px;border:1px solid #e0e0e0;text-align:center;flex:1">'+
         '<div style="font-size:22px;font-weight:800;color:'+s[2]+'">'+counts[s[0]]+'</div>'+
-        '<div style="font-size:11px;color:#94a3b8">'+s[1]+'</div>'+
+        '<div style="font-size:11px;color:#777777">'+s[1]+'</div>'+
       '</div>';
     }).join('')+
   '</div>';
 
   var toolbar='<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:14px">'+
-    '<select onchange="_R.qDept=this.value;_rRec()" style="padding:7px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
+    '<select onchange="_R.qDept=this.value;_rRec()" style="padding:7px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
       '<option value="all">All Departments</option>'+
       DEPARTMENTS.map(function(d){return '<option value="'+d.name+'"'+(deptF===d.name?' selected':'')+'>'+d.name+'</option>';}).join('')+
     '</select>'+
-    '<select onchange="_R.qStatus=this.value;_rRec()" style="padding:7px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
+    '<select onchange="_R.qStatus=this.value;_rRec()" style="padding:7px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
       [['all','All Status'],['waiting','Waiting'],['at-nurse','At Nurse'],['with-doctor','With Doctor'],['done','Done']].map(function(o){
         return '<option value="'+o[0]+'"'+(statusF===o[0]?' selected':'')+'>'+o[1]+'</option>';
       }).join('')+
@@ -1319,20 +1532,23 @@ function _rQueue() {
 
   var deptCards='';
 
+  var _todayStr=(new Date()).toISOString().slice(0,10);
   var rows=filtered.length
     ?filtered.map(function(p,i){
         var pc=_priCfg(p.priority), sc=_stCfg(p.status);
-        var wait=Math.floor((new Date()-new Date(p.checkedInAt))/60000);
-        return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9">'+
-          '<td style="padding:9px 14px;font-family:monospace;font-weight:700;font-size:13px;color:#0d9488">'+p.token+'</td>'+
-          '<td style="padding:9px 14px"><div style="font-weight:600;font-size:13px">'+p.name+'</div><div style="font-size:11px;color:#94a3b8">'+p.id+'</div></td>'+
-          '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+p.department+'</td>'+
+        var _cin=new Date(p.checkedInAt);
+        var _isToday=p.checkedInAt&&p.checkedInAt.slice(0,10)===_todayStr;
+        var wait=_isToday&&!isNaN(_cin)?Math.floor((new Date()-_cin)/60000):0;
+        return '<tr style="background:'+(i%2===0?'#fff':'#f4f5f0')+';border-bottom:1px solid #f0f1ec">'+
+          '<td style="padding:9px 14px;font-family:monospace;font-weight:700;font-size:13px;color:#0F6E56">'+p.token+'</td>'+
+          '<td style="padding:9px 14px"><div style="font-weight:600;font-size:13px">'+p.name+'</div><div style="font-size:11px;color:#777777">'+p.id+'</div></td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:#777777">'+p.department+'</td>'+
           '<td style="padding:9px 14px">'+_badge(pc.label,{color:pc.color,bg:pc.bg,border:pc.border})+'</td>'+
           '<td style="padding:9px 14px">'+_badge(sc.label,{color:sc.color,bg:sc.bg,border:sc.border})+'</td>'+
-          '<td style="padding:9px 14px;font-size:12px;color:'+(wait>20?'#dc2626':'#64748b')+';font-weight:'+(wait>20?'700':'400')+'">'+wait+' min</td>'+
-          '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+(
-            p.status==='at-nurse'?'🏥 Nurse Station':
-            p.status==='with-doctor'?'🩺 Consultation Room':
+          '<td style="padding:9px 14px;font-size:12px;color:'+(wait>20?'#dc2626':'#777777')+';font-weight:'+(wait>20?'700':'400')+'">'+(_isToday?wait+' min':'—')+'</td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:#777777">'+(
+            p.status==='at-nurse'?'🏥 At Nurse Station':
+            p.status==='with-doctor'?'🩺 In Consultation':
             p.status==='done'?'✓ Discharged':
             p.status==='waiting'?'⏳ Waiting Room':
             p.department==='Pharmacy Pickup'?'💊 Pharmacy':
@@ -1350,14 +1566,14 @@ function _rQueue() {
             }())+'</td>'+
         '</tr>';
       }).join('')
-    :'<tr><td colspan="7" style="padding:24px;text-align:center;color:#94a3b8;font-size:13px">No patients match the current filter</td></tr>';
+    :'<tr><td colspan="7" style="padding:24px;text-align:center;color:#777777;font-size:13px">No patients match the current filter</td></tr>';
 
   return '<div style="padding:20px">'+
     statPills+toolbar+deptCards+
     _card(
       '<table style="width:100%;border-collapse:collapse">'+
         '<thead><tr>'+['Token','Patient','Department','Priority','Status','Location','Wait','Action'].map(function(h){
-          return '<th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8">'+h+'</th>';
+          return '<th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#777777">'+h+'</th>';
         }).join('')+'</tr></thead><tbody>'+rows+'</tbody></table>','0')+
   '</div>';
 }
@@ -1397,20 +1613,20 @@ function _rAppointments() {
   window._calNav=navDate;
 
   /* Toolbar */
-  var toolbar='<div style="display:flex;align-items:center;gap:8px;padding:12px 20px;border-bottom:1px solid #e2e8f0;background:#fff;flex-shrink:0;flex-wrap:wrap">'+
-    '<button onclick="_calNav(-1)" style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:7px;background:#fff;cursor:pointer;font-size:14px">‹</button>'+
-    '<button onclick="_calNav(1)"  style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:7px;background:#fff;cursor:pointer;font-size:14px">›</button>'+
-    '<span style="font-size:14px;font-weight:700;color:#0f172a;min-width:220px">'+headerLabel()+'</span>'+
-    '<div style="display:flex;border:1.5px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-left:8px">'+
+  var toolbar='<div style="display:flex;align-items:center;gap:8px;padding:12px 20px;border-bottom:1px solid #e0e0e0;background:#fff;flex-shrink:0;flex-wrap:wrap">'+
+    '<button onclick="_calNav(-1)" style="padding:6px 10px;border:1.5px solid #e0e0e0;border-radius:7px;background:#fff;cursor:pointer;font-size:14px">‹</button>'+
+    '<button onclick="_calNav(1)"  style="padding:6px 10px;border:1.5px solid #e0e0e0;border-radius:7px;background:#fff;cursor:pointer;font-size:14px">›</button>'+
+    '<span style="font-size:14px;font-weight:700;color:#111111;min-width:220px">'+headerLabel()+'</span>'+
+    '<div style="display:flex;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;margin-left:8px">'+
       ['day','week','month','year'].map(function(v){
-        return '<button onclick="_R.calView=\''+v+'\';_rRec()" style="padding:6px 14px;border:none;background:'+(calView===v?'#0d9488':'#fff')+';color:'+(calView===v?'#fff':'#475569')+';font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">'+v.charAt(0).toUpperCase()+v.slice(1)+'</button>';
+        return '<button onclick="_R.calView=\''+v+'\';_rRec()" style="padding:6px 14px;border:none;background:'+(calView===v?'#0F6E56':'#fff')+';color:'+(calView===v?'#fff':'#555555')+';font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">'+v.charAt(0).toUpperCase()+v.slice(1)+'</button>';
       }).join('')+
     '</div>'+
-    '<select onchange="_R.calDept=this.value;_rRec()" style="padding:6px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;outline:none">'+
+    '<select onchange="_R.calDept=this.value;_rRec()" style="padding:6px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:12px;font-family:inherit;outline:none">'+
       '<option value="all">All Departments</option>'+
       DEPARTMENTS.map(function(d){return '<option value="'+d.name+'"'+(calDept===d.name?' selected':'')+'>'+d.name+'</option>';}).join('')+
     '</select>'+
-    '<button onclick="_rTab(\'book\')" style="margin-left:auto;display:flex;align-items:center;gap:5px;padding:7px 14px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"white\" stroke-width=\"2\"><line x1=\"12\" y1=\"5\" x2=\"12\" y2=\"19\"/><line x1=\"5\" y1=\"12\" x2=\"19\" y2=\"12\"/></svg> New appointment</button>'+
+    '<button onclick="_rTab(\'book\')" style="margin-left:auto;display:flex;align-items:center;gap:5px;padding:7px 14px;border-radius:8px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"white\" stroke-width=\"2\"><line x1=\"12\" y1=\"5\" x2=\"12\" y2=\"19\"/><line x1=\"5\" y1=\"12\" x2=\"19\" y2=\"12\"/></svg> New appointment</button>'+
   '</div>';
 
   /* Filter appointments */
@@ -1424,22 +1640,22 @@ function _rAppointments() {
     var dayStr=calDate.toISOString().slice(0,10);
     var isSunDay=calDate.getDay()===0;
     if(isSunDay){
-      cal='<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:16px">⛔ Clinic closed on Sundays</div>';
+      cal='<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#d0d0d0;font-size:16px">⛔ Clinic closed on Sundays</div>';
     } else {
       var dayApts=apts.filter(function(a){return a.date&&a.date.slice(0,10)===dayStr&&a.status!=='cancelled';});
       cal='<div style="flex:1;overflow:auto"><table style="width:100%;border-collapse:collapse">'+
-        '<thead><tr><th style="width:60px;padding:8px;border-right:1px solid #f1f5f9;border-bottom:1px solid #e2e8f0"></th>'+
-        '<th style="padding:10px;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:700;color:#0d9488">'+calDate.toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long'})+'</th></tr></thead><tbody>'+
+        '<thead><tr><th style="width:60px;padding:8px;border-right:1px solid #f0f1ec;border-bottom:1px solid #e0e0e0"></th>'+
+        '<th style="padding:10px;border-bottom:1px solid #e0e0e0;font-size:13px;font-weight:700;color:#0F6E56">'+calDate.toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long'})+'</th></tr></thead><tbody>'+
         HOURS.map(function(h){
           var hNum=parseInt(h);
           var slotApts=dayApts.filter(function(a){return parseInt((a.time||'0').split(':')[0])===hNum;});
-          return '<tr><td style="padding:4px 8px;border-right:1px solid #f1f5f9;border-top:1px solid #f8fafc;font-size:10px;color:#cbd5e1;white-space:nowrap;vertical-align:top">'+h+'</td>'+
-            '<td style="padding:3px;border-top:1px solid #f8fafc;vertical-align:top;min-height:40px">'+
+          return '<tr><td style="padding:4px 8px;border-right:1px solid #f0f1ec;border-top:1px solid #f4f5f0;font-size:10px;color:#d0d0d0;white-space:nowrap;vertical-align:top">'+h+'</td>'+
+            '<td style="padding:3px;border-top:1px solid #f4f5f0;vertical-align:top;min-height:40px">'+
             slotApts.map(function(a){
-              var col={booked:'#3b82f6',walkin:'#0d9488',emergency:'#dc2626'}[a.type]||'#3b82f6';
+              var col={booked:'#1A4A9B',walkin:'#0F6E56',emergency:'#dc2626'}[a.type]||'#1A4A9B';
               return '<div style="background:'+col+'18;border-left:3px solid '+col+';border-radius:5px;padding:6px 10px;margin-bottom:3px;cursor:pointer" onclick="_rAptEdit(\''+a.id+'\')">' +
                 '<div style="font-size:12px;font-weight:700;color:'+col+'">'+(a.name||'Patient')+'</div>' +
-                '<div style="font-size:11px;color:#64748b">'+a.time+' · '+(a.dept||'')+'</div>' +
+                '<div style="font-size:11px;color:#777777">'+a.time+' · '+(a.dept||'')+'</div>' +
               '</div>';
             }).join('')+
             '</td></tr>';
@@ -1465,7 +1681,7 @@ function _rAppointments() {
     cal='<div style="flex:1;overflow:auto;padding:8px">'+
       '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-bottom:4px">'+
         ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(function(d,i){
-          return '<div style="padding:6px;text-align:center;font-size:11px;font-weight:700;color:'+(i===6?'#cbd5e1':'#475569')+'">'+d+'</div>';
+          return '<div style="padding:6px;text-align:center;font-size:11px;font-weight:700;color:'+(i===6?'#d0d0d0':'#555555')+'">'+d+'</div>';
         }).join('')+
       '</div>'+
       weeks.map(function(wk){
@@ -1476,13 +1692,13 @@ function _rAppointments() {
             var isSunM=d.getDay()===0;
             var isToday=d.toDateString()===todayMs;
             var dayApts=apts.filter(function(a){return a.date&&a.date.slice(0,10)===ds&&a.status!=='cancelled';});
-            return '<div style="min-height:64px;border-radius:4px;padding:4px;background:'+(isSunM?'#f9fafb':isToday?'#f0fdfa':'#fff')+';border:1px solid '+(isToday?'#0d9488':'#f1f5f9')+'">'+
-              '<div style="font-size:11px;font-weight:700;margin-bottom:2px;color:'+(isSunM?'#cbd5e1':isToday?'#0d9488':'#475569')+'">'+d.getDate()+'</div>'+
+            return '<div style="min-height:64px;border-radius:4px;padding:4px;background:'+(isSunM?'#f9fafb':isToday?'#f0fdfa':'#fff')+';border:1px solid '+(isToday?'#0F6E56':'#f0f1ec')+'">'+
+              '<div style="font-size:11px;font-weight:700;margin-bottom:2px;color:'+(isSunM?'#d0d0d0':isToday?'#0F6E56':'#555555')+'">'+d.getDate()+'</div>'+
               dayApts.slice(0,3).map(function(a){
-                var col={booked:'#3b82f6',walkin:'#0d9488',emergency:'#dc2626'}[a.type]||'#3b82f6';
+                var col={booked:'#1A4A9B',walkin:'#0F6E56',emergency:'#dc2626'}[a.type]||'#1A4A9B';
                 return '<div style="font-size:9px;font-weight:600;color:'+col+';background:'+col+'15;border-radius:3px;padding:1px 4px;margin-bottom:1px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer" onclick="_rAptEdit(\''+a.id+'\')">'+(a.name||'Patient')+'</div>';
               }).join('')+
-              (dayApts.length>3?'<div style="font-size:9px;color:#94a3b8">+' +(dayApts.length-3)+' more</div>':'')+
+              (dayApts.length>3?'<div style="font-size:9px;color:#777777">+' +(dayApts.length-3)+' more</div>':'')+
             '</div>';
           }).join('')+
         '</div>';
@@ -1498,10 +1714,10 @@ function _rAppointments() {
       MONTHS.map(function(mn,mi){
         var mApts=apts.filter(function(a){return a.date&&parseInt(a.date.slice(5,7))-1===mi&&parseInt(a.date.slice(0,4))===calDate.getFullYear()&&a.status!=='cancelled';}).length;
         var isNow=mi===new Date().getMonth()&&calDate.getFullYear()===new Date().getFullYear();
-        return '<button onclick="_R.calDate=new Date('+calDate.getFullYear()+','+(mi)+',1);_R.calView=\'month\';_rRec()" style="background:'+(isNow?'#f0fdfa':'#fff')+';border:1.5px solid '+(isNow?'#0d9488':'#e2e8f0')+';border-radius:10px;padding:16px;cursor:pointer;font-family:inherit;text-align:left">'+
-          '<div style="font-size:13px;font-weight:700;color:'+(isNow?'#0d9488':'#0f172a')+'">'+mn+'</div>'+
-          '<div style="font-size:22px;font-weight:800;color:'+(mApts>0?'#3b82f6':'#e2e8f0');+';margin-top:6px">'+mApts+'</div>'+
-          '<div style="font-size:11px;color:#94a3b8">appointment'+(mApts===1?'':'s')+'</div>'+
+        return '<button onclick="_R.calDate=new Date('+calDate.getFullYear()+','+(mi)+',1);_R.calView=\'month\';_rRec()" style="background:'+(isNow?'#f0fdfa':'#fff')+';border:1.5px solid '+(isNow?'#0F6E56':'#e0e0e0')+';border-radius:10px;padding:16px;cursor:pointer;font-family:inherit;text-align:left">'+
+          '<div style="font-size:13px;font-weight:700;color:'+(isNow?'#0F6E56':'#111111')+'">'+mn+'</div>'+
+          '<div style="font-size:22px;font-weight:800;color:'+(mApts>0?'#0F6E56':'#e0e0e0');+';margin-top:6px">'+mApts+'</div>'+
+          '<div style="font-size:11px;color:#777777">appointment'+(mApts===1?'':'s')+'</div>'+
         '</button>';
       }).join('')+
       '</div></div>';
@@ -1516,18 +1732,18 @@ function _rAppointments() {
 
     cal='<div style="overflow:auto;flex:1"><table style="width:100%;border-collapse:collapse;min-width:700px">'+
       '<thead><tr>'+
-        '<th style="width:60px;padding:8px;border-right:1px solid #f1f5f9;border-bottom:1px solid #e2e8f0;font-size:10px;color:#94a3b8"></th>'+
+        '<th style="width:60px;padding:8px;border-right:1px solid #f0f1ec;border-bottom:1px solid #e0e0e0;font-size:10px;color:#777777"></th>'+
         days.map(function(d){
           var isT=d.toDateString()===today;
           var isSunH=d.getDay()===0;
-          return '<th style="padding:10px 6px;border-left:1px solid #f1f5f9;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:700;color:'+(isT?'#0d9488':isSunH?'#cbd5e1':'#475569')+';background:'+(isT?'#f0fdfa':isSunH?'#f9fafb':'#fff')+'">'+
-            DAYS_ABBR[d.getDay()]+' '+d.getDate()+(isSunH?' <span style="font-size:9px;font-weight:400;color:#e2e8f0">Closed</span>':'')+
+          return '<th style="padding:10px 6px;border-left:1px solid #f0f1ec;border-bottom:1px solid #e0e0e0;font-size:12px;font-weight:700;color:'+(isT?'#0F6E56':isSunH?'#d0d0d0':'#555555')+';background:'+(isT?'#f0fdfa':isSunH?'#f9fafb':'#fff')+'">'+
+            DAYS_ABBR[d.getDay()]+' '+d.getDate()+(isSunH?' <span style="font-size:9px;font-weight:400;color:#e0e0e0">Closed</span>':'')+
           '</th>';
         }).join('')+
       '</tr></thead><tbody>'+
       HOURS.map(function(h){
         return '<tr>'+
-          '<td style="padding:4px 8px;border-right:1px solid #f1f5f9;border-top:1px solid #f8fafc;font-size:10px;color:#cbd5e1;vertical-align:top;white-space:nowrap">'+h+'</td>'+
+          '<td style="padding:4px 8px;border-right:1px solid #f0f1ec;border-top:1px solid #f4f5f0;font-size:10px;color:#d0d0d0;vertical-align:top;white-space:nowrap">'+h+'</td>'+
           days.map(function(d){
             var dateStr=d.toISOString().slice(0,10);
             /* Match bookings whose time falls within this hour row */
@@ -1541,16 +1757,16 @@ function _rAppointments() {
             });
             var isSun = d.getDay()===0;
             var cellBg = isSun ? 'background:#f9fafb' : '';
-            return '<td style="padding:3px;border-left:1px solid #f1f5f9;border-top:1px solid #f8fafc;vertical-align:top;min-height:36px;'+cellBg+'">'+
+            return '<td style="padding:3px;border-left:1px solid #f0f1ec;border-top:1px solid #f4f5f0;vertical-align:top;min-height:36px;'+cellBg+'">'+
               dayApts.map(function(apt){
-                var typeColors={booked:'#3b82f6',walkin:'#0d9488',emergency:'#dc2626'};
-                var col=typeColors[apt.type]||'#3b82f6';
+                var typeColors={booked:'#1A4A9B',walkin:'#0F6E56',emergency:'#dc2626'};
+                var col=typeColors[apt.type]||'#1A4A9B';
                 return '<div style="background:'+col+'18;border-left:3px solid '+col+';border-radius:4px;padding:4px 6px;margin-bottom:2px;cursor:pointer" onclick="_rAptEdit(\''+apt.id+'\')">' +
                   '<div style="font-size:10px;font-weight:700;color:'+col+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(apt.name||'Patient')+'</div>' +
-                  '<div style="font-size:9px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+apt.time+' · '+(apt.dept||'')+'</div>' +
+                  '<div style="font-size:9px;color:#777777;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+apt.time+' · '+(apt.dept||'')+'</div>' +
                 '</div>';
               }).join('') +
-              (isSun && dayApts.length===0 ? '<div style="font-size:9px;color:#e2e8f0;text-align:center;padding-top:8px">—</div>' : '') +
+              (isSun && dayApts.length===0 ? '<div style="font-size:9px;color:#e0e0e0;text-align:center;padding-top:8px">—</div>' : '') +
             '</td>';
           }).join('')+
         '</tr>';
@@ -1560,20 +1776,20 @@ function _rAppointments() {
 
   /* Appointments list */
   var listRows=apts.map(function(a,i){
-    var typeColor={booked:{bg:'#f0fdf4',c:'#16a34a',b:'#86efac'},walkin:{bg:'#eff6ff',c:'#1d4ed8',b:'#bfdbfe'},emergency:{bg:'#fef2f2',c:'#dc2626',b:'#fca5a5'}};
+    var typeColor={booked:{bg:'#f0fdf4',c:'#16a34a',b:'#86efac'},walkin:{bg:'#f0fdfa',c:'#1A4A9B',b:'#99f6e4'},emergency:{bg:'#fef2f2',c:'#dc2626',b:'#fca5a5'}};
     var tc=typeColor[a.type]||typeColor.booked;
     var cancelled=a.status==='cancelled';
-    return '<tr style="background:'+(cancelled?'#f9fafb':i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9;opacity:'+(cancelled?'.55':'1')+'">'+
-      '<td style="padding:9px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#64748b">'+a.ref+'</td>'+
+    return '<tr style="background:'+(cancelled?'#f9fafb':i%2===0?'#fff':'#f4f5f0')+';border-bottom:1px solid #f0f1ec;opacity:'+(cancelled?'.55':'1')+'">'+
+      '<td style="padding:9px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#777777">'+a.ref+'</td>'+
       '<td style="padding:9px 14px;font-weight:600;font-size:13px">'+(a.name||'—')+'</td>'+
-      '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+(a.dept||'—')+'</td>'+
-      '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+(a.date||'')+' '+a.time+'</td>'+
+      '<td style="padding:9px 14px;font-size:12px;color:#777777">'+(a.dept||'—')+'</td>'+
+      '<td style="padding:9px 14px;font-size:12px;color:#777777">'+(a.date||'')+' '+a.time+'</td>'+
       '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+tc.bg+';color:'+tc.c+';border:1px solid '+tc.b+'">'+a.type+'</span></td>'+
       '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+(cancelled?'#f9fafb':a.verified?'#f0fdf4':'#fffbeb')+';color:'+(cancelled?'#9ca3af':a.verified?'#16a34a':'#b45309')+';border:1px solid '+(cancelled?'#e5e7eb':a.verified?'#86efac':'#fcd34d')+'">'+(cancelled?'Cancelled':a.verified?'Verified':'Pending')+'</span></td>'+
       '<td style="padding:9px 14px">'+
         (!cancelled?
           '<div style="display:flex;gap:5px">'+
-            '<button onclick="_rAptEdit(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #bfdbfe;color:#1d4ed8;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Edit</button>'+
+            '<button onclick="_rAptEdit(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid rgba(26,74,155,.35);color:#1A4A9B;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Edit</button>'+
             '<button onclick="_rAptCancel(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #fca5a5;color:#dc2626;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Cancel</button>'+
           '</div>':
           '<span style="font-size:11px;color:#9ca3af">Cancelled</span>')+
@@ -1588,22 +1804,22 @@ function _rAppointments() {
       var todayStr = new Date().toISOString().slice(0,10);
       var todayApts = apts.filter(function(a){return a.date===todayStr&&a.status!=='cancelled';});
       var todayRows = todayApts.map(function(a,i){
-        var typeColor={booked:{bg:'#f0fdf4',c:'#16a34a',b:'#86efac'},walkin:{bg:'#eff6ff',c:'#1d4ed8',b:'#bfdbfe'},emergency:{bg:'#fef2f2',c:'#dc2626',b:'#fca5a5'}};
+        var typeColor={booked:{bg:'#f0fdf4',c:'#16a34a',b:'#86efac'},walkin:{bg:'#f0fdfa',c:'#1A4A9B',b:'#99f6e4'},emergency:{bg:'#fef2f2',c:'#dc2626',b:'#fca5a5'}};
         var tc=typeColor[a.type]||typeColor.booked;
-        return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9">'+
-          '<td style="padding:9px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#64748b">'+a.ref+'</td>'+
+        return '<tr style="background:'+(i%2===0?'#fff':'#f4f5f0')+';border-bottom:1px solid #f0f1ec">'+
+          '<td style="padding:9px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#777777">'+a.ref+'</td>'+
           '<td style="padding:9px 14px;font-weight:600;font-size:13px">'+(a.name||'—')+'</td>'+
-          '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+(a.dept||'—')+'</td>'+
-          '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+a.time+'</td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:#777777">'+(a.dept||'—')+'</td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:#777777">'+a.time+'</td>'+
           '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+tc.bg+';color:'+tc.c+';border:1px solid '+tc.b+'">'+a.type+'</span></td>'+
           '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+(a.verified?'#f0fdf4':'#fffbeb')+';color:'+(a.verified?'#16a34a':'#b45309')+';border:1px solid '+(a.verified?'#86efac':'#fcd34d')+'">'+(a.verified?'Verified':'Pending')+'</span></td>'+
-          '<td style="padding:9px 14px"><div style="display:flex;gap:5px"><button onclick="_rAptEdit(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #bfdbfe;color:#1d4ed8;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Edit</button><button onclick="_rAptCancel(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #fca5a5;color:#dc2626;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Cancel</button></div></td>'+
+          '<td style="padding:9px 14px"><div style="display:flex;gap:5px"><button onclick="_rAptEdit(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid rgba(26,74,155,.35);color:#1A4A9B;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Edit</button><button onclick="_rAptCancel(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #fca5a5;color:#dc2626;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Cancel</button></div></td>'+
         '</tr>';
       }).join('');
-      return _card('<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:10px">Today\'s Appointments ('+todayApts.length+')</div>'+
+      return _card('<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:10px">Today\'s Appointments ('+todayApts.length+')</div>'+
         (todayApts.length?
-          '<table style="width:100%;border-collapse:collapse"><thead><tr>'+['Ref','Patient','Department','Time','Type','Status','Actions'].map(function(h){return '<th style="padding:7px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+todayRows+'</tbody></table>':
-          '<div style="padding:16px;text-align:center;color:#94a3b8;font-size:13px">No appointments scheduled for today</div>'),
+          '<table style="width:100%;border-collapse:collapse"><thead><tr>'+['Ref','Patient','Department','Time','Type','Status','Actions'].map(function(h){return '<th style="padding:7px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#777777">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+todayRows+'</tbody></table>':
+          '<div style="padding:16px;text-align:center;color:#777777;font-size:13px">No appointments scheduled for today</div>'),
         '0');
     })()+
     '</div>'+
@@ -1620,8 +1836,8 @@ function _rEmergency() {
   var form=_card(
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">'+
       '<div style="width:42px;height:42px;border-radius:12px;background:#dc2626;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+_svgIcon('bolt')+'</div>'+
-      '<div><div style="font-size:16px;font-weight:800;color:#0f172a">Emergency Intake</div>'+
-      '<div style="font-size:13px;color:#64748b">Fast-track a patient to the emergency queue</div></div>'+
+      '<div><div style="font-size:16px;font-weight:800;color:#111111">Emergency Intake</div>'+
+      '<div style="font-size:13px;color:#777777">Fast-track a patient to the emergency queue</div></div>'+
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'+
       _inp('em-id','SA ID / Passport','e.g. 8203041234083',em.emId)+
@@ -1629,8 +1845,8 @@ function _rEmergency() {
     '</div>'+
     _sel('em-dept','Department',DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};}),em.emDept)+
     '<div style="margin-top:12px">'+
-      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Chief Complaint</label>'+
-      '<textarea id="em-desc" rows="2" placeholder="Brief emergency description…" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box">'+( em.emDesc||'')+'</textarea>'+
+      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#555555;margin-bottom:5px">Chief Complaint</label>'+
+      '<textarea id="em-desc" rows="2" placeholder="Brief emergency description…" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box">'+( em.emDesc||'')+'</textarea>'+
     '</div>'+
     '<div style="margin-top:14px">'+
       _pBtn('Issue Emergency Token','_rEmergencyIssue()','#dc2626')+
@@ -1641,11 +1857,11 @@ function _rEmergency() {
     ?recent.map(function(p){
       return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:8px;margin-bottom:6px">'+
         '<span style="font-family:monospace;font-weight:800;color:#dc2626;font-size:15px">'+p.token+'</span>'+
-        '<div style="flex:1"><div style="font-size:12px;font-weight:600">'+p.name+'</div><div style="font-size:11px;color:#94a3b8">'+p.department+'</div></div>'+
+        '<div style="flex:1"><div style="font-size:12px;font-weight:600">'+p.name+'</div><div style="font-size:11px;color:#777777">'+p.department+'</div></div>'+
         _badge('Emergency',{color:'#dc2626',bg:'#fef2f2',border:'#fca5a5'})+
       '</div>';
     }).join('')
-    :'<div style="padding:16px;text-align:center;color:#94a3b8;font-size:13px;background:#f8fafc;border-radius:8px;border:1px dashed #e2e8f0">No emergency tokens today</div>';
+    :'<div style="padding:16px;text-align:center;color:#777777;font-size:13px;background:#f4f5f0;border-radius:8px;border:1px dashed #e0e0e0">No emergency tokens today</div>';
 
   return '<div style="padding:20px;max-width:900px">'+
     '<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:20px">'+
@@ -1672,42 +1888,42 @@ function _rMessaging() {
   var msgHist=_R.messages;
 
   var sendForm=_card(
-    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:14px">Send Message</div>'+
+    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#777777;margin-bottom:14px">Send Message</div>'+
     _sel('msg-to','To',recipients.map(function(r){return {v:r.v,label:r.label};}),_R.msgTo)+
     '<div style="margin-top:12px;margin-bottom:12px">'+
-      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Message</label>'+
-      '<textarea id="msg-body" rows="4" placeholder="Type your message…" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;resize:none;outline:none;box-sizing:border-box">'+(_R.msgBody||'')+'</textarea>'+
+      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#555555;margin-bottom:5px">Message</label>'+
+      '<textarea id="msg-body" rows="4" placeholder="Type your message…" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;resize:none;outline:none;box-sizing:border-box">'+(_R.msgBody||'')+'</textarea>'+
     '</div>'+
-    '<button onclick="_rSendMsg()" style="width:100%;padding:11px;border-radius:9px;border:none;background:#0d9488;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Send Message</button>'
+    '<button onclick="_rSendMsg()" style="width:100%;padding:11px;border-radius:50px;border:none;background:#0F6E56;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Send Message</button>'
   );
 
   var histHtml=_card(
-    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:10px">Message History</div>'+
+    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#777777;margin-bottom:10px">Message History</div>'+
     (msgHist.length
       ?'<div style="display:flex;flex-direction:column;gap:0">'+
         msgHist.map(function(m){
-          return '<div style="padding:12px 14px;border-top:1px solid #f1f5f9;'+(m.read?'':'background:#f0fdfa')+'">'+
+          return '<div style="padding:12px 14px;border-top:1px solid #f0f1ec;'+(m.read?'':'background:#f0fdfa')+'">'+
             '<div style="display:flex;justify-content:space-between;margin-bottom:4px">'+
-              '<span style="font-size:12px;font-weight:700;color:#0f172a">'+m.from+'</span>'+
-              '<span style="font-size:11px;color:#94a3b8">'+m.time+'</span>'+
+              '<span style="font-size:12px;font-weight:700;color:#111111">'+m.from+'</span>'+
+              '<span style="font-size:11px;color:#777777">'+m.time+'</span>'+
             '</div>'+
-            '<div style="font-size:13px;color:#475569">'+m.text+'</div>'+
-            (!m.read?'<span style="display:inline-block;margin-top:5px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#f0fdfa;color:#0d9488;border:1px solid #99f6e4">Unread</span>':'')+
+            '<div style="font-size:13px;color:#555555">'+m.text+'</div>'+
+            (!m.read?'<span style="display:inline-block;margin-top:5px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#f0fdfa;color:#0F6E56;border:1px solid #99f6e4">Unread</span>':'')+
           '</div>';
         }).join('')+'</div>'
-      :'<div style="padding:20px;text-align:center;color:#94a3b8;font-size:13px">No messages yet</div>'),
+      :'<div style="padding:20px;text-align:center;color:#777777;font-size:13px">No messages yet</div>'),
     '0'
   );
 
   /* Upcoming vaccination reminder form */
   var vaxReminderForm = _card(
-    '<div style="font-size:13px;font-weight:700;color:#2563eb;margin-bottom:12px">💉 Send Vaccination Reminders</div>'+
-    '<div style="font-size:12px;color:#64748b;margin-bottom:10px">Send upcoming vaccination reminders to patients scheduled for immunisations.</div>'+
+    '<div style="font-size:13px;font-weight:700;color:#0F6E56;margin-bottom:12px">💉 Send Vaccination Reminders</div>'+
+    '<div style="font-size:12px;color:#777777;margin-bottom:10px">Send upcoming vaccination reminders to patients scheduled for immunisations.</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
       _sel('vax-remind-days','Send reminders for appointments within',[{v:'1',label:'Tomorrow'},{v:'3',label:'Next 3 days'},{v:'7',label:'Next 7 days'},{v:'14',label:'Next 14 days'}],'7')+
       _sel('vax-remind-type','Department',[{v:'Immunisation',label:'Immunisation only'},{v:'all',label:'All departments'}],'Immunisation')+
     '</div>'+
-    '<button onclick="_rSendVaxReminders()" style="display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:9px;border:none;background:#2563eb;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">💉 Send Vaccination Reminders</button>'
+    '<button onclick="_rSendVaxReminders()" style="display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:50px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">💉 Send Vaccination Reminders</button>'
   );
 
   /* Delay notification form */
@@ -1719,7 +1935,7 @@ function _rMessaging() {
     '</div>'+
     _inp('delay-reason','Reason (optional)','e.g. Doctor running late','','text')+
     '<div style="margin-top:10px">'+
-      '<button onclick="_rSendDelay()" style="display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:9px;border:none;background:#d97706;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'+_svgIcon('clock')+' Send Delay Notification</button>'+
+      '<button onclick="_rSendDelay()" style="display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:50px;border:none;background:#d97706;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'+_svgIcon('clock')+' Send Delay Notification</button>'+
     '</div>'
   );
 
@@ -1738,7 +1954,7 @@ function _rAnalytics() {
   var noShow=q.filter(function(p){return p.status==='no-show';});
 
   var kpis=[
-    {label:'Total Patients',value:q.length,      color:'#0d9488'},
+    {label:'Total Patients',value:q.length,      color:'#0F6E56'},
     {label:'Avg Wait (min)', value:avgWait,        color:'#f59e0b'},
     {label:'Completed',      value:done.length,    color:'#10b981'},
     {label:'No-shows',       value:noShow.length,  color:'#ef4444'},
@@ -1746,21 +1962,21 @@ function _rAnalytics() {
 
   var kpiHtml='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">'+
     kpis.map(function(k){
-      return _card('<div style="text-align:center"><div style="font-size:32px;font-weight:800;margin-bottom:4px;color:'+k.color+'">'+k.value+'</div><div style="font-size:12px;color:#94a3b8">'+k.label+'</div></div>');
+      return _card('<div style="text-align:center"><div style="font-size:32px;font-weight:800;margin-bottom:4px;color:'+k.color+'">'+k.value+'</div><div style="font-size:12px;color:#777777">'+k.label+'</div></div>');
     }).join('')+'</div>';
 
   /* Hourly bar chart */
   var hourly=[{h:'07',n:4},{h:'08',n:9},{h:'09',n:14},{h:'10',n:11},{h:'11',n:8},{h:'12',n:6},{h:'13',n:7},{h:'14',n:5},{h:'15',n:3}];
   var maxN=Math.max.apply(null,hourly.map(function(r){return r.n;}));
   var barChart=_card(
-    '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">Patients per Hour</div>'+
+    '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:14px">Patients per Hour</div>'+
     '<div style="display:flex;align-items:flex-end;gap:6px;height:120px">'+
       hourly.map(function(r){
         var pct=maxN?Math.round(r.n/maxN*100):0;
         return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">'+
-          '<div style="font-size:10px;color:#64748b">'+r.n+'</div>'+
-          '<div style="width:100%;background:#0d9488;border-radius:4px 4px 0 0;height:'+pct+'%"></div>'+
-          '<div style="font-size:9px;color:#94a3b8">'+r.h+':00</div>'+
+          '<div style="font-size:10px;color:#777777">'+r.n+'</div>'+
+          '<div style="width:100%;background:#0F6E56;border-radius:4px 4px 0 0;height:'+pct+'%"></div>'+
+          '<div style="font-size:9px;color:#777777">'+r.h+':00</div>'+
         '</div>';
       }).join('')+
     '</div>'
@@ -1774,19 +1990,19 @@ function _rAnalytics() {
   }).filter(function(d){return d.n>0;}).sort(function(a,b){return b.n-a.n;});
 
   var deptChart=_card(
-    '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">Patients by Department</div>'+
+    '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:14px">Patients by Department</div>'+
     (deptBreak.length
       ?deptBreak.map(function(d){
         return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
           '<span style="width:8px;height:8px;border-radius:50%;background:'+d.color+';flex-shrink:0"></span>'+
-          '<span style="flex:1;font-size:12px;color:#475569">'+d.name+'</span>'+
-          '<span style="font-size:12px;font-weight:700;color:#0f172a;width:24px;text-align:right">'+d.n+'</span>'+
-          '<div style="width:80px;height:5px;border-radius:3px;background:#f1f5f9;overflow:hidden">'+
+          '<span style="flex:1;font-size:12px;color:#555555">'+d.name+'</span>'+
+          '<span style="font-size:12px;font-weight:700;color:#111111;width:24px;text-align:right">'+d.n+'</span>'+
+          '<div style="width:80px;height:5px;border-radius:3px;background:#f0f1ec;overflow:hidden">'+
             '<div style="height:100%;background:'+d.color+';border-radius:3px;width:'+d.pct+'%"></div>'+
           '</div>'+
         '</div>';
       }).join('')
-      :'<div style="font-size:13px;color:#94a3b8;text-align:center;padding:16px">No data yet</div>')
+      :'<div style="font-size:13px;color:#777777;text-align:center;padding:16px">No data yet</div>')
   );
 
   /* Wait time distribution */
@@ -1799,19 +2015,19 @@ function _rAnalytics() {
     else waitBuckets[3][1]++;
   });
   var waitChart=_card(
-    '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">Wait Time Distribution</div>'+
+    '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:14px">Wait Time Distribution</div>'+
     (q.length
       ?waitBuckets.map(function(b){
         var pct=q.length?Math.round(b[1]/q.length*100):0;
         return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
-          '<span style="font-size:12px;color:#475569;width:70px;flex-shrink:0">'+b[0]+'</span>'+
-          '<div style="flex:1;height:8px;border-radius:4px;background:#f1f5f9;overflow:hidden">'+
+          '<span style="font-size:12px;color:#555555;width:70px;flex-shrink:0">'+b[0]+'</span>'+
+          '<div style="flex:1;height:8px;border-radius:4px;background:#f0f1ec;overflow:hidden">'+
             '<div style="height:100%;background:'+b[2]+';border-radius:4px;width:'+pct+'%"></div>'+
           '</div>'+
-          '<span style="font-size:12px;font-weight:700;color:#0f172a;width:20px;text-align:right">'+b[1]+'</span>'+
+          '<span style="font-size:12px;font-weight:700;color:#111111;width:20px;text-align:right">'+b[1]+'</span>'+
         '</div>';
       }).join('')
-      :'<div style="font-size:13px;color:#94a3b8;text-align:center;padding:16px">No queue data yet</div>')
+      :'<div style="font-size:13px;color:#777777;text-align:center;padding:16px">No queue data yet</div>')
   );
 
   return '<div style="padding:20px;max-width:1100px">'+
@@ -1823,32 +2039,32 @@ function _rAnalytics() {
 function _rAptEditPage() {
   var apt = _R._editApt;
   if(!apt) { _R.tab='appointments'; _rRec(); return ''; }
-  var back = '<button onclick="_rTab(\'appointments\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Appointments</button>';
+  var back = '<button onclick="_rTab(\'appointments\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555555;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Appointments</button>';
   var todayIso = new Date().toISOString().slice(0,10);
   var SLOTS = ['07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30'];
   return '<div style="padding:28px 32px">'+back+
-    '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:4px">Edit Appointment</div>'+
-    '<div style="font-size:15px;color:#64748b;margin-bottom:24px">Ref: <strong>'+apt.ref+'</strong> · Patient: <strong>'+(apt.name||'—')+'</strong></div>'+
-    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px;max-width:640px">'+
+    '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:4px">Edit Appointment</div>'+
+    '<div style="font-size:15px;color:#777777;margin-bottom:24px">Ref: <strong>'+apt.ref+'</strong> · Patient: <strong>'+(apt.name||'—')+'</strong></div>'+
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px;max-width:640px">'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+
         _frmSel('ae-dept','DEPARTMENT *',DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};}),apt.dept)+
-        '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">DATE *</label>'+
-          '<input id="ae-date" type="date" min="'+todayIso+'" value="'+(apt.date||todayIso)+'" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box"></div>'+
+        '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#555555;margin-bottom:6px">DATE *</label>'+
+          '<input id="ae-date" type="date" min="'+todayIso+'" value="'+(apt.date||todayIso)+'" style="width:100%;padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box"></div>'+
       '</div>'+
-      '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:8px">NEW TIME SLOT</label>'+
+      '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#555555;margin-bottom:8px">NEW TIME SLOT</label>'+
         '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">'+
           SLOTS.map(function(t){
             var sel=apt.time===t;
-            return '<button data-edit-slot="'+t+'" style="padding:8px 4px;border-radius:7px;border:1.5px solid '+(sel?'#3b82f6':'#e2e8f0')+';background:'+(sel?'#eff6ff':'#fff')+';color:'+(sel?'#1d4ed8':'#0f172a')+';font-size:13px;font-weight:'+(sel?'700':'400')+';cursor:pointer;font-family:inherit">'+t+'</button>';
+            return '<button data-edit-slot="'+t+'" style="padding:8px 4px;border-radius:7px;border:1.5px solid '+(sel?'#0F6E56':'#e0e0e0')+';background:'+(sel?'#f0fdfa':'#fff')+';color:'+(sel?'#1A4A9B':'#111111')+';font-size:13px;font-weight:'+(sel?'700':'400')+';cursor:pointer;font-family:inherit">'+t+'</button>';
           }).join('')+
         '</div>'+
       '</div>'+
-      '<div id="ae-selected-slot" style="margin-top:10px;font-size:13px;color:#0d9488;font-weight:600">'+(apt.time?'Selected: '+apt.time:'')+'</div>'+
+      '<div id="ae-selected-slot" style="margin-top:10px;font-size:13px;color:#0F6E56;font-weight:600">'+(apt.time?'Selected: '+apt.time:'')+'</div>'+
     '</div>'+
     '<div style="display:flex;gap:10px;margin-top:14px">'+
-      '<button onclick="_rAptSaveEdit()" style="padding:14px 28px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Save changes</button>'+
+      '<button onclick="_rAptSaveEdit()" style="padding:14px 28px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Save changes</button>'+
       '<button onclick="_rAptCancel(\''+apt.id+'\')" style="padding:14px 20px;border-radius:10px;border:1.5px solid #fca5a5;background:#fff;color:#dc2626;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel appointment</button>'+
-      '<button onclick="_rTab(\'appointments\')" style="padding:14px 20px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;cursor:pointer;font-family:inherit">Discard</button>'+
+      '<button onclick="_rTab(\'appointments\')" style="padding:14px 20px;border-radius:10px;border:1.5px solid #e0e0e0;background:#fff;color:#555555;font-size:14px;cursor:pointer;font-family:inherit">Discard</button>'+
     '</div>'+
   '</div>';
 }
@@ -1858,43 +2074,43 @@ function _rAptEditPage() {
    REGISTER NEW PATIENT (standalone page)
 ═══════════════════════════════════════════════════════════════════════ */
 function _rRegisterNew() {
-  var back='<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
+  var back='<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555555;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
   return '<div style="padding:28px 32px">'+back+
     '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">'+
       '<div>'+
         '<div style="margin-bottom:24px">'+
-          '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Register New Patient</div>'+
-          '<div style="font-size:15px;color:#64748b">Add a new patient profile to the NIHMS database.</div>'+
+          '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:6px">Register New Patient</div>'+
+          '<div style="font-size:15px;color:#777777">Add a new patient profile to the NIHMS database.</div>'+
         '</div>'+
-        '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">'+
-          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#0d9488">'+
-            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>'+
+        '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">'+
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#0F6E56">'+
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>'+
             '<span style="font-size:13px;font-weight:700">Patient details</span>'+
           '</div>'+
           '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'+
             _frmInp('nr-fn','FIRST NAME *','e.g. Nomvula')+ _frmInp('nr-ln','LAST NAME *','e.g. Dlamini')+
-            _frmInp('nr-id','SA ID / PASSPORT *','e.g. 8203041234083')+ _frmInp('nr-dob','DATE OF BIRTH','','date')+
-            _frmSel('nr-gen','GENDER',[{v:'',label:'— Select —'},{v:'Female',label:'Female'},{v:'Male',label:'Male'},{v:'Other',label:'Other'}])+
+            _frmInpId()+ _frmInp('nr-dob','DATE OF BIRTH','','date')+
+            _frmSel('nr-gen','GENDER',[{v:'',label:'— Select —'},{v:'female',label:'Female'},{v:'male',label:'Male'},{v:'non-binary',label:'Non-binary'},{v:'prefer_not_to_say',label:'Prefer not to say'}])+
             _frmSel('nr-blood','BLOOD TYPE',[{v:'',label:'— Unknown —'},{v:'A+',label:'A+'},{v:'A-',label:'A-'},{v:'B+',label:'B+'},{v:'B-',label:'B-'},{v:'AB+',label:'AB+'},{v:'AB-',label:'AB-'},{v:'O+',label:'O+'},{v:'O-',label:'O-'}])+
             _frmInp('nr-ph','PHONE NUMBER *','+27820000000','tel')+ _frmInp('nr-em','EMAIL','patient@email.com','email')+
           '</div>'+
           '<div style="margin-top:14px">'+_frmInp('nr-addr','ADDRESS','Street address, suburb, city')+'</div>'+
 
         /* ── ID Document Upload ── */
-        '<div style="margin-top:18px;background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:20px">' +
+        '<div style="margin-top:18px;background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:20px">' +
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">' +
-            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' +
-            '<span style="font-size:13px;font-weight:700;color:#0f172a">ID Document Upload</span>' +
-            '<span style="font-size:11px;color:#94a3b8;margin-left:4px">(optional — SA ID Book, Smart ID Card, or Passport scan)</span>' +
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' +
+            '<span style="font-size:13px;font-weight:700;color:#111111">ID Document Upload</span>' +
+            '<span style="font-size:11px;color:#777777;margin-left:4px">(optional — SA ID Book, Smart ID Card, or Passport scan)</span>' +
           '</div>' +
           '<div id="nr-id-drop" onclick="document.getElementById(\'nr-id-file\').click()" ' +
-               'ondragover="event.preventDefault();this.style.borderColor=\'#0d9488\';this.style.background=\'#f0fdfa\'" ' +
-               'ondragleave="this.style.borderColor=\'#e2e8f0\';this.style.background=\'#f9fafb\'" ' +
+               'ondragover="event.preventDefault();this.style.borderColor=\'#0F6E56\';this.style.background=\'#f0fdfa\'" ' +
+               'ondragleave="this.style.borderColor=\'#e0e0e0\';this.style.background=\'#f9fafb\'" ' +
                'ondrop="_rIdFileDrop(event)" ' +
-               'style="border:2px dashed #e2e8f0;border-radius:12px;padding:28px 20px;text-align:center;cursor:pointer;background:#f9fafb;transition:all .2s">' +
+               'style="border:2px dashed #e0e0e0;border-radius:12px;padding:28px 20px;text-align:center;cursor:pointer;background:#f9fafb;transition:all .2s">' +
             '<div style="font-size:32px;margin-bottom:8px">📄</div>' +
-            '<div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:4px">Click to upload or drag &amp; drop</div>' +
-            '<div style="font-size:12px;color:#94a3b8">JPG · PNG · PDF · Max 5 MB</div>' +
+            '<div style="font-size:14px;font-weight:600;color:#111111;margin-bottom:4px">Click to upload or drag &amp; drop</div>' +
+            '<div style="font-size:12px;color:#777777">JPG · PNG · PDF · Max 5 MB</div>' +
             '<input id="nr-id-file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" ' +
                    'style="display:none" onchange="_rIdFileSelect(this)">' +
           '</div>' +
@@ -1905,31 +2121,31 @@ function _rRegisterNew() {
 
         '</div>'+
         '<div style="display:flex;gap:10px;margin-top:14px">'+
-          '<button onclick="_rSaveNewPatient()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+          '<button onclick="_rSaveNewPatient()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>'+
             'Register patient'+
           '</button>'+
-          '<button onclick="_rTab(\'overview\')" style="padding:14px 24px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+          '<button onclick="_rTab(\'overview\')" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Cancel</button>'+
         '</div>'+
       '</div>'+
-      '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:18px">'+
-        '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:12px">Recently registered</div>'+
+      '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:18px">'+
+        '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:12px">Recently registered</div>'+
         ((_R.recentPatients && _R.recentPatients.length)
           ? _R.recentPatients.map(function(p){
-              return '<div style="padding:8px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:8px">' +
-                '<div style="width:30px;height:30px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">' +
+              return '<div style="padding:8px 12px;border-bottom:1px solid #f0f1ec;display:flex;align-items:center;gap:8px">' +
+                '<div style="width:30px;height:30px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">' +
                   ((p.firstName||'?')[0]+(p.lastName||'?')[0]).toUpperCase() +
                 '</div>' +
                 '<div style="flex:1;min-width:0">' +
-                  '<div style="font-size:12px;font-weight:600;color:#0f172a">'+(p.firstName||'')+' '+(p.lastName||'')+'</div>' +
-                  '<div style="font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(p.nationalId||p.id||'')+(p.phone?' · '+p.phone:'')+'</div>' +
+                  '<div style="font-size:12px;font-weight:600;color:#111111">'+(p.firstName||'')+' '+(p.lastName||'')+'</div>' +
+                  '<div style="font-size:11px;color:#777777;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(p.nationalId||p.id||'')+(p.phone?' · '+p.phone:'')+'</div>' +
                 '</div>' +
-                '<button onclick="_rOpenPatientFile(\''+encodeURIComponent(p.nationalId||p.id||'')+'\')" style="padding:3px 8px;border-radius:5px;border:1px solid #e2e8f0;background:#fff;font-size:10px;color:#0d9488;cursor:pointer;font-family:inherit;flex-shrink:0">View</button>' +
+                '<button onclick="_rOpenPatientFile(\''+encodeURIComponent(p.nationalId||p.id||'')+'\')" style="padding:3px 8px;border-radius:5px;border:1px solid #e0e0e0;background:#fff;font-size:10px;color:#0F6E56;cursor:pointer;font-family:inherit;flex-shrink:0">View</button>' +
               '</div>';
             }).join('')
           : (_R.loadingData
-              ? '<div style="padding:14px;text-align:center;font-size:12px;color:#94a3b8">⏳ Loading patients…</div>'
-              : '<div style="padding:14px;text-align:center;font-size:12px;color:#94a3b8">No patients registered yet.<br>Registered patients will appear here.</div>'))+
+              ? '<div style="padding:14px;text-align:center;font-size:12px;color:#777777">⏳ Loading patients…</div>'
+              : '<div style="padding:14px;text-align:center;font-size:12px;color:#777777">No patients registered yet.<br>Registered patients will appear here.</div>'))+
       '</div>'+
     '</div>'+
   '</div>';
@@ -1939,6 +2155,10 @@ window._rSaveNewPatient = async function() {
   function _v(id){ var el=document.getElementById(id); return el?el.value.trim():''; }
   var fn=_v('nr-fn'),ln=_v('nr-ln'),id=_v('nr-id'),ph=_v('nr-ph');
   var dob=_v('nr-dob'),gen=_v('nr-gen'),blood=_v('nr-blood'),em=_v('nr-em'),addr=_v('nr-addr');
+  /* ── Normalize gender/bloodType to match backend enum ── */
+  var genMap = { 'female':'female','male':'male','other':'non-binary','non-binary':'non-binary','prefer_not_to_say':'prefer_not_to_say' };
+  var genNorm = genMap[(gen||'').toLowerCase()] || 'prefer_not_to_say';
+  var bloodNorm = blood || 'unknown';
   /* ── Validate all required fields at once — highlight every error ── */
   var hasErr = false;
 
@@ -1979,12 +2199,12 @@ window._rSaveNewPatient = async function() {
         firstName:   fn,
         lastName:    ln,
         nationalId:  id,
-        dateOfBirth: dob,
-        gender:      gen,
+        dateOfBirth: dob || undefined,
+        gender:      genNorm,
         phone:       ph,
-        email:       em,
-        bloodType:   blood,
-        address:     addr,
+        email:       em || undefined,
+        bloodType:   bloodNorm,
+        address:     addr || undefined,
       })
     });
     /* API returns the created document */
@@ -2082,11 +2302,7 @@ window._rSaveNewPatient = async function() {
     _rIdClearFile();
   }
 
-  /* ── Timed confirmation banner ── */
-  var secs = (elapsed / 1000).toFixed(2);
-  var target = 2.0;
-  var withinTarget = elapsed < target * 1000;
-
+  /* ── Confirmation banner ── */
   /* Show confirmation on the current page before navigating */
   var banner = document.createElement('div');
   banner.style.cssText = [
@@ -2112,15 +2328,11 @@ window._rSaveNewPatient = async function() {
     '<div style="font-size:24px;flex-shrink:0">✅</div>',
     '<div style="flex:1">',
       '<div style="font-size:14px;font-weight:700;color:#14532d;margin-bottom:4px">',
-        'Patient profile created in MongoDB',
+        'Patient registered successfully',
       '</div>',
       '<div style="font-size:12px;color:#166534;line-height:1.6">',
         '<strong>' + fn + ' ' + ln + '</strong> · ID: ' + id + '<br>',
-        'Confirmation received in <strong>' + elapsed + ' ms</strong>',
-        ' (' + secs + 's — target: ≤2.0s)',
-        withinTarget
-          ? ' <span style="color:#16a34a;font-weight:700">✓ within target</span>'
-          : ' <span style="color:#d97706;font-weight:700">⚠ over target</span>',
+        'A new patient profile has been created and saved to NIHMS.',
         docLine,
       '</div>',
     '</div>',
@@ -2134,14 +2346,23 @@ window._rSaveNewPatient = async function() {
     document.head.appendChild(anim);
   }
   document.body.appendChild(banner);
-  setTimeout(function() {
-    banner.style.transition = 'opacity .4s';
-    banner.style.opacity = '0';
-    setTimeout(function() { banner.remove(); }, 400);
-  }, 3000);
 
-  /* Navigate to overview after short delay so user sees the banner */
-  setTimeout(function() { _rTab('overview'); }, 800);
+  /* Fire a toast immediately — visible even after page re-render */
+  UI.showToast('✅ ' + fn + ' ' + ln + ' registered successfully', 'ok');
+
+  /* Navigate to overview, then re-attach the detail banner on top */
+  setTimeout(function() {
+    _rTab('overview');
+    setTimeout(function() {
+      document.body.appendChild(banner);
+      banner.style.opacity = '1';
+      setTimeout(function() {
+        banner.style.transition = 'opacity .5s';
+        banner.style.opacity = '0';
+        setTimeout(function() { banner.remove(); }, 500);
+      }, 3000);
+    }, 120);
+  }, 500);
 };
 
 
@@ -2184,7 +2405,7 @@ window._rAptCancel = async function(id) {
 
   /* ── Notify patient ── */
   var msg = 'NIHMS: Your appointment '+apt.ref+' on '+apt.date+' at '+apt.time+' ('+apt.dept+') has been CANCELLED. Please contact reception to reschedule. Johannesburg CHC.';
-  var emailHtml = '<div style="font-family:inherit;max-width:500px;margin:0 auto"><div style="background:#dc2626;padding:20px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Cancelled</h2></div><div style="background:#fef2f2;padding:20px;border-radius:0 0 10px 10px"><p>Dear patient,</p><p>Your appointment has been cancelled:</p><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Reference</td><td style="padding:8px;font-weight:700;color:#dc2626">'+apt.ref+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Department</td><td style="padding:8px;font-weight:600">'+apt.dept+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Original Date</td><td style="padding:8px;font-weight:600">'+apt.date+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Original Time</td><td style="padding:8px;font-weight:600">'+apt.time+'</td></tr></table><p style="font-size:13px;margin-top:14px">Please contact reception to reschedule your appointment.</p><p style="font-size:12px;color:#94a3b8">Johannesburg CHC · Reception</p></div></div>';
+  var emailHtml = '<div style="font-family:inherit;max-width:500px;margin:0 auto"><div style="background:#dc2626;padding:20px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Cancelled</h2></div><div style="background:#FCEBEB;padding:20px;border-radius:0 0 10px 10px"><p>Dear patient,</p><p>Your appointment has been cancelled:</p><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;color:#777777;font-size:13px">Reference</td><td style="padding:8px;font-weight:700;color:#dc2626">'+apt.ref+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">Department</td><td style="padding:8px;font-weight:600">'+apt.dept+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">Original Date</td><td style="padding:8px;font-weight:600">'+apt.date+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">Original Time</td><td style="padding:8px;font-weight:600">'+apt.time+'</td></tr></table><p style="font-size:13px;margin-top:14px">Please contact reception to reschedule your appointment.</p><p style="font-size:12px;color:#777777">Johannesburg CHC · Reception</p></div></div>';
   try {
     if (apt.phone||apt.patientPhone) await API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:apt.phone||apt.patientPhone,message:msg})}).catch(function(){});
     if (apt.email||apt.patientEmail) await API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:apt.email||apt.patientEmail,subject:'NIHMS — Appointment cancelled: '+apt.ref,html:emailHtml})}).catch(function(){});
@@ -2206,7 +2427,7 @@ function _rPatientFile() {
   var pf = _R.patientFile || { step:'search', id:'', patient:null, notFound:false, editing:false };
   if (!_R.patientFile) _R.patientFile = pf;
 
-  var back = '<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
+  var back = '<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555555;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
 
   /* ── EDIT MODE ── */
   if (pf.editing && pf.patient) {
@@ -2215,10 +2436,10 @@ function _rPatientFile() {
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           '<div style="margin-bottom:24px">' +
-            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:4px">Edit Patient Profile</div>' +
-            '<div style="font-size:14px;color:#64748b">Update the details for <strong>'+(pt.firstName||'')+' '+(pt.lastName||'')+'</strong> · '+pt.id+'</div>' +
+            '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:4px">Edit Patient Profile</div>' +
+            '<div style="font-size:14px;color:#777777">Update the details for <strong>'+(pt.firstName||'')+' '+(pt.lastName||'')+'</strong> · '+pt.id+'</div>' +
           '</div>' +
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
               _frmInp('pf-fn',  'FIRST NAME *',    '', 'text', pt.firstName||'') +
               _frmInp('pf-ln',  'LAST NAME *',     '', 'text', pt.lastName||'')  +
@@ -2232,8 +2453,8 @@ function _rPatientFile() {
             '<div style="margin-top:14px">' + _frmInp('pf-addr','ADDRESS','', 'text', pt.address||'') + '</div>' +
           '</div>' +
           '<div style="display:flex;gap:10px;margin-top:14px">' +
-            '<button onclick="_rPfSave()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">Save changes</button>' +
-            '<button onclick="_R.patientFile.editing=false;_rRec()" style="padding:14px 20px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;cursor:pointer;font-family:inherit">Cancel</button>' +
+            '<button onclick="_rPfSave()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#0F6E56;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">Save changes</button>' +
+            '<button onclick="_R.patientFile.editing=false;_rRec()" style="padding:14px 20px;border-radius:10px;border:1.5px solid #e0e0e0;background:#fff;color:#555555;font-size:14px;cursor:pointer;font-family:inherit">Cancel</button>' +
           '</div>' +
         '</div>' +
         _pfSidePanel(pt) +
@@ -2251,53 +2472,53 @@ function _rPatientFile() {
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           /* Profile card */
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px;margin-bottom:16px">' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px;margin-bottom:16px">' +
             '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">' +
-              '<div style="width:52px;height:52px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex-shrink:0">'+initials+'</div>' +
+              '<div style="width:52px;height:52px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex-shrink:0">'+initials+'</div>' +
               '<div style="flex:1">' +
-                '<div style="font-size:20px;font-weight:800;color:#0f172a">'+(pt.firstName||'')+' '+(pt.lastName||'')+'</div>' +
-                '<div style="font-size:13px;color:#64748b;margin-top:2px">🪪 '+pt.id+(pt.gender?' · '+pt.gender:'')+(pt.dob?' · DOB: '+pt.dob:'')+'</div>' +
+                '<div style="font-size:20px;font-weight:800;color:#111111">'+(pt.firstName||'')+' '+(pt.lastName||'')+'</div>' +
+                '<div style="font-size:13px;color:#777777;margin-top:2px">🪪 '+pt.id+(pt.gender?' · '+pt.gender:'')+(pt.dob?' · DOB: '+pt.dob:'')+'</div>' +
               '</div>' +
-              '<button onclick="_R.patientFile.editing=true;_rRec()" style="display:flex;align-items:center;gap:6px;padding:9px 16px;border-radius:8px;border:none;background:#0d9488;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">' +
+              '<button onclick="_R.patientFile.editing=true;_rRec()" style="display:flex;align-items:center;gap:6px;padding:9px 16px;border-radius:8px;border:none;background:#0F6E56;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">' +
                 '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
                 'Edit profile' +
               '</button>' +
             '</div>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
               [['Phone', pt.phone||'—'],['Email', pt.email||'—'],['Blood type', pt.bloodType||'—'],['Address', pt.address||'—']].map(function(r){
-                return '<div style="padding:10px 12px;background:#f8fafc;border-radius:8px">' +
-                  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:3px">'+r[0]+'</div>' +
-                  '<div style="font-size:13px;font-weight:600;color:#0f172a">'+r[1]+'</div>' +
+                return '<div style="padding:10px 12px;background:#f4f5f0;border-radius:8px">' +
+                  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#777777;margin-bottom:3px">'+r[0]+'</div>' +
+                  '<div style="font-size:13px;font-weight:600;color:#111111">'+r[1]+'</div>' +
                 '</div>';
               }).join('') +
             '</div>' +
           '</div>' +
           /* Appointment history */
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
-            '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">' +
-              '<div style="font-size:13px;font-weight:700;color:#0f172a">Appointment History ('+ptApts.length+')</div>' +
-              '<button onclick="_rTab(\'book\');_R.bk.step=\'search\';_R.bk.id=\''+pt.id+'\';_rRec()" style="font-size:12px;color:#3b82f6;border:none;background:transparent;cursor:pointer;font-family:inherit">+ Book new appointment</button>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;overflow:hidden">' +
+            '<div style="padding:12px 16px;border-bottom:1px solid #f0f1ec;display:flex;align-items:center;justify-content:space-between">' +
+              '<div style="font-size:13px;font-weight:700;color:#111111">Appointment History ('+ptApts.length+')</div>' +
+              '<button onclick="_rTab(\'book\');_R.bk.step=\'search\';_R.bk.id=\''+pt.id+'\';_rRec()" style="font-size:12px;color:#0F6E56;border:none;background:transparent;cursor:pointer;font-family:inherit">+ Book new appointment</button>' +
             '</div>' +
 
         '</div>' +
         /* All patients list */
-        '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
-          '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">All Registered Patients ('+NIHMS_PATIENTS.length+')</div>' +
+        '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;overflow:hidden">' +
+          '<div style="padding:12px 16px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:700;color:#111111">All Registered Patients ('+NIHMS_PATIENTS.length+')</div>' +
           NIHMS_PATIENTS.map(function(p,i){
-            return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid #f8fafc;background:'+(i%2===0?'#fff':'#f8fafc')+'">' +
-              '<div style="width:32px;height:32px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(((p.firstName||'?')[0])+((p.lastName||'?')[0])).toUpperCase()+'</div>' +
+            return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid #f4f5f0;background:'+(i%2===0?'#fff':'#f4f5f0')+'">' +
+              '<div style="width:32px;height:32px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(((p.firstName||'?')[0])+((p.lastName||'?')[0])).toUpperCase()+'</div>' +
               '<div style="flex:1;min-width:0">' +
-                '<div style="font-size:13px;font-weight:600;color:#0f172a">'+(p.firstName||'')+' '+(p.lastName||'')+'</div>' +
-                '<div style="font-size:11px;color:#94a3b8">'+p.id+(p.phone?' · '+p.phone:'')+'</div>' +
+                '<div style="font-size:13px;font-weight:600;color:#111111">'+(p.firstName||'')+' '+(p.lastName||'')+'</div>' +
+                '<div style="font-size:11px;color:#777777">'+p.id+(p.phone?' · '+p.phone:'')+'</div>' +
               '</div>' +
-              '<button onclick="_rOpenPatientFile(\''+p.id+'\')" style="padding:5px 12px;border-radius:6px;border:1px solid #e2e8f0;background:#fff;font-size:12px;color:#0d9488;cursor:pointer;font-family:inherit;font-weight:600">Open file</button>' +
+              '<button onclick="_rOpenPatientFile(\''+p.id+'\')" style="padding:5px 12px;border-radius:6px;border:1px solid #e0e0e0;background:#fff;font-size:12px;color:#0F6E56;cursor:pointer;font-family:inherit;font-weight:600">Open file</button>' +
             '</div>';
           }).join('') +
         '</div>' +
       '</div>' +
-      '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:16px">' +
-        '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:12px">Quick tips</div>' +
-        '<div style="font-size:12px;color:#64748b;line-height:1.7">' +
+      '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:16px">' +
+        '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:12px">Quick tips</div>' +
+        '<div style="font-size:12px;color:#777777;line-height:1.7">' +
           '• Search by SA ID or passport number<br>' +
           '• Click <strong>Open file</strong> to view a patient record<br>' +
           '• Click <strong>Edit profile</strong> to update contact details<br>' +
@@ -2316,22 +2537,22 @@ function _pfSidePanel(pt) {
   }).sort(function(a,b){ return (a.date||'') < (b.date||'') ? -1 : 1; }).slice(0,5);
   var today = new Date().toISOString().slice(0,10);
   return '<div style="display:flex;flex-direction:column;gap:14px">' +
-    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
-      '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Upcoming for this patient</div>' +
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;overflow:hidden">' +
+      '<div style="padding:12px 16px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:700;color:#111111">Upcoming for this patient</div>' +
       (ptApts.filter(function(a){return (a.date||'').slice(0,10)>=today;}).length
         ? ptApts.filter(function(a){return (a.date||'').slice(0,10)>=today;}).map(function(a){
-            return '<div style="padding:9px 14px;border-bottom:1px solid #f8fafc">' +
-              '<div style="font-size:12px;font-weight:700;color:#0f172a">'+a.ref+'</div>' +
-              '<div style="font-size:11px;color:#64748b">'+(a.dept||'')+'</div>' +
-              '<div style="font-size:11px;color:#94a3b8">'+(a.date||'')+' @ '+(a.time||'')+'</div>' +
+            return '<div style="padding:9px 14px;border-bottom:1px solid #f4f5f0">' +
+              '<div style="font-size:12px;font-weight:700;color:#111111">'+a.ref+'</div>' +
+              '<div style="font-size:11px;color:#777777">'+(a.dept||'')+'</div>' +
+              '<div style="font-size:11px;color:#777777">'+(a.date||'')+' @ '+(a.time||'')+'</div>' +
             '</div>';
           }).join('')
-        : '<div style="padding:14px;text-align:center;font-size:12px;color:#94a3b8">No upcoming appointments</div>') +
+        : '<div style="padding:14px;text-align:center;font-size:12px;color:#777777">No upcoming appointments</div>') +
     '</div>' +
     '<div style="background:#f0fdfa;border-radius:14px;border:1px solid #99f6e4;padding:14px">' +
-      '<div style="font-size:12px;font-weight:700;color:#0d9488;margin-bottom:6px">Patient summary</div>' +
-      '<div style="font-size:12px;color:#475569">'+_R.appointments.filter(function(a){return a.patientId===pt.id||a.patientId===pt.nationalId;}).length+' total appointments</div>' +
-      '<div style="font-size:12px;color:#475569">'+_R.appointments.filter(function(a){return (a.patientId===pt.id||a.patientId===pt.nationalId)&&a.verified;}).length+' verified</div>' +
+      '<div style="font-size:12px;font-weight:700;color:#0F6E56;margin-bottom:6px">Patient summary</div>' +
+      '<div style="font-size:12px;color:#555555">'+_R.appointments.filter(function(a){return a.patientId===pt.id||a.patientId===pt.nationalId;}).length+' total appointments</div>' +
+      '<div style="font-size:12px;color:#555555">'+_R.appointments.filter(function(a){return (a.patientId===pt.id||a.patientId===pt.nationalId)&&a.verified;}).length+' verified</div>' +
     '</div>' +
   '</div>';
 }
@@ -2471,6 +2692,8 @@ window._rCheckinSearch = async function() {
   var today  = new Date().toISOString().slice(0,10);
 
   var appt = _R.appointments.find(function(a) {
+    /* Skip cancelled appointments — cannot check in a cancelled booking */
+    if (a.status === 'cancelled') return false;
     /* Match by patient ObjectId OR by the SA ID / passport entered */
     var aPatId = (a.patientId || a.patient || '').toString().trim();
     var match  = aPatId === pid || aPatId === id ||
@@ -2492,6 +2715,7 @@ window._rCheckinSearch = async function() {
       if (aRes && aRes.data && aRes.data.length) {
         /* Take the closest upcoming/today appointment */
         var todayApts = aRes.data.filter(function(a) {
+          if (a.status === 'cancelled') return false;
           return (a.date || a.appointmentDate || '').slice(0,10) >= today;
         });
         if (todayApts.length) {
@@ -2727,31 +2951,65 @@ window._rCheckinIssue = async function() {
   /* If still no date, default to today (walk-in) */
   if (!ci.selectedDate) ci.selectedDate = todayStr;
 
-  var dept=(document.getElementById('ci-slot-dept')||document.getElementById('ci-dept')||{value:ci.dept}).value||ci.dept;
-  _R.ci.dept = dept;
-  var token = _genToken(dept);
-
-  /* Immunisation patients go to nurse immunisation queue */
-  if (dept==='Immunisation') {
-    var immuReq = {
-      id:'REQ-IMM-'+token, patientId:ci.patient._id||ci.patient.id,
-      patientName:(ci.patient.firstName||'')+' '+(ci.patient.lastName||''),
-      age:ci.patient.age||'—', sex:ci.patient.sex||ci.patient.gender||'—',
-      complaint:'Immunisation appointment', priority:'Normal',
-      requestedBy:'Reception', requestedAt:_fmtTime(),
-      notes:'Patient scheduled for immunisation. Token: '+token+'. Directed to Nurse Immunisation Station.',
-      seen:false, isImmunisation:true
-    };
-    if(window._nurseAddRequest) window._nurseAddRequest(immuReq);
-    else{if(!window._NURSE_REQUESTS)window._NURSE_REQUESTS=[];window._NURSE_REQUESTS.push(immuReq);}
+  /* ── Fix: use appointment's actual department (Case A: booked appt, no dept dropdown) ── */
+  if (ci.appt && ci.appt.dept && (!ci.dept || ci.dept === 'General Consultation')) {
+    ci.dept = ci.appt.dept;
   }
 
-  _R.queue.push({ token:token, id:ci.patient.id, name:(ci.patient.firstName||ci.patient.name||'')+(ci.patient.lastName?' '+ci.patient.lastName:''), department:dept, priority:'normal', status:'waiting', checkedInAt:new Date().toISOString() });
+  var dept=(document.getElementById('ci-slot-dept')||document.getElementById('ci-dept')||{value:ci.dept}).value||(ci.appt&&ci.appt.dept)||ci.dept||'General Consultation';
+  _R.ci.dept = dept;
 
-  /* Notify nurse */
-  var req={ id:'REQ-'+token, patientId:ci.patient._id||ci.patient.id, patientName:(ci.patient.firstName||'')+(ci.patient.lastName?' '+ci.patient.lastName:''), age:ci.patient.age||'—', sex:ci.patient.sex||ci.patient.gender||'—', complaint:'Walk-in queue check-in', priority:'Normal', requestedBy:'Reception', requestedAt:_fmtTime(), notes:'Patient '+token+' checked in at '+dept+'. Directed to nurses station for vitals.', seen:false };
-  if(window._nurseAddRequest) window._nurseAddRequest(req);
-  else { if(!window._NURSE_REQUESTS) window._NURSE_REQUESTS=[]; window._NURSE_REQUESTS.push(req); }
+  /* ── Duplicate check-in prevention ── */
+  var ptId = (ci.patient._id || ci.patient.id || ci.patient.nationalId || '');
+  var todayDate = new Date().toISOString().slice(0,10);
+  var alreadyIn = _R.queue.find(function(q) {
+    var qDate = (q.checkedInAt || '').slice(0,10);
+    var qName = (q.name || '').trim();
+    var ptFullName = ((ci.patient.firstName||'')+(ci.patient.lastName?' '+ci.patient.lastName:'')).trim();
+    return ((ptId && (q.id === ptId || q.patientId === ptId)) || (qName && ptFullName && qName === ptFullName))
+      && qDate === todayDate && q.status !== 'done';
+  });
+  if (alreadyIn) {
+    var _dupName = ((ci.patient.firstName||'')+' '+(ci.patient.lastName||'')).trim();
+    UI.showToast('⚠ ' + _dupName + ' is already checked in today (Token: ' + alreadyIn.token + ')', 'err');
+    var _old = document.getElementById('ci-dup-banner'); if (_old) _old.remove();
+    var _db = document.createElement('div');
+    _db.id = 'ci-dup-banner';
+    _db.style.cssText = 'position:fixed;top:72px;left:50%;transform:translateX(-50%);z-index:8888;background:#f0f4f8;border:1.5px solid #cbd5e1;border-radius:14px;padding:20px 24px;box-shadow:0 4px 24px rgba(0,0,0,.10);max-width:520px;width:92%';
+    _db.innerHTML = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><div style="font-size:20px">🚫</div><div style="font-size:15px;font-weight:700;color:#0F4C3A">Patient Already Checked In</div></div><div style="font-size:13px;color:#374151;line-height:1.7;margin-bottom:14px"><strong>' + _dupName + '</strong> has already been checked in today.<br>Token: <strong style="font-family:monospace;font-size:14px;color:#0F6E56">' + alreadyIn.token + '</strong> &nbsp;·&nbsp; Department: <strong>' + (alreadyIn.department||'') + '</strong></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="document.getElementById(\'ci-dup-banner\').remove();if(window._rResetCheckin)window._rResetCheckin();" style="padding:9px 18px;border-radius:22px;border:none;background:#0F6E56;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">+ Check In Another Patient</button><button onclick="document.getElementById(\'ci-dup-banner\').remove()" style="padding:9px 18px;border-radius:22px;border:1.5px solid #9ca3af;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">✕ Dismiss</button></div>';
+    document.body.appendChild(_db);
+    setTimeout(function(){ var b=document.getElementById('ci-dup-banner'); if(b){b.style.transition='opacity .4s';b.style.opacity='0';setTimeout(function(){b.remove();},400);} }, 8000);
+    return;
+  }
+
+  var token = _genToken(dept);
+  var isImm = (dept === 'Immunisation');
+
+  /* ── Route to nurse: immunisation → immQueue, all others → vitals ── */
+  if (isImm) {
+    var immuReq = {
+      id:          'REQ-IMM-' + token,
+      patientId:   ci.patient._id || ci.patient.id,
+      patientName: (ci.patient.firstName||'') + ' ' + (ci.patient.lastName||''),
+      age:         ci.patient.age || '—',
+      sex:         ci.patient.sex || ci.patient.gender || '—',
+      complaint:   'Scheduled Immunisation',
+      priority:    'Normal',
+      requestedBy: 'Reception',
+      requestedAt: _fmtTime(),
+      notes:       'Immunisation appointment. Token: ' + token + '. Directed to Nurse Immunisation Station.',
+      seen:        false,
+      isImmunisation: true,
+      autoAccept:  true,
+      department:  'Immunisation',
+    };
+    _sendToNurseTab(immuReq);
+  } else {
+    var req = { id:'REQ-'+token, patientId:ci.patient._id||ci.patient.id, patientName:(ci.patient.firstName||'')+(ci.patient.lastName?' '+ci.patient.lastName:''), age:ci.patient.age||'—', sex:ci.patient.sex||ci.patient.gender||'—', complaint:ci.appt ? (ci.appt.type||'Appointment') : 'Walk-in', priority:'Normal', requestedBy:'Reception', requestedAt:_fmtTime(), notes:'Patient '+token+' checked in at '+dept+'. Directed to nurses station for vitals.', seen:false, autoAccept:true, department:dept };
+    _sendToNurseTab(req);
+  }
+
+  _R.queue.push({ token:token, id:ptId, patientId:ptId, name:(ci.patient.firstName||ci.patient.name||'')+(ci.patient.lastName?' '+ci.patient.lastName:''), department:dept, priority:'normal', status:'waiting', checkedInAt:new Date().toISOString() });
 
   /* ── Send SMS + Email notifications ── */
   var sms=false, email=false;
@@ -2785,7 +3043,7 @@ window._rCheckinIssue = async function() {
     'NIHMS CHECK-IN CONFIRMED. Dear ' + ptName + '. ' +
     'Queue token: ' + token + '. Dept: ' + dept + '. ' +
     'Date: ' + apptDate + ' at ' + apptTime + '. ' +
-    'Go to the Nurses Station for vitals. ' +
+    (isImm ? 'Go to the Nurse Immunisation Station. ' : 'Go to the Nurses Station for vitals. ') +
     'Patient dashboard: https://nihms.netlify.app/patient . ' +
     'Emergency: 10177 | NIHMS Jhb CHC';
 
@@ -2794,31 +3052,31 @@ window._rCheckinIssue = async function() {
 
   var emailHtml =
     '<div style="font-family:system-ui,-apple-system,Arial,sans-serif;max-width:540px;margin:0 auto;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10)">' +
-      '<div style="background:linear-gradient(135deg,#0d9488,#0f766e);padding:28px 24px;text-align:center">' +
+      '<div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);padding:28px 24px;text-align:center">' +
         '<div style="font-size:36px;margin-bottom:8px">✅</div>' +
         '<h1 style="color:#fff;margin:0;font-size:22px;font-weight:800">Check-In Confirmed</h1>' +
         '<p style="color:rgba(255,255,255,.85);margin:6px 0 0;font-size:13px">National Integrated Healthcare Management System · Johannesburg CHC</p>' +
       '</div>' +
-      '<div style="background:#f8fafc;padding:28px;border-radius:0 0 12px 12px">' +
-        '<p style="font-size:15px;color:#475569;margin:0 0 20px">Dear <strong>' + ptName.trim() + '</strong>,</p>' +
-        '<div style="background:#fff;border-radius:14px;padding:24px;text-align:center;border:2.5px solid #0d9488;margin-bottom:20px">' +
-          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#94a3b8;margin-bottom:10px">Your Queue Token</div>' +
-          '<div style="font-size:72px;font-weight:900;font-family:monospace;color:#0d9488;line-height:1;letter-spacing:.05em">' + token + '</div>' +
-          '<div style="margin-top:10px;font-size:13px;color:#0d9488;font-weight:600">' + dept + '</div>' +
-          '<div style="margin-top:4px;font-size:12px;color:#94a3b8">' + apptDate + ' · ' + apptTime + '</div>' +
+      '<div style="background:#f4f5f0;padding:28px;border-radius:0 0 12px 12px">' +
+        '<p style="font-size:15px;color:#555555;margin:0 0 20px">Dear <strong>' + ptName.trim() + '</strong>,</p>' +
+        '<div style="background:#fff;border-radius:14px;padding:24px;text-align:center;border:2.5px solid #0F6E56;margin-bottom:20px">' +
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#777777;margin-bottom:10px">Your Queue Token</div>' +
+          '<div style="font-size:72px;font-weight:900;font-family:monospace;color:#0F6E56;line-height:1;letter-spacing:.05em">' + token + '</div>' +
+          '<div style="margin-top:10px;font-size:13px;color:#0F6E56;font-weight:600">' + dept + '</div>' +
+          '<div style="margin-top:4px;font-size:12px;color:#777777">' + apptDate + ' · ' + apptTime + '</div>' +
         '</div>' +
         '<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:16px;text-align:center;margin-bottom:20px">' +
           '<div style="font-size:13px;color:#14532d;font-weight:600;margin-bottom:6px">📱 View your token on your Patient Dashboard</div>' +
-          '<a href="' + dashboardUrl + '" style="display:inline-block;padding:10px 22px;background:#0d9488;color:#fff;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none">Open Patient Dashboard →</a>' +
-          '<div style="font-size:11px;color:#64748b;margin-top:8px">Or visit: https://nihms.netlify.app/patient</div>' +
+          '<a href="' + dashboardUrl + '" style="display:inline-block;padding:10px 22px;background:#0F6E56;color:#fff;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none">Open Patient Dashboard →</a>' +
+          '<div style="font-size:11px;color:#777777;margin-top:8px">Or visit: https://nihms.netlify.app/patient</div>' +
         '</div>' +
         '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
-          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#94a3b8;width:40%">Department</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#0f172a">' + dept + '</td></tr>' +
-          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#94a3b8">Date</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#0f172a">' + apptDate + '</td></tr>' +
-          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#94a3b8">Time</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#0f172a">' + apptTime + '</td></tr>' +
-          '<tr><td style="padding:10px 14px;font-size:13px;color:#94a3b8">Checked in at</td><td style="padding:10px 14px;font-size:13px;font-weight:600;color:#0f172a">' + _fmtTime() + '</td></tr>' +
+          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;color:#777777;width:40%">Department</td><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:600;color:#111111">' + dept + '</td></tr>' +
+          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;color:#777777">Date</td><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:600;color:#111111">' + apptDate + '</td></tr>' +
+          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;color:#777777">Time</td><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:600;color:#111111">' + apptTime + '</td></tr>' +
+          '<tr><td style="padding:10px 14px;font-size:13px;color:#777777">Checked in at</td><td style="padding:10px 14px;font-size:13px;font-weight:600;color:#111111">' + _fmtTime() + '</td></tr>' +
         '</table>' +
-        '<div style="background:#eff6ff;border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:13px;color:#1d4ed8">' +
+        '<div style="background:#E6F1FB;border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:13px;color:#185FA5">' +
           '<strong>📋 What to do next:</strong><br>' +
           '1. Proceed to the <strong>Nurses Station</strong> for vitals<br>' +
           '2. Wait to be called by your token number<br>' +
@@ -2916,7 +3174,7 @@ window._rBookSearch = async function() {
   if(!patient) patient = await _apiSearchPatient(id).catch(function(){ return null; });
 
   if(!patient){ _R.bk.notFound=true; _rRec(); return; }
-  _R.bk.patient=patient; _R.bk.step='slot'; _rRec();
+  _R.bk.patient=_normPt(patient)||patient; _R.bk.step='found'; _rRec();
 };
 
 /* _rBookRegisterNew — used by the new booking form (bk-reg-* field IDs) */
@@ -3036,7 +3294,7 @@ window._rBookConfirm = async function() {
 
   /* Notify patient */
   var smsMsg = 'NIHMS APPOINTMENT CONFIRMED. Dear '+name.trim()+', your appointment ('+ref+') is booked at '+dept+' on '+bk.selectedDate+' at '+bk.selectedSlot+'. Please arrive 10 min early. Clinic: 07:00-17:00. Emergencies: 10177.';
-  var emailHtml = '<div style="font-family:inherit;max-width:520px;margin:0 auto"><div style="background:linear-gradient(135deg,#3b82f6,#2563eb);padding:24px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Confirmed</h2></div><div style="background:#f8fafc;padding:24px;border-radius:0 0 10px 10px"><p>Dear <strong>'+name.trim()+'</strong>,</p><table style="width:100%;border-collapse:collapse;margin:16px 0"><tr><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#94a3b8;font-size:13px">Reference</td><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#3b82f6">'+ref+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#94a3b8;font-size:13px">Department</td><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-weight:600">'+dept+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#94a3b8;font-size:13px">Date</td><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-weight:600">'+bk.selectedDate+'</td></tr><tr><td style="padding:8px 12px;color:#94a3b8;font-size:13px">Time</td><td style="padding:8px 12px;font-weight:600">'+bk.selectedSlot+'</td></tr></table><p style="font-size:13px;color:#475569">Please arrive 10 minutes before your appointment time.</p><p style="font-size:12px;color:#94a3b8">Johannesburg CHC · Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Emergencies: 10177</p></div></div>';
+  var emailHtml = '<div style="font-family:inherit;max-width:520px;margin:0 auto"><div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);padding:24px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Confirmed</h2></div><div style="background:#f4f5f0;padding:24px;border-radius:0 0 10px 10px"><p>Dear <strong>'+name.trim()+'</strong>,</p><table style="width:100%;border-collapse:collapse;margin:16px 0"><tr><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#777777;font-size:13px">Reference</td><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;font-weight:700;color:#0F6E56">'+ref+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#777777;font-size:13px">Department</td><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;font-weight:600">'+dept+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#777777;font-size:13px">Date</td><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;font-weight:600">'+bk.selectedDate+'</td></tr><tr><td style="padding:8px 12px;color:#777777;font-size:13px">Time</td><td style="padding:8px 12px;font-weight:600">'+bk.selectedSlot+'</td></tr></table><p style="font-size:13px;color:#555555">Please arrive 10 minutes before your appointment time.</p><p style="font-size:12px;color:#777777">Johannesburg CHC · Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Emergencies: 10177</p></div></div>';
   try {
     if(pt.phone) await API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:pt.phone,message:smsMsg})}).catch(function(){});
     if(pt.email) await API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:pt.email,subject:'NIHMS — Appointment confirmed: '+ref,html:emailHtml})}).catch(function(){});
@@ -3047,6 +3305,40 @@ window._rBookConfirm = async function() {
     result:{ name:name, ref:ref, dept:dept, date:bk.selectedDate, time:bk.selectedSlot, phone:pt.phone, email:pt.email }};
   _rRec();
   UI.showToast('Appointment '+ref+' confirmed','ok');
+};
+
+/* ── Send patient to nurse queue from done screen ── */
+window._rSendToNurse = function(token) {
+  var p = _R.queue.find(function(q){ return q.token === token; });
+  if (!p) { UI.showToast('Queue entry not found for ' + token, 'error'); return; }
+
+  p.status = 'at-nurse';
+
+  fetch(API_BASE + '/queue/' + (p._id || p.id), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('nihms_token') || '') },
+    body: JSON.stringify({ status: 'at-nurse' })
+  }).catch(function(){});
+
+  var nurseReq = {
+    id:          'REQ-' + token,
+    patientId:   p.patientId || p._id || '',
+    patientName: p.patientName || p.name || '',
+    age:         p.age || '—',
+    sex:         p.sex || p.gender || '—',
+    complaint:   p.complaint || 'Walk-in queue check-in',
+    priority:    p.priority || 'Normal',
+    requestedBy: 'Reception',
+    requestedAt: new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}),
+    notes:       'Patient ' + token + ' redirected to Nurse Station for vitals.',
+    seen:        false,
+    autoAccept:  true   /* skip Triage Requests — go straight to Vitals Queue */
+  };
+  _sendToNurseTab(nurseReq);
+
+  UI.showToast('\u2705 ' + (p.patientName || p.name || token) + ' sent to Nurse Queue', 'ok');
+  _R.tab = 'queue';
+  _rRec();
 };
 
 /* Queue */
@@ -3060,9 +3352,8 @@ window._rQueueAdvance = function(token, newStatus) {
   if(newStatus==='at-nurse') {
     var req={id:'REQ-'+token+'-adv',patientId:p.id,patientName:p.name,age:p.age||'—',sex:p.sex||'—',
       complaint:p.complaint||'Queue check-in',priority:p.priority==='urgent'?'Emergency':'Normal',
-      requestedBy:'Reception',requestedAt:_fmtTime(),notes:'Patient '+token+' sent to nurse station from queue.',seen:false};
-    if(window._nurseAddRequest) window._nurseAddRequest(req);
-    else{if(!window._NURSE_REQUESTS)window._NURSE_REQUESTS=[];window._NURSE_REQUESTS.push(req);}
+      requestedBy:'Reception',requestedAt:_fmtTime(),notes:'Patient '+token+' redirected to Nurse Station for vitals.',seen:false,autoAccept:true};
+    _sendToNurseTab(req);
   }
   _rRec();
   var labels={'at-nurse':'sent to nurses station','with-doctor':p.department==='Telemedicine'?'sent to telemedicine queue':'sent to doctor','done':'marked complete'};
@@ -3217,14 +3508,14 @@ window._rSendMsg = async function() {
               to: lastPt.email,
               subject: 'NIHMS — Message from Reception',
               html: '<div style="font-family:system-ui,Arial,sans-serif;max-width:480px;margin:0 auto">'
-                  + '<div style="background:linear-gradient(135deg,#0d9488,#0f766e);padding:20px;border-radius:12px 12px 0 0;text-align:center">'
+                  + '<div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);padding:20px;border-radius:12px 12px 0 0;text-align:center">'
                   + '<div style="font-size:24px;margin-bottom:6px">📩</div>'
                   + '<h2 style="color:#fff;margin:0;font-size:18px">Message from Reception</h2>'
                   + '<p style="color:rgba(255,255,255,.8);margin:4px 0 0;font-size:12px">Johannesburg CHC · NIHMS</p></div>'
-                  + '<div style="background:#f8fafc;padding:24px;border-radius:0 0 12px 12px">'
-                  + '<p style="font-size:15px;color:#0f172a;line-height:1.6;margin:0 0 16px">' + body + '</p>'
-                  + '<a href="https://nihms.netlify.app/patient" style="display:block;padding:12px;background:#0d9488;color:#fff;border-radius:10px;font-size:13px;font-weight:700;text-decoration:none;text-align:center">View your Patient Dashboard →</a>'
-                  + '<p style="font-size:11px;color:#94a3b8;margin:12px 0 0;text-align:center">NIHMS · Johannesburg CHC · Emergency: 10177</p>'
+                  + '<div style="background:#f4f5f0;padding:24px;border-radius:0 0 12px 12px">'
+                  + '<p style="font-size:15px;color:#111111;line-height:1.6;margin:0 0 16px">' + body + '</p>'
+                  + '<a href="https://nihms.netlify.app/patient" style="display:block;padding:12px;background:#0F6E56;color:#fff;border-radius:10px;font-size:13px;font-weight:700;text-decoration:none;text-align:center">View your Patient Dashboard →</a>'
+                  + '<p style="font-size:11px;color:#777777;margin:12px 0 0;text-align:center">NIHMS · Johannesburg CHC · Emergency: 10177</p>'
                   + '</div></div>',
               text: 'Message from NIHMS Reception: ' + body,
             })
@@ -3272,9 +3563,9 @@ function _bindAptEditGrid() {
     if (_R._editApt) _R._editApt._newTime = t;
     container.querySelectorAll('[data-edit-slot]').forEach(function(b) {
       var sel = b.getAttribute('data-edit-slot') === t;
-      b.style.border     = '1.5px solid ' + (sel ? '#3b82f6' : '#e2e8f0');
+      b.style.border     = '1.5px solid ' + (sel ? '#0F6E56' : '#e0e0e0');
       b.style.background = sel ? '#eff6ff' : '#fff';
-      b.style.color      = sel ? '#1d4ed8' : '#0f172a';
+      b.style.color      = sel ? '#185FA5' : '#111111';
       b.style.fontWeight = sel ? '700' : '400';
     });
     var lbl = document.getElementById('ae-selected-slot');
@@ -3291,8 +3582,8 @@ function _rBind() {
   /* Update tab nav highlights */
   document.querySelectorAll('[id^="rn-"]').forEach(function(btn){
     var t=btn.id.replace('rn-','');
-    btn.style.borderBottomColor=t===_R.tab?'#0d9488':'transparent';
-    btn.style.color=t===_R.tab?'#0d9488':'#64748b';
+    btn.style.borderBottomColor=t===_R.tab?'#0F6E56':'transparent';
+    btn.style.color=t===_R.tab?'#0F6E56':'#777777';
     btn.style.fontWeight=t===_R.tab?'700':'500';
   });
   /* Enter on ID inputs */
@@ -3305,6 +3596,18 @@ function _rBind() {
 /* Expose */
 window._rTab=_rTab;
 window._rRec=_rRec;
+
+/* Reset check-in to fresh search — called by "Check In Another Patient" button on dup banner */
+window._rResetCheckin = function() {
+  _R.tab = 'checkin';
+  _R.ci = { step:'search', id:'', patient:null, appt:null, dept:'General Consultation', result:null, notFound:false };
+  _rRec();
+  /* After re-render, focus the ID input */
+  setTimeout(function() {
+    var idInput = document.getElementById('ci-id');
+    if (idInput) { idInput.value = ''; idInput.focus(); }
+  }, 80);
+};
 
 window._rAptSaveEdit = async function() {
   var apt = _R._editApt;
@@ -3345,7 +3648,7 @@ window._rAptSaveEdit = async function() {
 
   /* ── Notify patient ── */
   var msg = 'NIHMS: Your appointment '+apt.ref+' has been updated. New details: '+dept+' on '+date+' at '+slot+'. Please arrive 10 minutes early. Johannesburg CHC.';
-  var emailHtml = '<div style="font-family:inherit;max-width:500px;margin:0 auto"><div style="background:#3b82f6;padding:20px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Updated</h2></div><div style="background:#f8fafc;padding:20px;border-radius:0 0 10px 10px"><p>Dear patient,</p><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Reference</td><td style="padding:8px;font-weight:700;color:#3b82f6">'+apt.ref+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Department</td><td style="padding:8px;font-weight:600">'+dept+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">New Date</td><td style="padding:8px;font-weight:600">'+date+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">New Time</td><td style="padding:8px;font-weight:600">'+slot+'</td></tr></table><p style="font-size:12px;color:#94a3b8;margin-top:16px">Please contact reception if you need to reschedule. Johannesburg CHC.</p></div></div>';
+  var emailHtml = '<div style="font-family:inherit;max-width:500px;margin:0 auto"><div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);padding:20px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Updated</h2></div><div style="background:#f4f5f0;padding:20px;border-radius:0 0 10px 10px"><p>Dear patient,</p><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;color:#777777;font-size:13px">Reference</td><td style="padding:8px;font-weight:700;color:#0F6E56">'+apt.ref+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">Department</td><td style="padding:8px;font-weight:600">'+dept+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">New Date</td><td style="padding:8px;font-weight:600">'+date+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">New Time</td><td style="padding:8px;font-weight:600">'+slot+'</td></tr></table><p style="font-size:12px;color:#777777;margin-top:16px">Please contact reception if you need to reschedule. Johannesburg CHC.</p></div></div>';
   try {
     if (apt.phone||apt.patientPhone) await API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:apt.phone||apt.patientPhone,message:msg})}).catch(function(){});
     if (apt.email||apt.patientEmail) await API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:apt.email||apt.patientEmail,subject:'NIHMS — Appointment updated: '+apt.ref,html:emailHtml})}).catch(function(){});
@@ -3428,12 +3731,12 @@ window._rSendVaxReminders = async function() {
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           '<div style="margin-bottom:24px">' +
-            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Patient Registration</div>' +
-            '<div style="font-size:15px;color:#64748b">Complete the patient profile then proceed to book the appointment.</div>' +
+            '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:6px">Patient Registration</div>' +
+            '<div style="font-size:15px;color:#777777">Complete the patient profile then proceed to book the appointment.</div>' +
           '</div>' +
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
-            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#3b82f6">' +
-              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#0F6E56">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
               '<span style="font-size:13px;font-weight:700">Register new patient</span>' +
             '</div>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
@@ -3447,18 +3750,18 @@ window._rSendVaxReminders = async function() {
               _frmInp('bk-reg-em','EMAIL','patient@email.com','email') +
             '</div>' +
             '<div style="margin-top:14px">' + _frmInp('bk-reg-addr','ADDRESS','Street address, suburb, city') + '</div>' +
-          '<div style="margin-top:16px;background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:16px">' +
+          '<div style="margin-top:16px;background:#fff;border-radius:12px;border:1px solid #e0e0e0;padding:16px">' +
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">' +
-              '<span style="font-size:12px;font-weight:700;color:#0f172a">📄 ID Document</span>' +
-              '<span style="font-size:11px;color:#94a3b8">(optional — JPG/PNG/PDF, max 5MB)</span>' +
+              '<span style="font-size:12px;font-weight:700;color:#111111">📄 ID Document</span>' +
+              '<span style="font-size:11px;color:#777777">(optional — JPG/PNG/PDF, max 5MB)</span>' +
             '</div>' +
             '<div id="nr-id-drop" onclick="document.getElementById(\'nr-id-file\').click()" ' +
-                 'ondragover="event.preventDefault();this.style.borderColor=\'#0d9488\'" ' +
-                 'ondragleave="this.style.borderColor=\'#e2e8f0\'" ' +
+                 'ondragover="event.preventDefault();this.style.borderColor=\'#0F6E56\'" ' +
+                 'ondragleave="this.style.borderColor=\'#e0e0e0\'" ' +
                  'ondrop="_rIdFileDrop(event)" ' +
-                 'style="border:2px dashed #e2e8f0;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#f9fafb">' +
+                 'style="border:2px dashed #e0e0e0;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#f9fafb">' +
               '<div>📄 Click to upload or drag & drop</div>' +
-              '<div style="font-size:11px;color:#94a3b8">JPG · PNG · PDF · Max 5 MB</div>' +
+              '<div style="font-size:11px;color:#777777">JPG · PNG · PDF · Max 5 MB</div>' +
               '<input id="nr-id-file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" ' +
                      'style="display:none" onchange="_rIdFileSelect(this)">' +
             '</div>' +
@@ -3466,13 +3769,37 @@ window._rSendVaxReminders = async function() {
           '</div>' +
           '</div>' +
           '<div style="display:flex;gap:10px;margin-top:14px">' +
-            '<button onclick="_rBookRegisterNew()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
+            '<button onclick="_rBookRegisterNew()" style="flex:1;padding:14px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
               '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>Register' +
             '</button>' +
-            '<button onclick="_R.bk.step=\'search\';_rRec()" style="padding:14px 24px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Back</button>' +
+            '<button onclick="_R.bk.step=\'search\';_rRec()" style="padding:14px 24px;border-radius:10px;border:1.5px solid #e0e0e0;background:#fff;color:#555555;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Back</button>' +
           '</div>' +
         '</div>' +
         _bkSidePanel() +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ══ STEP 2b: PATIENT FOUND ══ */
+  if (bk.step === 'found' && bk.patient) {
+    var pt0 = bk.patient;
+    var initials0 = (((pt0.firstName||pt0.name||'?')[0])+((pt0.lastName||'?')[0])).toUpperCase();
+    var fullName0 = (pt0.firstName ? (pt0.firstName+' '+(pt0.lastName||'')).trim() : (pt0.name||''));
+    return '<div style="padding:28px 32px">' + back +
+      '<div style="max-width:600px">' +
+        '<div style="background:#f0f0ec;border-radius:14px;border:1px solid #e0e0e0;padding:22px 24px;margin-bottom:16px">' +
+          '<div style="font-size:15px;font-weight:700;color:#111111;margin-bottom:4px">No appointment found for <span style="color:#0F6E56">'+fullName0+'</span></div>' +
+          '<div style="font-size:13px;color:#555555;margin-bottom:18px">You can book a new appointment now.</div>' +
+          '<button onclick="_R.bk.step=\'slot\';_rRec()" style="display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:50px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">' +
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
+            '+ Book Appointment Now' +
+          '</button>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:#fff;border-radius:14px;border:1.5px solid #99f6e4">' +
+          '<div style="width:40px;height:40px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">'+initials0+'</div>' +
+          '<div style="flex:1"><div style="font-size:15px;font-weight:700;color:#111111">'+fullName0+'</div><div style="font-size:13px;color:#555555">'+(pt0.phone||pt0.id||'')+'</div></div>' +
+          '<button onclick="_R.bk.step=\'search\';_R.bk.patient=null;_rRec()" style="font-size:13px;color:#0F6E56;border:none;background:transparent;cursor:pointer;font-family:inherit;text-decoration:underline">Change</button>' +
+        '</div>' +
       '</div>' +
     '</div>';
   }
@@ -3511,7 +3838,7 @@ window._rSendVaxReminders = async function() {
     var hintText = selDate ? (isSat?'Saturday · 07:00–13:00':isSun?'Closed':'Weekday · 07:00–17:00') : 'Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Sun closed';
 
     var slotGrid = !selDate
-      ? '<div style="padding:14px;background:#f8fafc;border-radius:8px;text-align:center;color:#94a3b8;font-size:13px">Select a date to see available slots</div>'
+      ? '<div style="padding:14px;background:#f4f5f0;border-radius:8px;text-align:center;color:#777777;font-size:13px">Select a date to see available slots</div>'
       : isSun
         ? '<div style="padding:14px;background:#fef2f2;border-radius:8px;text-align:center;color:#dc2626;font-size:13px;font-weight:600">⛔ Clinic closed on Sundays</div>'
         : availSlots.length === 0
@@ -3519,7 +3846,7 @@ window._rSendVaxReminders = async function() {
           : '<div id="bk-slot-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">' +
               availSlots.map(function(t){
                 var isSel = selSlot===t;
-                return '<button data-bkslot="'+t+'" style="padding:12px 8px;border-radius:8px;border:1.5px solid '+(isSel?'#3b82f6':'#e2e8f0')+';background:'+(isSel?'#eff6ff':'#fff')+';color:'+(isSel?'#3b82f6':'#0f172a')+';font-size:14px;font-weight:'+(isSel?'700':'500')+';cursor:pointer;font-family:inherit">'+t+'</button>';
+                return '<button data-bkslot="'+t+'" style="padding:12px 8px;border-radius:8px;border:1.5px solid '+(isSel?'#0F6E56':'#e0e0e0')+';background:'+(isSel?'#f0fdfa':'#fff')+';color:'+(isSel?'#0F6E56':'#111111')+';font-size:14px;font-weight:'+(isSel?'700':'500')+';cursor:pointer;font-family:inherit">'+t+'</button>';
               }).join('')+
             '</div>';
 
@@ -3527,27 +3854,27 @@ window._rSendVaxReminders = async function() {
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           '<div style="margin-bottom:24px">' +
-            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Book & Schedule</div>' +
-            '<div style="font-size:15px;color:#64748b">Select a department, date and slot for <strong>'+(pt.firstName||'')+' '+(pt.lastName||'')+'</strong>.</div>' +
+            '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:6px">Book & Schedule</div>' +
+            '<div style="font-size:15px;color:#777777">Select a department, date and slot for <strong>'+(pt.firstName||'')+' '+(pt.lastName||'')+'</strong>.</div>' +
           '</div>' +
 
           /* Patient pill */
-          '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:#eff6ff;border-radius:12px;border:1px solid #bfdbfe;margin-bottom:16px">' +
-            '<div style="width:38px;height:38px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">'+initials+'</div>' +
-            '<div style="flex:1"><div style="font-weight:700;font-size:14px;color:#0f172a">'+(pt.firstName||'')+' '+(pt.lastName||'')+'</div><div style="font-size:12px;color:#64748b">'+(pt.phone||pt.id||'')+'</div></div>' +
-            '<button onclick="_R.bk.step=\'search\';_R.bk.patient=null;_rRec()" style="font-size:13px;color:#3b82f6;border:none;background:transparent;cursor:pointer;font-family:inherit;text-decoration:underline">Change</button>' +
+          '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:#f0fdfa;border-radius:12px;border:1px solid #99f6e4;margin-bottom:16px">' +
+            '<div style="width:38px;height:38px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">'+initials+'</div>' +
+            '<div style="flex:1"><div style="font-weight:700;font-size:14px;color:#111111">'+(pt.firstName||'')+' '+(pt.lastName||'')+'</div><div style="font-size:12px;color:#777777">'+(pt.phone||pt.id||'')+'</div></div>' +
+            '<button onclick="_R.bk.step=\'search\';_R.bk.patient=null;_rRec()" style="font-size:13px;color:#0F6E56;border:none;background:transparent;cursor:pointer;font-family:inherit;text-decoration:underline">Change</button>' +
           '</div>' +
 
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">' +
             /* Date + visit type (dept merged in) */
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">' +
-              '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">DATE *</label>' +
-                '<input id="bk-slot-date" type="date" min="'+todayIso+'" value="'+selDate+'" onchange="_bkDateChange(this.value)" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#0f172a"></div>' +
+              '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#555555;margin-bottom:6px">DATE *</label>' +
+                '<input id="bk-slot-date" type="date" min="'+todayIso+'" value="'+selDate+'" onchange="_bkDateChange(this.value)" style="width:100%;padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;color:#111111"></div>' +
               _frmSel('bk-visit-type','VISIT TYPE / DEPARTMENT', DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};}), bk.dept||'General Consultation') +
             '</div>' +
             '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
-              '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569">AVAILABLE TIME SLOTS *</div>' +
-              '<div style="font-size:11px;color:#94a3b8">'+hintText+'</div>' +
+              '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#555555">AVAILABLE TIME SLOTS *</div>' +
+              '<div style="font-size:11px;color:#777777">'+hintText+'</div>' +
             '</div>' +
             slotGrid +
             (!selSlot && selDate && !isSun && availSlots.length>0
@@ -3558,7 +3885,7 @@ window._rSendVaxReminders = async function() {
         _bkSidePanel() +
       '</div>' +
       '<div style="padding:16px 0 0;margin-top:20px">' +
-        '<button onclick="_rBookConfirm()" style="width:100%;padding:16px;border-radius:12px;border:none;background:#3b82f6;color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:10px">' +
+        '<button onclick="_rBookConfirm()" style="width:100%;padding:16px;border-radius:50px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 4px 14px rgba(15,110,86,.25)">' +
           '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
           'Confirm Appointment' +
         '</button>' +
@@ -3579,30 +3906,30 @@ function _bkSidePanel() {
     .sort(function(a,b){ return ((a.date||'').slice(0,10)+a.time) > ((b.date||'').slice(0,10)+b.time) ? 1 : -1; })
     .slice(0,6);
   return '<div style="display:flex;flex-direction:column;gap:14px">' +
-    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
-      '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Upcoming Appointments</div>' +
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;overflow:hidden">' +
+      '<div style="padding:12px 16px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:700;color:#111111">Upcoming Appointments</div>' +
       (upcoming.length
         ? upcoming.map(function(a){
-            return '<div style="padding:9px 14px;border-bottom:1px solid #f8fafc">' +
+            return '<div style="padding:9px 14px;border-bottom:1px solid #f4f5f0">' +
               '<div style="display:flex;align-items:center;justify-content:space-between">' +
-                '<div style="font-size:12px;font-weight:600;color:#0f172a">'+(a.name||'Patient')+'</div>' +
-                '<div style="font-family:monospace;font-size:11px;color:#3b82f6">'+a.ref+'</div>' +
+                '<div style="font-size:12px;font-weight:600;color:#111111">'+(a.name||'Patient')+'</div>' +
+                '<div style="font-family:monospace;font-size:11px;color:#0F6E56">'+a.ref+'</div>' +
               '</div>' +
-              '<div style="font-size:11px;color:#94a3b8;margin-top:2px">'+a.dept+' · '+(a.date||'')+(a.time?' @ '+a.time:'')+'</div>' +
+              '<div style="font-size:11px;color:#777777;margin-top:2px">'+a.dept+' · '+(a.date||'')+(a.time?' @ '+a.time:'')+'</div>' +
             '</div>';
           }).join('')
-        : '<div style="padding:16px;text-align:center;font-size:13px;color:#94a3b8">No upcoming appointments</div>') +
+        : '<div style="padding:16px;text-align:center;font-size:13px;color:#777777">No upcoming appointments</div>') +
     '</div>' +
-    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:16px">' +
-      '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:10px">Dept. availability</div>' +
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:16px">' +
+      '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:10px">Dept. availability</div>' +
       DEPARTMENTS.slice(0,6).map(function(d){
         var booked = _R.appointments.filter(function(a){return a.dept===d.name&&(a.date||'').slice(0,10)===today&&a.status!=='cancelled';}).length;
         var pct    = Math.min(Math.round(booked/10*100),100);
         return '<div style="margin-bottom:8px">' +
           '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">' +
-            '<span style="color:#475569">'+d.name+'</span><span style="color:#94a3b8">'+booked+' booked</span>' +
+            '<span style="color:#555555">'+d.name+'</span><span style="color:#777777">'+booked+' booked</span>' +
           '</div>' +
-          '<div style="height:4px;background:#f1f5f9;border-radius:2px"><div style="height:4px;background:'+d.color+';border-radius:2px;width:'+pct+'%"></div></div>' +
+          '<div style="height:4px;background:#f0f1ec;border-radius:2px"><div style="height:4px;background:'+d.color+';border-radius:2px;width:'+pct+'%"></div></div>' +
         '</div>';
       }).join('') +
     '</div>' +
@@ -3628,9 +3955,9 @@ function _bindBkGrids() {
       _R.bk.selectedSlot = t;
       slotGrid.querySelectorAll('[data-bkslot]').forEach(function(b){
         var s = b.getAttribute('data-bkslot')===t;
-        b.style.border='1.5px solid '+(s?'#3b82f6':'#e2e8f0');
-        b.style.background=s?'#eff6ff':'#fff';
-        b.style.color=s?'#3b82f6':'#0f172a';
+        b.style.border='1.5px solid '+(s?'#0F6E56':'#e0e0e0');
+        b.style.background=s?'#f0fdfa':'#fff';
+        b.style.color=s?'#0F6E56':'#111111';
         b.style.fontWeight=s?'700':'500';
       });
       var errEl=document.getElementById('bk-slot-error');
@@ -3656,20 +3983,20 @@ function _rQueue() {
   var counts={ waiting:q.filter(function(p){return p.status==='waiting';}).length, 'at-nurse':q.filter(function(p){return p.status==='at-nurse';}).length, 'with-doctor':q.filter(function(p){return p.status==='with-doctor';}).length, done:q.filter(function(p){return p.status==='done';}).length };
 
   var statPills='<div style="display:flex;gap:10px;margin-bottom:14px">'+
-    [['waiting','Waiting','#d97706'],['at-nurse','At Nurse','#7c3aed'],['with-doctor','With Doctor','#0d9488'],['done','Done','#16a34a']].map(function(s){
-      return '<div style="padding:10px 16px;background:#fff;border-radius:10px;border:1px solid #e2e8f0;text-align:center;flex:1">'+
+    [['waiting','Waiting','#d97706'],['at-nurse','At Nurse','#7c3aed'],['with-doctor','With Doctor','#0F6E56'],['done','Done','#16a34a']].map(function(s){
+      return '<div style="padding:10px 16px;background:#fff;border-radius:10px;border:1px solid #e0e0e0;text-align:center;flex:1">'+
         '<div style="font-size:22px;font-weight:800;color:'+s[2]+'">'+counts[s[0]]+'</div>'+
-        '<div style="font-size:11px;color:#94a3b8">'+s[1]+'</div>'+
+        '<div style="font-size:11px;color:#777777">'+s[1]+'</div>'+
       '</div>';
     }).join('')+
   '</div>';
 
   var toolbar='<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:14px">'+
-    '<select onchange="_R.qDept=this.value;_rRec()" style="padding:7px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
+    '<select onchange="_R.qDept=this.value;_rRec()" style="padding:7px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
       '<option value="all">All Departments</option>'+
       DEPARTMENTS.map(function(d){return '<option value="'+d.name+'"'+(deptF===d.name?' selected':'')+'>'+d.name+'</option>';}).join('')+
     '</select>'+
-    '<select onchange="_R.qStatus=this.value;_rRec()" style="padding:7px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
+    '<select onchange="_R.qStatus=this.value;_rRec()" style="padding:7px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
       [['all','All Status'],['waiting','Waiting'],['at-nurse','At Nurse'],['with-doctor','With Doctor'],['done','Done']].map(function(o){
         return '<option value="'+o[0]+'"'+(statusF===o[0]?' selected':'')+'>'+o[1]+'</option>';
       }).join('')+
@@ -3684,16 +4011,16 @@ function _rQueue() {
     ?filtered.map(function(p,i){
         var pc=_priCfg(p.priority), sc=_stCfg(p.status);
         var wait=Math.floor((new Date()-new Date(p.checkedInAt))/60000);
-        return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9">'+
-          '<td style="padding:9px 14px;font-family:monospace;font-weight:700;font-size:13px;color:#0d9488">'+p.token+'</td>'+
-          '<td style="padding:9px 14px"><div style="font-weight:600;font-size:13px">'+p.name+'</div><div style="font-size:11px;color:#94a3b8">'+p.id+'</div></td>'+
-          '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+p.department+'</td>'+
+        return '<tr style="background:'+(i%2===0?'#fff':'#f4f5f0')+';border-bottom:1px solid #f0f1ec">'+
+          '<td style="padding:9px 14px;font-family:monospace;font-weight:700;font-size:13px;color:#0F6E56">'+p.token+'</td>'+
+          '<td style="padding:9px 14px"><div style="font-weight:600;font-size:13px">'+p.name+'</div><div style="font-size:11px;color:#777777">'+p.id+'</div></td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:#777777">'+p.department+'</td>'+
           '<td style="padding:9px 14px">'+_badge(pc.label,{color:pc.color,bg:pc.bg,border:pc.border})+'</td>'+
           '<td style="padding:9px 14px">'+_badge(sc.label,{color:sc.color,bg:sc.bg,border:sc.border})+'</td>'+
-          '<td style="padding:9px 14px;font-size:12px;color:'+(wait>20?'#dc2626':'#64748b')+';font-weight:'+(wait>20?'700':'400')+'">'+wait+' min</td>'+
-          '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+(
-            p.status==='at-nurse'?'🏥 Nurse Station':
-            p.status==='with-doctor'?'🩺 Consultation Room':
+          '<td style="padding:9px 14px;font-size:12px;color:'+(wait>20?'#dc2626':'#777777')+';font-weight:'+(wait>20?'700':'400')+'">'+wait+' min</td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:#777777">'+(
+            p.status==='at-nurse'?'🏥 At Nurse Station':
+            p.status==='with-doctor'?'🩺 In Consultation':
             p.status==='done'?'✓ Discharged':
             p.status==='waiting'?'⏳ Waiting Room':
             p.department==='Pharmacy Pickup'?'💊 Pharmacy':
@@ -3711,14 +4038,14 @@ function _rQueue() {
             }())+'</td>'+
         '</tr>';
       }).join('')
-    :'<tr><td colspan="7" style="padding:24px;text-align:center;color:#94a3b8;font-size:13px">No patients match the current filter</td></tr>';
+    :'<tr><td colspan="7" style="padding:24px;text-align:center;color:#777777;font-size:13px">No patients match the current filter</td></tr>';
 
   return '<div style="padding:20px">'+
     statPills+toolbar+deptCards+
     _card(
       '<table style="width:100%;border-collapse:collapse">'+
         '<thead><tr>'+['Token','Patient','Department','Priority','Status','Location','Wait','Action'].map(function(h){
-          return '<th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8">'+h+'</th>';
+          return '<th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#777777">'+h+'</th>';
         }).join('')+'</tr></thead><tbody>'+rows+'</tbody></table>','0')+
   '</div>';
 }
@@ -3758,20 +4085,20 @@ function _rAppointments() {
   window._calNav=navDate;
 
   /* Toolbar */
-  var toolbar='<div style="display:flex;align-items:center;gap:8px;padding:12px 20px;border-bottom:1px solid #e2e8f0;background:#fff;flex-shrink:0;flex-wrap:wrap">'+
-    '<button onclick="_calNav(-1)" style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:7px;background:#fff;cursor:pointer;font-size:14px">‹</button>'+
-    '<button onclick="_calNav(1)"  style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:7px;background:#fff;cursor:pointer;font-size:14px">›</button>'+
-    '<span style="font-size:14px;font-weight:700;color:#0f172a;min-width:220px">'+headerLabel()+'</span>'+
-    '<div style="display:flex;border:1.5px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-left:8px">'+
+  var toolbar='<div style="display:flex;align-items:center;gap:8px;padding:12px 20px;border-bottom:1px solid #e0e0e0;background:#fff;flex-shrink:0;flex-wrap:wrap">'+
+    '<button onclick="_calNav(-1)" style="padding:6px 10px;border:1.5px solid #e0e0e0;border-radius:7px;background:#fff;cursor:pointer;font-size:14px">‹</button>'+
+    '<button onclick="_calNav(1)"  style="padding:6px 10px;border:1.5px solid #e0e0e0;border-radius:7px;background:#fff;cursor:pointer;font-size:14px">›</button>'+
+    '<span style="font-size:14px;font-weight:700;color:#111111;min-width:220px">'+headerLabel()+'</span>'+
+    '<div style="display:flex;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;margin-left:8px">'+
       ['day','week','month','year'].map(function(v){
-        return '<button onclick="_R.calView=\''+v+'\';_rRec()" style="padding:6px 14px;border:none;background:'+(calView===v?'#0d9488':'#fff')+';color:'+(calView===v?'#fff':'#475569')+';font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">'+v.charAt(0).toUpperCase()+v.slice(1)+'</button>';
+        return '<button onclick="_R.calView=\''+v+'\';_rRec()" style="padding:6px 14px;border:none;background:'+(calView===v?'#0F6E56':'#fff')+';color:'+(calView===v?'#fff':'#555555')+';font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">'+v.charAt(0).toUpperCase()+v.slice(1)+'</button>';
       }).join('')+
     '</div>'+
-    '<select onchange="_R.calDept=this.value;_rRec()" style="padding:6px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;outline:none">'+
+    '<select onchange="_R.calDept=this.value;_rRec()" style="padding:6px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:12px;font-family:inherit;outline:none">'+
       '<option value="all">All Departments</option>'+
       DEPARTMENTS.map(function(d){return '<option value="'+d.name+'"'+(calDept===d.name?' selected':'')+'>'+d.name+'</option>';}).join('')+
     '</select>'+
-    '<button onclick="_rTab(\'book\')" style="margin-left:auto;display:flex;align-items:center;gap:5px;padding:7px 14px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"white\" stroke-width=\"2\"><line x1=\"12\" y1=\"5\" x2=\"12\" y2=\"19\"/><line x1=\"5\" y1=\"12\" x2=\"19\" y2=\"12\"/></svg> New appointment</button>'+
+    '<button onclick="_rTab(\'book\')" style="margin-left:auto;display:flex;align-items:center;gap:5px;padding:7px 14px;border-radius:8px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"white\" stroke-width=\"2\"><line x1=\"12\" y1=\"5\" x2=\"12\" y2=\"19\"/><line x1=\"5\" y1=\"12\" x2=\"19\" y2=\"12\"/></svg> New appointment</button>'+
   '</div>';
 
   /* Filter appointments */
@@ -3785,22 +4112,22 @@ function _rAppointments() {
     var dayStr=calDate.toISOString().slice(0,10);
     var isSunDay=calDate.getDay()===0;
     if(isSunDay){
-      cal='<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:16px">⛔ Clinic closed on Sundays</div>';
+      cal='<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#d0d0d0;font-size:16px">⛔ Clinic closed on Sundays</div>';
     } else {
       var dayApts=apts.filter(function(a){return a.date&&a.date.slice(0,10)===dayStr&&a.status!=='cancelled';});
       cal='<div style="flex:1;overflow:auto"><table style="width:100%;border-collapse:collapse">'+
-        '<thead><tr><th style="width:60px;padding:8px;border-right:1px solid #f1f5f9;border-bottom:1px solid #e2e8f0"></th>'+
-        '<th style="padding:10px;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:700;color:#0d9488">'+calDate.toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long'})+'</th></tr></thead><tbody>'+
+        '<thead><tr><th style="width:60px;padding:8px;border-right:1px solid #f0f1ec;border-bottom:1px solid #e0e0e0"></th>'+
+        '<th style="padding:10px;border-bottom:1px solid #e0e0e0;font-size:13px;font-weight:700;color:#0F6E56">'+calDate.toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long'})+'</th></tr></thead><tbody>'+
         HOURS.map(function(h){
           var hNum=parseInt(h);
           var slotApts=dayApts.filter(function(a){return parseInt((a.time||'0').split(':')[0])===hNum;});
-          return '<tr><td style="padding:4px 8px;border-right:1px solid #f1f5f9;border-top:1px solid #f8fafc;font-size:10px;color:#cbd5e1;white-space:nowrap;vertical-align:top">'+h+'</td>'+
-            '<td style="padding:3px;border-top:1px solid #f8fafc;vertical-align:top;min-height:40px">'+
+          return '<tr><td style="padding:4px 8px;border-right:1px solid #f0f1ec;border-top:1px solid #f4f5f0;font-size:10px;color:#d0d0d0;white-space:nowrap;vertical-align:top">'+h+'</td>'+
+            '<td style="padding:3px;border-top:1px solid #f4f5f0;vertical-align:top;min-height:40px">'+
             slotApts.map(function(a){
-              var col={booked:'#3b82f6',walkin:'#0d9488',emergency:'#dc2626'}[a.type]||'#3b82f6';
+              var col={booked:'#1A4A9B',walkin:'#0F6E56',emergency:'#dc2626'}[a.type]||'#1A4A9B';
               return '<div style="background:'+col+'18;border-left:3px solid '+col+';border-radius:5px;padding:6px 10px;margin-bottom:3px;cursor:pointer" onclick="_rAptEdit(\''+a.id+'\')">' +
                 '<div style="font-size:12px;font-weight:700;color:'+col+'">'+(a.name||'Patient')+'</div>' +
-                '<div style="font-size:11px;color:#64748b">'+a.time+' · '+(a.dept||'')+'</div>' +
+                '<div style="font-size:11px;color:#777777">'+a.time+' · '+(a.dept||'')+'</div>' +
               '</div>';
             }).join('')+
             '</td></tr>';
@@ -3826,7 +4153,7 @@ function _rAppointments() {
     cal='<div style="flex:1;overflow:auto;padding:8px">'+
       '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-bottom:4px">'+
         ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(function(d,i){
-          return '<div style="padding:6px;text-align:center;font-size:11px;font-weight:700;color:'+(i===6?'#cbd5e1':'#475569')+'">'+d+'</div>';
+          return '<div style="padding:6px;text-align:center;font-size:11px;font-weight:700;color:'+(i===6?'#d0d0d0':'#555555')+'">'+d+'</div>';
         }).join('')+
       '</div>'+
       weeks.map(function(wk){
@@ -3837,13 +4164,13 @@ function _rAppointments() {
             var isSunM=d.getDay()===0;
             var isToday=d.toDateString()===todayMs;
             var dayApts=apts.filter(function(a){return a.date&&a.date.slice(0,10)===ds&&a.status!=='cancelled';});
-            return '<div style="min-height:64px;border-radius:4px;padding:4px;background:'+(isSunM?'#f9fafb':isToday?'#f0fdfa':'#fff')+';border:1px solid '+(isToday?'#0d9488':'#f1f5f9')+'">'+
-              '<div style="font-size:11px;font-weight:700;margin-bottom:2px;color:'+(isSunM?'#cbd5e1':isToday?'#0d9488':'#475569')+'">'+d.getDate()+'</div>'+
+            return '<div style="min-height:64px;border-radius:4px;padding:4px;background:'+(isSunM?'#f9fafb':isToday?'#f0fdfa':'#fff')+';border:1px solid '+(isToday?'#0F6E56':'#f0f1ec')+'">'+
+              '<div style="font-size:11px;font-weight:700;margin-bottom:2px;color:'+(isSunM?'#d0d0d0':isToday?'#0F6E56':'#555555')+'">'+d.getDate()+'</div>'+
               dayApts.slice(0,3).map(function(a){
-                var col={booked:'#3b82f6',walkin:'#0d9488',emergency:'#dc2626'}[a.type]||'#3b82f6';
+                var col={booked:'#1A4A9B',walkin:'#0F6E56',emergency:'#dc2626'}[a.type]||'#1A4A9B';
                 return '<div style="font-size:9px;font-weight:600;color:'+col+';background:'+col+'15;border-radius:3px;padding:1px 4px;margin-bottom:1px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer" onclick="_rAptEdit(\''+a.id+'\')">'+(a.name||'Patient')+'</div>';
               }).join('')+
-              (dayApts.length>3?'<div style="font-size:9px;color:#94a3b8">+' +(dayApts.length-3)+' more</div>':'')+
+              (dayApts.length>3?'<div style="font-size:9px;color:#777777">+' +(dayApts.length-3)+' more</div>':'')+
             '</div>';
           }).join('')+
         '</div>';
@@ -3859,10 +4186,10 @@ function _rAppointments() {
       MONTHS.map(function(mn,mi){
         var mApts=apts.filter(function(a){return a.date&&parseInt(a.date.slice(5,7))-1===mi&&parseInt(a.date.slice(0,4))===calDate.getFullYear()&&a.status!=='cancelled';}).length;
         var isNow=mi===new Date().getMonth()&&calDate.getFullYear()===new Date().getFullYear();
-        return '<button onclick="_R.calDate=new Date('+calDate.getFullYear()+','+(mi)+',1);_R.calView=\'month\';_rRec()" style="background:'+(isNow?'#f0fdfa':'#fff')+';border:1.5px solid '+(isNow?'#0d9488':'#e2e8f0')+';border-radius:10px;padding:16px;cursor:pointer;font-family:inherit;text-align:left">'+
-          '<div style="font-size:13px;font-weight:700;color:'+(isNow?'#0d9488':'#0f172a')+'">'+mn+'</div>'+
-          '<div style="font-size:22px;font-weight:800;color:'+(mApts>0?'#3b82f6':'#e2e8f0');+';margin-top:6px">'+mApts+'</div>'+
-          '<div style="font-size:11px;color:#94a3b8">appointment'+(mApts===1?'':'s')+'</div>'+
+        return '<button onclick="_R.calDate=new Date('+calDate.getFullYear()+','+(mi)+',1);_R.calView=\'month\';_rRec()" style="background:'+(isNow?'#f0fdfa':'#fff')+';border:1.5px solid '+(isNow?'#0F6E56':'#e0e0e0')+';border-radius:10px;padding:16px;cursor:pointer;font-family:inherit;text-align:left">'+
+          '<div style="font-size:13px;font-weight:700;color:'+(isNow?'#0F6E56':'#111111')+'">'+mn+'</div>'+
+          '<div style="font-size:22px;font-weight:800;color:'+(mApts>0?'#0F6E56':'#e0e0e0');+';margin-top:6px">'+mApts+'</div>'+
+          '<div style="font-size:11px;color:#777777">appointment'+(mApts===1?'':'s')+'</div>'+
         '</button>';
       }).join('')+
       '</div></div>';
@@ -3877,18 +4204,18 @@ function _rAppointments() {
 
     cal='<div style="overflow:auto;flex:1"><table style="width:100%;border-collapse:collapse;min-width:700px">'+
       '<thead><tr>'+
-        '<th style="width:60px;padding:8px;border-right:1px solid #f1f5f9;border-bottom:1px solid #e2e8f0;font-size:10px;color:#94a3b8"></th>'+
+        '<th style="width:60px;padding:8px;border-right:1px solid #f0f1ec;border-bottom:1px solid #e0e0e0;font-size:10px;color:#777777"></th>'+
         days.map(function(d){
           var isT=d.toDateString()===today;
           var isSunH=d.getDay()===0;
-          return '<th style="padding:10px 6px;border-left:1px solid #f1f5f9;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:700;color:'+(isT?'#0d9488':isSunH?'#cbd5e1':'#475569')+';background:'+(isT?'#f0fdfa':isSunH?'#f9fafb':'#fff')+'">'+
-            DAYS_ABBR[d.getDay()]+' '+d.getDate()+(isSunH?' <span style="font-size:9px;font-weight:400;color:#e2e8f0">Closed</span>':'')+
+          return '<th style="padding:10px 6px;border-left:1px solid #f0f1ec;border-bottom:1px solid #e0e0e0;font-size:12px;font-weight:700;color:'+(isT?'#0F6E56':isSunH?'#d0d0d0':'#555555')+';background:'+(isT?'#f0fdfa':isSunH?'#f9fafb':'#fff')+'">'+
+            DAYS_ABBR[d.getDay()]+' '+d.getDate()+(isSunH?' <span style="font-size:9px;font-weight:400;color:#e0e0e0">Closed</span>':'')+
           '</th>';
         }).join('')+
       '</tr></thead><tbody>'+
       HOURS.map(function(h){
         return '<tr>'+
-          '<td style="padding:4px 8px;border-right:1px solid #f1f5f9;border-top:1px solid #f8fafc;font-size:10px;color:#cbd5e1;vertical-align:top;white-space:nowrap">'+h+'</td>'+
+          '<td style="padding:4px 8px;border-right:1px solid #f0f1ec;border-top:1px solid #f4f5f0;font-size:10px;color:#d0d0d0;vertical-align:top;white-space:nowrap">'+h+'</td>'+
           days.map(function(d){
             var dateStr=d.toISOString().slice(0,10);
             /* Match bookings whose time falls within this hour row */
@@ -3902,16 +4229,16 @@ function _rAppointments() {
             });
             var isSun = d.getDay()===0;
             var cellBg = isSun ? 'background:#f9fafb' : '';
-            return '<td style="padding:3px;border-left:1px solid #f1f5f9;border-top:1px solid #f8fafc;vertical-align:top;min-height:36px;'+cellBg+'">'+
+            return '<td style="padding:3px;border-left:1px solid #f0f1ec;border-top:1px solid #f4f5f0;vertical-align:top;min-height:36px;'+cellBg+'">'+
               dayApts.map(function(apt){
-                var typeColors={booked:'#3b82f6',walkin:'#0d9488',emergency:'#dc2626'};
-                var col=typeColors[apt.type]||'#3b82f6';
+                var typeColors={booked:'#1A4A9B',walkin:'#0F6E56',emergency:'#dc2626'};
+                var col=typeColors[apt.type]||'#1A4A9B';
                 return '<div style="background:'+col+'18;border-left:3px solid '+col+';border-radius:4px;padding:4px 6px;margin-bottom:2px;cursor:pointer" onclick="_rAptEdit(\''+apt.id+'\')">' +
                   '<div style="font-size:10px;font-weight:700;color:'+col+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(apt.name||'Patient')+'</div>' +
-                  '<div style="font-size:9px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+apt.time+' · '+(apt.dept||'')+'</div>' +
+                  '<div style="font-size:9px;color:#777777;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+apt.time+' · '+(apt.dept||'')+'</div>' +
                 '</div>';
               }).join('') +
-              (isSun && dayApts.length===0 ? '<div style="font-size:9px;color:#e2e8f0;text-align:center;padding-top:8px">—</div>' : '') +
+              (isSun && dayApts.length===0 ? '<div style="font-size:9px;color:#e0e0e0;text-align:center;padding-top:8px">—</div>' : '') +
             '</td>';
           }).join('')+
         '</tr>';
@@ -3921,20 +4248,20 @@ function _rAppointments() {
 
   /* Appointments list */
   var listRows=apts.map(function(a,i){
-    var typeColor={booked:{bg:'#f0fdf4',c:'#16a34a',b:'#86efac'},walkin:{bg:'#eff6ff',c:'#1d4ed8',b:'#bfdbfe'},emergency:{bg:'#fef2f2',c:'#dc2626',b:'#fca5a5'}};
+    var typeColor={booked:{bg:'#f0fdf4',c:'#16a34a',b:'#86efac'},walkin:{bg:'#f0fdfa',c:'#1A4A9B',b:'#99f6e4'},emergency:{bg:'#fef2f2',c:'#dc2626',b:'#fca5a5'}};
     var tc=typeColor[a.type]||typeColor.booked;
     var cancelled=a.status==='cancelled';
-    return '<tr style="background:'+(cancelled?'#f9fafb':i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9;opacity:'+(cancelled?'.55':'1')+'">'+
-      '<td style="padding:9px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#64748b">'+a.ref+'</td>'+
+    return '<tr style="background:'+(cancelled?'#f9fafb':i%2===0?'#fff':'#f4f5f0')+';border-bottom:1px solid #f0f1ec;opacity:'+(cancelled?'.55':'1')+'">'+
+      '<td style="padding:9px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#777777">'+a.ref+'</td>'+
       '<td style="padding:9px 14px;font-weight:600;font-size:13px">'+(a.name||'—')+'</td>'+
-      '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+(a.dept||'—')+'</td>'+
-      '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+(a.date||'')+' '+a.time+'</td>'+
+      '<td style="padding:9px 14px;font-size:12px;color:#777777">'+(a.dept||'—')+'</td>'+
+      '<td style="padding:9px 14px;font-size:12px;color:#777777">'+(a.date||'')+' '+a.time+'</td>'+
       '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+tc.bg+';color:'+tc.c+';border:1px solid '+tc.b+'">'+a.type+'</span></td>'+
       '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+(cancelled?'#f9fafb':a.verified?'#f0fdf4':'#fffbeb')+';color:'+(cancelled?'#9ca3af':a.verified?'#16a34a':'#b45309')+';border:1px solid '+(cancelled?'#e5e7eb':a.verified?'#86efac':'#fcd34d')+'">'+(cancelled?'Cancelled':a.verified?'Verified':'Pending')+'</span></td>'+
       '<td style="padding:9px 14px">'+
         (!cancelled?
           '<div style="display:flex;gap:5px">'+
-            '<button onclick="_rAptEdit(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #bfdbfe;color:#1d4ed8;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Edit</button>'+
+            '<button onclick="_rAptEdit(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid rgba(26,74,155,.35);color:#1A4A9B;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Edit</button>'+
             '<button onclick="_rAptCancel(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #fca5a5;color:#dc2626;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Cancel</button>'+
           '</div>':
           '<span style="font-size:11px;color:#9ca3af">Cancelled</span>')+
@@ -3949,22 +4276,22 @@ function _rAppointments() {
       var todayStr = new Date().toISOString().slice(0,10);
       var todayApts = apts.filter(function(a){return a.date===todayStr&&a.status!=='cancelled';});
       var todayRows = todayApts.map(function(a,i){
-        var typeColor={booked:{bg:'#f0fdf4',c:'#16a34a',b:'#86efac'},walkin:{bg:'#eff6ff',c:'#1d4ed8',b:'#bfdbfe'},emergency:{bg:'#fef2f2',c:'#dc2626',b:'#fca5a5'}};
+        var typeColor={booked:{bg:'#f0fdf4',c:'#16a34a',b:'#86efac'},walkin:{bg:'#f0fdfa',c:'#1A4A9B',b:'#99f6e4'},emergency:{bg:'#fef2f2',c:'#dc2626',b:'#fca5a5'}};
         var tc=typeColor[a.type]||typeColor.booked;
-        return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9">'+
-          '<td style="padding:9px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#64748b">'+a.ref+'</td>'+
+        return '<tr style="background:'+(i%2===0?'#fff':'#f4f5f0')+';border-bottom:1px solid #f0f1ec">'+
+          '<td style="padding:9px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#777777">'+a.ref+'</td>'+
           '<td style="padding:9px 14px;font-weight:600;font-size:13px">'+(a.name||'—')+'</td>'+
-          '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+(a.dept||'—')+'</td>'+
-          '<td style="padding:9px 14px;font-size:12px;color:#64748b">'+a.time+'</td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:#777777">'+(a.dept||'—')+'</td>'+
+          '<td style="padding:9px 14px;font-size:12px;color:#777777">'+a.time+'</td>'+
           '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+tc.bg+';color:'+tc.c+';border:1px solid '+tc.b+'">'+a.type+'</span></td>'+
           '<td style="padding:9px 14px"><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:'+(a.verified?'#f0fdf4':'#fffbeb')+';color:'+(a.verified?'#16a34a':'#b45309')+';border:1px solid '+(a.verified?'#86efac':'#fcd34d')+'">'+(a.verified?'Verified':'Pending')+'</span></td>'+
-          '<td style="padding:9px 14px"><div style="display:flex;gap:5px"><button onclick="_rAptEdit(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #bfdbfe;color:#1d4ed8;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Edit</button><button onclick="_rAptCancel(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #fca5a5;color:#dc2626;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Cancel</button></div></td>'+
+          '<td style="padding:9px 14px"><div style="display:flex;gap:5px"><button onclick="_rAptEdit(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid rgba(26,74,155,.35);color:#1A4A9B;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Edit</button><button onclick="_rAptCancel(\''+a.id+'\')" style="padding:4px 10px;border-radius:6px;border:1px solid #fca5a5;color:#dc2626;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">Cancel</button></div></td>'+
         '</tr>';
       }).join('');
-      return _card('<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:10px">Today\'s Appointments ('+todayApts.length+')</div>'+
+      return _card('<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:10px">Today\'s Appointments ('+todayApts.length+')</div>'+
         (todayApts.length?
-          '<table style="width:100%;border-collapse:collapse"><thead><tr>'+['Ref','Patient','Department','Time','Type','Status','Actions'].map(function(h){return '<th style="padding:7px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+todayRows+'</tbody></table>':
-          '<div style="padding:16px;text-align:center;color:#94a3b8;font-size:13px">No appointments scheduled for today</div>'),
+          '<table style="width:100%;border-collapse:collapse"><thead><tr>'+['Ref','Patient','Department','Time','Type','Status','Actions'].map(function(h){return '<th style="padding:7px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#777777">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+todayRows+'</tbody></table>':
+          '<div style="padding:16px;text-align:center;color:#777777;font-size:13px">No appointments scheduled for today</div>'),
         '0');
     })()+
     '</div>'+
@@ -3981,8 +4308,8 @@ function _rEmergency() {
   var form=_card(
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">'+
       '<div style="width:42px;height:42px;border-radius:12px;background:#dc2626;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+_svgIcon('bolt')+'</div>'+
-      '<div><div style="font-size:16px;font-weight:800;color:#0f172a">Emergency Intake</div>'+
-      '<div style="font-size:13px;color:#64748b">Fast-track a patient to the emergency queue</div></div>'+
+      '<div><div style="font-size:16px;font-weight:800;color:#111111">Emergency Intake</div>'+
+      '<div style="font-size:13px;color:#777777">Fast-track a patient to the emergency queue</div></div>'+
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'+
       _inp('em-id','SA ID / Passport','e.g. 8203041234083',em.emId)+
@@ -3990,8 +4317,8 @@ function _rEmergency() {
     '</div>'+
     _sel('em-dept','Department',DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};}),em.emDept)+
     '<div style="margin-top:12px">'+
-      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Chief Complaint</label>'+
-      '<textarea id="em-desc" rows="2" placeholder="Brief emergency description…" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box">'+( em.emDesc||'')+'</textarea>'+
+      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#555555;margin-bottom:5px">Chief Complaint</label>'+
+      '<textarea id="em-desc" rows="2" placeholder="Brief emergency description…" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box">'+( em.emDesc||'')+'</textarea>'+
     '</div>'+
     '<div style="margin-top:14px">'+
       _pBtn('Issue Emergency Token','_rEmergencyIssue()','#dc2626')+
@@ -4002,11 +4329,11 @@ function _rEmergency() {
     ?recent.map(function(p){
       return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:8px;margin-bottom:6px">'+
         '<span style="font-family:monospace;font-weight:800;color:#dc2626;font-size:15px">'+p.token+'</span>'+
-        '<div style="flex:1"><div style="font-size:12px;font-weight:600">'+p.name+'</div><div style="font-size:11px;color:#94a3b8">'+p.department+'</div></div>'+
+        '<div style="flex:1"><div style="font-size:12px;font-weight:600">'+p.name+'</div><div style="font-size:11px;color:#777777">'+p.department+'</div></div>'+
         _badge('Emergency',{color:'#dc2626',bg:'#fef2f2',border:'#fca5a5'})+
       '</div>';
     }).join('')
-    :'<div style="padding:16px;text-align:center;color:#94a3b8;font-size:13px;background:#f8fafc;border-radius:8px;border:1px dashed #e2e8f0">No emergency tokens today</div>';
+    :'<div style="padding:16px;text-align:center;color:#777777;font-size:13px;background:#f4f5f0;border-radius:8px;border:1px dashed #e0e0e0">No emergency tokens today</div>';
 
   return '<div style="padding:20px;max-width:900px">'+
     '<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:20px">'+
@@ -4033,42 +4360,42 @@ function _rMessaging() {
   var msgHist=_R.messages;
 
   var sendForm=_card(
-    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:14px">Send Message</div>'+
+    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#777777;margin-bottom:14px">Send Message</div>'+
     _sel('msg-to','To',recipients.map(function(r){return {v:r.v,label:r.label};}),_R.msgTo)+
     '<div style="margin-top:12px;margin-bottom:12px">'+
-      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Message</label>'+
-      '<textarea id="msg-body" rows="4" placeholder="Type your message…" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;resize:none;outline:none;box-sizing:border-box">'+(_R.msgBody||'')+'</textarea>'+
+      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#555555;margin-bottom:5px">Message</label>'+
+      '<textarea id="msg-body" rows="4" placeholder="Type your message…" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;resize:none;outline:none;box-sizing:border-box">'+(_R.msgBody||'')+'</textarea>'+
     '</div>'+
-    '<button onclick="_rSendMsg()" style="width:100%;padding:11px;border-radius:9px;border:none;background:#0d9488;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Send Message</button>'
+    '<button onclick="_rSendMsg()" style="width:100%;padding:11px;border-radius:50px;border:none;background:#0F6E56;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Send Message</button>'
   );
 
   var histHtml=_card(
-    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:10px">Message History</div>'+
+    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#777777;margin-bottom:10px">Message History</div>'+
     (msgHist.length
       ?'<div style="display:flex;flex-direction:column;gap:0">'+
         msgHist.map(function(m){
-          return '<div style="padding:12px 14px;border-top:1px solid #f1f5f9;'+(m.read?'':'background:#f0fdfa')+'">'+
+          return '<div style="padding:12px 14px;border-top:1px solid #f0f1ec;'+(m.read?'':'background:#f0fdfa')+'">'+
             '<div style="display:flex;justify-content:space-between;margin-bottom:4px">'+
-              '<span style="font-size:12px;font-weight:700;color:#0f172a">'+m.from+'</span>'+
-              '<span style="font-size:11px;color:#94a3b8">'+m.time+'</span>'+
+              '<span style="font-size:12px;font-weight:700;color:#111111">'+m.from+'</span>'+
+              '<span style="font-size:11px;color:#777777">'+m.time+'</span>'+
             '</div>'+
-            '<div style="font-size:13px;color:#475569">'+m.text+'</div>'+
-            (!m.read?'<span style="display:inline-block;margin-top:5px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#f0fdfa;color:#0d9488;border:1px solid #99f6e4">Unread</span>':'')+
+            '<div style="font-size:13px;color:#555555">'+m.text+'</div>'+
+            (!m.read?'<span style="display:inline-block;margin-top:5px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#f0fdfa;color:#0F6E56;border:1px solid #99f6e4">Unread</span>':'')+
           '</div>';
         }).join('')+'</div>'
-      :'<div style="padding:20px;text-align:center;color:#94a3b8;font-size:13px">No messages yet</div>'),
+      :'<div style="padding:20px;text-align:center;color:#777777;font-size:13px">No messages yet</div>'),
     '0'
   );
 
   /* Upcoming vaccination reminder form */
   var vaxReminderForm = _card(
-    '<div style="font-size:13px;font-weight:700;color:#2563eb;margin-bottom:12px">💉 Send Vaccination Reminders</div>'+
-    '<div style="font-size:12px;color:#64748b;margin-bottom:10px">Send upcoming vaccination reminders to patients scheduled for immunisations.</div>'+
+    '<div style="font-size:13px;font-weight:700;color:#0F6E56;margin-bottom:12px">💉 Send Vaccination Reminders</div>'+
+    '<div style="font-size:12px;color:#777777;margin-bottom:10px">Send upcoming vaccination reminders to patients scheduled for immunisations.</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
       _sel('vax-remind-days','Send reminders for appointments within',[{v:'1',label:'Tomorrow'},{v:'3',label:'Next 3 days'},{v:'7',label:'Next 7 days'},{v:'14',label:'Next 14 days'}],'7')+
       _sel('vax-remind-type','Department',[{v:'Immunisation',label:'Immunisation only'},{v:'all',label:'All departments'}],'Immunisation')+
     '</div>'+
-    '<button onclick="_rSendVaxReminders()" style="display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:9px;border:none;background:#2563eb;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">💉 Send Vaccination Reminders</button>'
+    '<button onclick="_rSendVaxReminders()" style="display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:50px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">💉 Send Vaccination Reminders</button>'
   );
 
   /* Delay notification form */
@@ -4080,7 +4407,7 @@ function _rMessaging() {
     '</div>'+
     _inp('delay-reason','Reason (optional)','e.g. Doctor running late','','text')+
     '<div style="margin-top:10px">'+
-      '<button onclick="_rSendDelay()" style="display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:9px;border:none;background:#d97706;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'+_svgIcon('clock')+' Send Delay Notification</button>'+
+      '<button onclick="_rSendDelay()" style="display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:50px;border:none;background:#d97706;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'+_svgIcon('clock')+' Send Delay Notification</button>'+
     '</div>'
   );
 
@@ -4099,7 +4426,7 @@ function _rAnalytics() {
   var noShow=q.filter(function(p){return p.status==='no-show';});
 
   var kpis=[
-    {label:'Total Patients',value:q.length,      color:'#0d9488'},
+    {label:'Total Patients',value:q.length,      color:'#0F6E56'},
     {label:'Avg Wait (min)', value:avgWait,        color:'#f59e0b'},
     {label:'Completed',      value:done.length,    color:'#10b981'},
     {label:'No-shows',       value:noShow.length,  color:'#ef4444'},
@@ -4107,21 +4434,21 @@ function _rAnalytics() {
 
   var kpiHtml='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">'+
     kpis.map(function(k){
-      return _card('<div style="text-align:center"><div style="font-size:32px;font-weight:800;margin-bottom:4px;color:'+k.color+'">'+k.value+'</div><div style="font-size:12px;color:#94a3b8">'+k.label+'</div></div>');
+      return _card('<div style="text-align:center"><div style="font-size:32px;font-weight:800;margin-bottom:4px;color:'+k.color+'">'+k.value+'</div><div style="font-size:12px;color:#777777">'+k.label+'</div></div>');
     }).join('')+'</div>';
 
   /* Hourly bar chart */
   var hourly=[{h:'07',n:4},{h:'08',n:9},{h:'09',n:14},{h:'10',n:11},{h:'11',n:8},{h:'12',n:6},{h:'13',n:7},{h:'14',n:5},{h:'15',n:3}];
   var maxN=Math.max.apply(null,hourly.map(function(r){return r.n;}));
   var barChart=_card(
-    '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">Patients per Hour</div>'+
+    '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:14px">Patients per Hour</div>'+
     '<div style="display:flex;align-items:flex-end;gap:6px;height:120px">'+
       hourly.map(function(r){
         var pct=maxN?Math.round(r.n/maxN*100):0;
         return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">'+
-          '<div style="font-size:10px;color:#64748b">'+r.n+'</div>'+
-          '<div style="width:100%;background:#0d9488;border-radius:4px 4px 0 0;height:'+pct+'%"></div>'+
-          '<div style="font-size:9px;color:#94a3b8">'+r.h+':00</div>'+
+          '<div style="font-size:10px;color:#777777">'+r.n+'</div>'+
+          '<div style="width:100%;background:#0F6E56;border-radius:4px 4px 0 0;height:'+pct+'%"></div>'+
+          '<div style="font-size:9px;color:#777777">'+r.h+':00</div>'+
         '</div>';
       }).join('')+
     '</div>'
@@ -4135,19 +4462,19 @@ function _rAnalytics() {
   }).filter(function(d){return d.n>0;}).sort(function(a,b){return b.n-a.n;});
 
   var deptChart=_card(
-    '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">Patients by Department</div>'+
+    '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:14px">Patients by Department</div>'+
     (deptBreak.length
       ?deptBreak.map(function(d){
         return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
           '<span style="width:8px;height:8px;border-radius:50%;background:'+d.color+';flex-shrink:0"></span>'+
-          '<span style="flex:1;font-size:12px;color:#475569">'+d.name+'</span>'+
-          '<span style="font-size:12px;font-weight:700;color:#0f172a;width:24px;text-align:right">'+d.n+'</span>'+
-          '<div style="width:80px;height:5px;border-radius:3px;background:#f1f5f9;overflow:hidden">'+
+          '<span style="flex:1;font-size:12px;color:#555555">'+d.name+'</span>'+
+          '<span style="font-size:12px;font-weight:700;color:#111111;width:24px;text-align:right">'+d.n+'</span>'+
+          '<div style="width:80px;height:5px;border-radius:3px;background:#f0f1ec;overflow:hidden">'+
             '<div style="height:100%;background:'+d.color+';border-radius:3px;width:'+d.pct+'%"></div>'+
           '</div>'+
         '</div>';
       }).join('')
-      :'<div style="font-size:13px;color:#94a3b8;text-align:center;padding:16px">No data yet</div>')
+      :'<div style="font-size:13px;color:#777777;text-align:center;padding:16px">No data yet</div>')
   );
 
   /* Wait time distribution */
@@ -4160,19 +4487,19 @@ function _rAnalytics() {
     else waitBuckets[3][1]++;
   });
   var waitChart=_card(
-    '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">Wait Time Distribution</div>'+
+    '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:14px">Wait Time Distribution</div>'+
     (q.length
       ?waitBuckets.map(function(b){
         var pct=q.length?Math.round(b[1]/q.length*100):0;
         return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
-          '<span style="font-size:12px;color:#475569;width:70px;flex-shrink:0">'+b[0]+'</span>'+
-          '<div style="flex:1;height:8px;border-radius:4px;background:#f1f5f9;overflow:hidden">'+
+          '<span style="font-size:12px;color:#555555;width:70px;flex-shrink:0">'+b[0]+'</span>'+
+          '<div style="flex:1;height:8px;border-radius:4px;background:#f0f1ec;overflow:hidden">'+
             '<div style="height:100%;background:'+b[2]+';border-radius:4px;width:'+pct+'%"></div>'+
           '</div>'+
-          '<span style="font-size:12px;font-weight:700;color:#0f172a;width:20px;text-align:right">'+b[1]+'</span>'+
+          '<span style="font-size:12px;font-weight:700;color:#111111;width:20px;text-align:right">'+b[1]+'</span>'+
         '</div>';
       }).join('')
-      :'<div style="font-size:13px;color:#94a3b8;text-align:center;padding:16px">No queue data yet</div>')
+      :'<div style="font-size:13px;color:#777777;text-align:center;padding:16px">No queue data yet</div>')
   );
 
   return '<div style="padding:20px;max-width:1100px">'+
@@ -4184,32 +4511,32 @@ function _rAnalytics() {
 function _rAptEditPage() {
   var apt = _R._editApt;
   if(!apt) { _R.tab='appointments'; _rRec(); return ''; }
-  var back = '<button onclick="_rTab(\'appointments\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Appointments</button>';
+  var back = '<button onclick="_rTab(\'appointments\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555555;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Appointments</button>';
   var todayIso = new Date().toISOString().slice(0,10);
   var SLOTS = ['07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30'];
   return '<div style="padding:28px 32px">'+back+
-    '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:4px">Edit Appointment</div>'+
-    '<div style="font-size:15px;color:#64748b;margin-bottom:24px">Ref: <strong>'+apt.ref+'</strong> · Patient: <strong>'+(apt.name||'—')+'</strong></div>'+
-    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px;max-width:640px">'+
+    '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:4px">Edit Appointment</div>'+
+    '<div style="font-size:15px;color:#777777;margin-bottom:24px">Ref: <strong>'+apt.ref+'</strong> · Patient: <strong>'+(apt.name||'—')+'</strong></div>'+
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px;max-width:640px">'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+
         _frmSel('ae-dept','DEPARTMENT *',DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};}),apt.dept)+
-        '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">DATE *</label>'+
-          '<input id="ae-date" type="date" min="'+todayIso+'" value="'+(apt.date||todayIso)+'" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box"></div>'+
+        '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#555555;margin-bottom:6px">DATE *</label>'+
+          '<input id="ae-date" type="date" min="'+todayIso+'" value="'+(apt.date||todayIso)+'" style="width:100%;padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box"></div>'+
       '</div>'+
-      '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:8px">NEW TIME SLOT</label>'+
+      '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#555555;margin-bottom:8px">NEW TIME SLOT</label>'+
         '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">'+
           SLOTS.map(function(t){
             var sel=apt.time===t;
-            return '<button data-edit-slot="'+t+'" style="padding:8px 4px;border-radius:7px;border:1.5px solid '+(sel?'#3b82f6':'#e2e8f0')+';background:'+(sel?'#eff6ff':'#fff')+';color:'+(sel?'#1d4ed8':'#0f172a')+';font-size:13px;font-weight:'+(sel?'700':'400')+';cursor:pointer;font-family:inherit">'+t+'</button>';
+            return '<button data-edit-slot="'+t+'" style="padding:8px 4px;border-radius:7px;border:1.5px solid '+(sel?'#0F6E56':'#e0e0e0')+';background:'+(sel?'#f0fdfa':'#fff')+';color:'+(sel?'#1A4A9B':'#111111')+';font-size:13px;font-weight:'+(sel?'700':'400')+';cursor:pointer;font-family:inherit">'+t+'</button>';
           }).join('')+
         '</div>'+
       '</div>'+
-      '<div id="ae-selected-slot" style="margin-top:10px;font-size:13px;color:#0d9488;font-weight:600">'+(apt.time?'Selected: '+apt.time:'')+'</div>'+
+      '<div id="ae-selected-slot" style="margin-top:10px;font-size:13px;color:#0F6E56;font-weight:600">'+(apt.time?'Selected: '+apt.time:'')+'</div>'+
     '</div>'+
     '<div style="display:flex;gap:10px;margin-top:14px">'+
-      '<button onclick="_rAptSaveEdit()" style="padding:14px 28px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Save changes</button>'+
+      '<button onclick="_rAptSaveEdit()" style="padding:14px 28px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Save changes</button>'+
       '<button onclick="_rAptCancel(\''+apt.id+'\')" style="padding:14px 20px;border-radius:10px;border:1.5px solid #fca5a5;background:#fff;color:#dc2626;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel appointment</button>'+
-      '<button onclick="_rTab(\'appointments\')" style="padding:14px 20px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;cursor:pointer;font-family:inherit">Discard</button>'+
+      '<button onclick="_rTab(\'appointments\')" style="padding:14px 20px;border-radius:10px;border:1.5px solid #e0e0e0;background:#fff;color:#555555;font-size:14px;cursor:pointer;font-family:inherit">Discard</button>'+
     '</div>'+
   '</div>';
 }
@@ -4219,43 +4546,43 @@ function _rAptEditPage() {
    REGISTER NEW PATIENT (standalone page)
 ═══════════════════════════════════════════════════════════════════════ */
 function _rRegisterNew() {
-  var back='<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
+  var back='<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555555;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
   return '<div style="padding:28px 32px">'+back+
     '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">'+
       '<div>'+
         '<div style="margin-bottom:24px">'+
-          '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Register New Patient</div>'+
-          '<div style="font-size:15px;color:#64748b">Add a new patient profile to the NIHMS database.</div>'+
+          '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:6px">Register New Patient</div>'+
+          '<div style="font-size:15px;color:#777777">Add a new patient profile to the NIHMS database.</div>'+
         '</div>'+
-        '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">'+
-          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#0d9488">'+
-            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>'+
+        '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">'+
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;color:#0F6E56">'+
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>'+
             '<span style="font-size:13px;font-weight:700">Patient details</span>'+
           '</div>'+
           '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'+
             _frmInp('nr-fn','FIRST NAME *','e.g. Nomvula')+ _frmInp('nr-ln','LAST NAME *','e.g. Dlamini')+
-            _frmInp('nr-id','SA ID / PASSPORT *','e.g. 8203041234083')+ _frmInp('nr-dob','DATE OF BIRTH','','date')+
-            _frmSel('nr-gen','GENDER',[{v:'',label:'— Select —'},{v:'Female',label:'Female'},{v:'Male',label:'Male'},{v:'Other',label:'Other'}])+
+            _frmInpId()+ _frmInp('nr-dob','DATE OF BIRTH','','date')+
+            _frmSel('nr-gen','GENDER',[{v:'',label:'— Select —'},{v:'female',label:'Female'},{v:'male',label:'Male'},{v:'non-binary',label:'Non-binary'},{v:'prefer_not_to_say',label:'Prefer not to say'}])+
             _frmSel('nr-blood','BLOOD TYPE',[{v:'',label:'— Unknown —'},{v:'A+',label:'A+'},{v:'A-',label:'A-'},{v:'B+',label:'B+'},{v:'B-',label:'B-'},{v:'AB+',label:'AB+'},{v:'AB-',label:'AB-'},{v:'O+',label:'O+'},{v:'O-',label:'O-'}])+
             _frmInp('nr-ph','PHONE NUMBER *','+27820000000','tel')+ _frmInp('nr-em','EMAIL','patient@email.com','email')+
           '</div>'+
           '<div style="margin-top:14px">'+_frmInp('nr-addr','ADDRESS','Street address, suburb, city')+'</div>'+
 
         /* ── ID Document Upload ── */
-        '<div style="margin-top:18px;background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:20px">' +
+        '<div style="margin-top:18px;background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:20px">' +
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">' +
-            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' +
-            '<span style="font-size:13px;font-weight:700;color:#0f172a">ID Document Upload</span>' +
-            '<span style="font-size:11px;color:#94a3b8;margin-left:4px">(optional — SA ID Book, Smart ID Card, or Passport scan)</span>' +
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' +
+            '<span style="font-size:13px;font-weight:700;color:#111111">ID Document Upload</span>' +
+            '<span style="font-size:11px;color:#777777;margin-left:4px">(optional — SA ID Book, Smart ID Card, or Passport scan)</span>' +
           '</div>' +
           '<div id="nr-id-drop" onclick="document.getElementById(\'nr-id-file\').click()" ' +
-               'ondragover="event.preventDefault();this.style.borderColor=\'#0d9488\';this.style.background=\'#f0fdfa\'" ' +
-               'ondragleave="this.style.borderColor=\'#e2e8f0\';this.style.background=\'#f9fafb\'" ' +
+               'ondragover="event.preventDefault();this.style.borderColor=\'#0F6E56\';this.style.background=\'#f0fdfa\'" ' +
+               'ondragleave="this.style.borderColor=\'#e0e0e0\';this.style.background=\'#f9fafb\'" ' +
                'ondrop="_rIdFileDrop(event)" ' +
-               'style="border:2px dashed #e2e8f0;border-radius:12px;padding:28px 20px;text-align:center;cursor:pointer;background:#f9fafb;transition:all .2s">' +
+               'style="border:2px dashed #e0e0e0;border-radius:12px;padding:28px 20px;text-align:center;cursor:pointer;background:#f9fafb;transition:all .2s">' +
             '<div style="font-size:32px;margin-bottom:8px">📄</div>' +
-            '<div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:4px">Click to upload or drag &amp; drop</div>' +
-            '<div style="font-size:12px;color:#94a3b8">JPG · PNG · PDF · Max 5 MB</div>' +
+            '<div style="font-size:14px;font-weight:600;color:#111111;margin-bottom:4px">Click to upload or drag &amp; drop</div>' +
+            '<div style="font-size:12px;color:#777777">JPG · PNG · PDF · Max 5 MB</div>' +
             '<input id="nr-id-file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" ' +
                    'style="display:none" onchange="_rIdFileSelect(this)">' +
           '</div>' +
@@ -4266,31 +4593,31 @@ function _rRegisterNew() {
 
         '</div>'+
         '<div style="display:flex;gap:10px;margin-top:14px">'+
-          '<button onclick="_rSaveNewPatient()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+          '<button onclick="_rSaveNewPatient()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>'+
             'Register patient'+
           '</button>'+
-          '<button onclick="_rTab(\'overview\')" style="padding:14px 24px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+          '<button onclick="_rTab(\'overview\')" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Cancel</button>'+
         '</div>'+
       '</div>'+
-      '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:18px">'+
-        '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:12px">Recently registered</div>'+
+      '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:18px">'+
+        '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:12px">Recently registered</div>'+
         ((_R.recentPatients && _R.recentPatients.length)
           ? _R.recentPatients.map(function(p){
-              return '<div style="padding:8px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:8px">' +
-                '<div style="width:30px;height:30px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">' +
+              return '<div style="padding:8px 12px;border-bottom:1px solid #f0f1ec;display:flex;align-items:center;gap:8px">' +
+                '<div style="width:30px;height:30px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">' +
                   ((p.firstName||'?')[0]+(p.lastName||'?')[0]).toUpperCase() +
                 '</div>' +
                 '<div style="flex:1;min-width:0">' +
-                  '<div style="font-size:12px;font-weight:600;color:#0f172a">'+(p.firstName||'')+' '+(p.lastName||'')+'</div>' +
-                  '<div style="font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(p.nationalId||p.id||'')+(p.phone?' · '+p.phone:'')+'</div>' +
+                  '<div style="font-size:12px;font-weight:600;color:#111111">'+(p.firstName||'')+' '+(p.lastName||'')+'</div>' +
+                  '<div style="font-size:11px;color:#777777;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(p.nationalId||p.id||'')+(p.phone?' · '+p.phone:'')+'</div>' +
                 '</div>' +
-                '<button onclick="_rOpenPatientFile(\''+encodeURIComponent(p.nationalId||p.id||'')+'\')" style="padding:3px 8px;border-radius:5px;border:1px solid #e2e8f0;background:#fff;font-size:10px;color:#0d9488;cursor:pointer;font-family:inherit;flex-shrink:0">View</button>' +
+                '<button onclick="_rOpenPatientFile(\''+encodeURIComponent(p.nationalId||p.id||'')+'\')" style="padding:3px 8px;border-radius:5px;border:1px solid #e0e0e0;background:#fff;font-size:10px;color:#0F6E56;cursor:pointer;font-family:inherit;flex-shrink:0">View</button>' +
               '</div>';
             }).join('')
           : (_R.loadingData
-              ? '<div style="padding:14px;text-align:center;font-size:12px;color:#94a3b8">⏳ Loading patients…</div>'
-              : '<div style="padding:14px;text-align:center;font-size:12px;color:#94a3b8">No patients registered yet.<br>Registered patients will appear here.</div>'))+
+              ? '<div style="padding:14px;text-align:center;font-size:12px;color:#777777">⏳ Loading patients…</div>'
+              : '<div style="padding:14px;text-align:center;font-size:12px;color:#777777">No patients registered yet.<br>Registered patients will appear here.</div>'))+
       '</div>'+
     '</div>'+
   '</div>';
@@ -4300,6 +4627,10 @@ window._rSaveNewPatient = async function() {
   function _v(id){ var el=document.getElementById(id); return el?el.value.trim():''; }
   var fn=_v('nr-fn'),ln=_v('nr-ln'),id=_v('nr-id'),ph=_v('nr-ph');
   var dob=_v('nr-dob'),gen=_v('nr-gen'),blood=_v('nr-blood'),em=_v('nr-em'),addr=_v('nr-addr');
+  /* ── Normalize gender/bloodType to match backend enum ── */
+  var genMap = { 'female':'female','male':'male','other':'non-binary','non-binary':'non-binary','prefer_not_to_say':'prefer_not_to_say' };
+  var genNorm = genMap[(gen||'').toLowerCase()] || 'prefer_not_to_say';
+  var bloodNorm = blood || 'unknown';
   /* ── Validate all required fields at once — highlight every error ── */
   var hasErr = false;
 
@@ -4340,12 +4671,12 @@ window._rSaveNewPatient = async function() {
         firstName:   fn,
         lastName:    ln,
         nationalId:  id,
-        dateOfBirth: dob,
-        gender:      gen,
+        dateOfBirth: dob || undefined,
+        gender:      genNorm,
         phone:       ph,
-        email:       em,
-        bloodType:   blood,
-        address:     addr,
+        email:       em || undefined,
+        bloodType:   bloodNorm,
+        address:     addr || undefined,
       })
     });
     /* API returns the created document */
@@ -4443,11 +4774,7 @@ window._rSaveNewPatient = async function() {
     _rIdClearFile();
   }
 
-  /* ── Timed confirmation banner ── */
-  var secs = (elapsed / 1000).toFixed(2);
-  var target = 2.0;
-  var withinTarget = elapsed < target * 1000;
-
+  /* ── Confirmation banner ── */
   /* Show confirmation on the current page before navigating */
   var banner = document.createElement('div');
   banner.style.cssText = [
@@ -4473,15 +4800,11 @@ window._rSaveNewPatient = async function() {
     '<div style="font-size:24px;flex-shrink:0">✅</div>',
     '<div style="flex:1">',
       '<div style="font-size:14px;font-weight:700;color:#14532d;margin-bottom:4px">',
-        'Patient profile created in MongoDB',
+        'Patient registered successfully',
       '</div>',
       '<div style="font-size:12px;color:#166534;line-height:1.6">',
         '<strong>' + fn + ' ' + ln + '</strong> · ID: ' + id + '<br>',
-        'Confirmation received in <strong>' + elapsed + ' ms</strong>',
-        ' (' + secs + 's — target: ≤2.0s)',
-        withinTarget
-          ? ' <span style="color:#16a34a;font-weight:700">✓ within target</span>'
-          : ' <span style="color:#d97706;font-weight:700">⚠ over target</span>',
+        'A new patient profile has been created and saved to NIHMS.',
         docLine,
       '</div>',
     '</div>',
@@ -4495,14 +4818,23 @@ window._rSaveNewPatient = async function() {
     document.head.appendChild(anim);
   }
   document.body.appendChild(banner);
-  setTimeout(function() {
-    banner.style.transition = 'opacity .4s';
-    banner.style.opacity = '0';
-    setTimeout(function() { banner.remove(); }, 400);
-  }, 3000);
 
-  /* Navigate to overview after short delay so user sees the banner */
-  setTimeout(function() { _rTab('overview'); }, 800);
+  /* Fire a toast immediately — visible even after page re-render */
+  UI.showToast('✅ ' + fn + ' ' + ln + ' registered successfully', 'ok');
+
+  /* Navigate to overview, then re-attach the detail banner on top */
+  setTimeout(function() {
+    _rTab('overview');
+    setTimeout(function() {
+      document.body.appendChild(banner);
+      banner.style.opacity = '1';
+      setTimeout(function() {
+        banner.style.transition = 'opacity .5s';
+        banner.style.opacity = '0';
+        setTimeout(function() { banner.remove(); }, 500);
+      }, 3000);
+    }, 120);
+  }, 500);
 };
 
 
@@ -4545,7 +4877,7 @@ window._rAptCancel = async function(id) {
 
   /* ── Notify patient ── */
   var msg = 'NIHMS: Your appointment '+apt.ref+' on '+apt.date+' at '+apt.time+' ('+apt.dept+') has been CANCELLED. Please contact reception to reschedule. Johannesburg CHC.';
-  var emailHtml = '<div style="font-family:inherit;max-width:500px;margin:0 auto"><div style="background:#dc2626;padding:20px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Cancelled</h2></div><div style="background:#fef2f2;padding:20px;border-radius:0 0 10px 10px"><p>Dear patient,</p><p>Your appointment has been cancelled:</p><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Reference</td><td style="padding:8px;font-weight:700;color:#dc2626">'+apt.ref+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Department</td><td style="padding:8px;font-weight:600">'+apt.dept+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Original Date</td><td style="padding:8px;font-weight:600">'+apt.date+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Original Time</td><td style="padding:8px;font-weight:600">'+apt.time+'</td></tr></table><p style="font-size:13px;margin-top:14px">Please contact reception to reschedule your appointment.</p><p style="font-size:12px;color:#94a3b8">Johannesburg CHC · Reception</p></div></div>';
+  var emailHtml = '<div style="font-family:inherit;max-width:500px;margin:0 auto"><div style="background:#dc2626;padding:20px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Cancelled</h2></div><div style="background:#FCEBEB;padding:20px;border-radius:0 0 10px 10px"><p>Dear patient,</p><p>Your appointment has been cancelled:</p><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;color:#777777;font-size:13px">Reference</td><td style="padding:8px;font-weight:700;color:#dc2626">'+apt.ref+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">Department</td><td style="padding:8px;font-weight:600">'+apt.dept+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">Original Date</td><td style="padding:8px;font-weight:600">'+apt.date+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">Original Time</td><td style="padding:8px;font-weight:600">'+apt.time+'</td></tr></table><p style="font-size:13px;margin-top:14px">Please contact reception to reschedule your appointment.</p><p style="font-size:12px;color:#777777">Johannesburg CHC · Reception</p></div></div>';
   try {
     if (apt.phone||apt.patientPhone) await API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:apt.phone||apt.patientPhone,message:msg})}).catch(function(){});
     if (apt.email||apt.patientEmail) await API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:apt.email||apt.patientEmail,subject:'NIHMS — Appointment cancelled: '+apt.ref,html:emailHtml})}).catch(function(){});
@@ -4567,7 +4899,7 @@ function _rPatientFile() {
   var pf = _R.patientFile || { step:'search', id:'', patient:null, notFound:false, editing:false };
   if (!_R.patientFile) _R.patientFile = pf;
 
-  var back = '<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
+  var back = '<button onclick="_rTab(\'overview\')" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555555;border:none;background:transparent;cursor:pointer;font-family:inherit;margin-bottom:28px">'+_svgIcon('back')+' Back to Overview</button>';
 
   /* ── EDIT MODE ── */
   if (pf.editing && pf.patient) {
@@ -4576,10 +4908,10 @@ function _rPatientFile() {
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           '<div style="margin-bottom:24px">' +
-            '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:4px">Edit Patient Profile</div>' +
-            '<div style="font-size:14px;color:#64748b">Update the details for <strong>'+(pt.firstName||'')+' '+(pt.lastName||'')+'</strong> · '+pt.id+'</div>' +
+            '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:4px">Edit Patient Profile</div>' +
+            '<div style="font-size:14px;color:#777777">Update the details for <strong>'+(pt.firstName||'')+' '+(pt.lastName||'')+'</strong> · '+pt.id+'</div>' +
           '</div>' +
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px">' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
               _frmInp('pf-fn',  'FIRST NAME *',    '', 'text', pt.firstName||'') +
               _frmInp('pf-ln',  'LAST NAME *',     '', 'text', pt.lastName||'')  +
@@ -4593,8 +4925,8 @@ function _rPatientFile() {
             '<div style="margin-top:14px">' + _frmInp('pf-addr','ADDRESS','', 'text', pt.address||'') + '</div>' +
           '</div>' +
           '<div style="display:flex;gap:10px;margin-top:14px">' +
-            '<button onclick="_rPfSave()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">Save changes</button>' +
-            '<button onclick="_R.patientFile.editing=false;_rRec()" style="padding:14px 20px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;cursor:pointer;font-family:inherit">Cancel</button>' +
+            '<button onclick="_rPfSave()" style="flex:1;padding:14px;border-radius:10px;border:none;background:#0F6E56;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">Save changes</button>' +
+            '<button onclick="_R.patientFile.editing=false;_rRec()" style="padding:14px 20px;border-radius:10px;border:1.5px solid #e0e0e0;background:#fff;color:#555555;font-size:14px;cursor:pointer;font-family:inherit">Cancel</button>' +
           '</div>' +
         '</div>' +
         _pfSidePanel(pt) +
@@ -4612,49 +4944,49 @@ function _rPatientFile() {
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
         '<div>' +
           /* Profile card */
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px;margin-bottom:16px">' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px;margin-bottom:16px">' +
             '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">' +
-              '<div style="width:52px;height:52px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex-shrink:0">'+initials+'</div>' +
+              '<div style="width:52px;height:52px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex-shrink:0">'+initials+'</div>' +
               '<div style="flex:1">' +
-                '<div style="font-size:20px;font-weight:800;color:#0f172a">'+(pt.firstName||'')+' '+(pt.lastName||'')+'</div>' +
-                '<div style="font-size:13px;color:#64748b;margin-top:2px">🪪 '+pt.id+(pt.gender?' · '+pt.gender:'')+(pt.dob?' · DOB: '+pt.dob:'')+'</div>' +
+                '<div style="font-size:20px;font-weight:800;color:#111111">'+(pt.firstName||'')+' '+(pt.lastName||'')+'</div>' +
+                '<div style="font-size:13px;color:#777777;margin-top:2px">🪪 '+pt.id+(pt.gender?' · '+pt.gender:'')+(pt.dob?' · DOB: '+pt.dob:'')+'</div>' +
               '</div>' +
-              '<button onclick="_R.patientFile.editing=true;_rRec()" style="display:flex;align-items:center;gap:6px;padding:9px 16px;border-radius:8px;border:none;background:#0d9488;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">' +
+              '<button onclick="_R.patientFile.editing=true;_rRec()" style="display:flex;align-items:center;gap:6px;padding:9px 16px;border-radius:8px;border:none;background:#0F6E56;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">' +
                 '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
                 'Edit profile' +
               '</button>' +
             '</div>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
               [['Phone', pt.phone||'—'],['Email', pt.email||'—'],['Blood type', pt.bloodType||'—'],['Address', pt.address||'—']].map(function(r){
-                return '<div style="padding:10px 12px;background:#f8fafc;border-radius:8px">' +
-                  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:3px">'+r[0]+'</div>' +
-                  '<div style="font-size:13px;font-weight:600;color:#0f172a">'+r[1]+'</div>' +
+                return '<div style="padding:10px 12px;background:#f4f5f0;border-radius:8px">' +
+                  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#777777;margin-bottom:3px">'+r[0]+'</div>' +
+                  '<div style="font-size:13px;font-weight:600;color:#111111">'+r[1]+'</div>' +
                 '</div>';
               }).join('') +
             '</div>' +
           '</div>' +
           /* Appointment history */
-          '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
-            '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">' +
-              '<div style="font-size:13px;font-weight:700;color:#0f172a">Appointment History ('+ptApts.length+')</div>' +
-              '<button onclick="_rTab(\'book\');_R.bk.step=\'search\';_R.bk.id=\''+pt.id+'\';_rRec()" style="font-size:12px;color:#3b82f6;border:none;background:transparent;cursor:pointer;font-family:inherit">+ Book new appointment</button>' +
+          '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;overflow:hidden">' +
+            '<div style="padding:12px 16px;border-bottom:1px solid #f0f1ec;display:flex;align-items:center;justify-content:space-between">' +
+              '<div style="font-size:13px;font-weight:700;color:#111111">Appointment History ('+ptApts.length+')</div>' +
+              '<button onclick="_rTab(\'book\');_R.bk.step=\'search\';_R.bk.id=\''+pt.id+'\';_rRec()" style="font-size:12px;color:#0F6E56;border:none;background:transparent;cursor:pointer;font-family:inherit">+ Book new appointment</button>' +
             '</div>' +
             (ptApts.length
               ? '<table style="width:100%;border-collapse:collapse">' +
-                  '<thead><tr>'+['Ref','Dept','Date','Time','Status'].map(function(h){ return '<th style="padding:7px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8">'+h+'</th>'; }).join('')+'</tr></thead>' +
+                  '<thead><tr>'+['Ref','Dept','Date','Time','Status'].map(function(h){ return '<th style="padding:7px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#777777">'+h+'</th>'; }).join('')+'</tr></thead>' +
                   '<tbody>' +
                   ptApts.map(function(a,i){
                     var cancelled=a.status==='cancelled';
-                    return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9;opacity:'+(cancelled?.55:1)+'">' +
-                      '<td style="padding:8px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#64748b">'+a.ref+'</td>' +
-                      '<td style="padding:8px 14px;font-size:12px;color:#0f172a">'+(a.dept||'—')+'</td>' +
-                      '<td style="padding:8px 14px;font-size:12px;color:#64748b">'+(a.date||'—')+'</td>' +
-                      '<td style="padding:8px 14px;font-size:12px;color:#64748b">'+(a.time||'—')+'</td>' +
+                    return '<tr style="background:'+(i%2===0?'#fff':'#f4f5f0')+';border-bottom:1px solid #f0f1ec;opacity:'+(cancelled?.55:1)+'">' +
+                      '<td style="padding:8px 14px;font-family:monospace;font-size:11px;font-weight:600;color:#777777">'+a.ref+'</td>' +
+                      '<td style="padding:8px 14px;font-size:12px;color:#111111">'+(a.dept||'—')+'</td>' +
+                      '<td style="padding:8px 14px;font-size:12px;color:#777777">'+(a.date||'—')+'</td>' +
+                      '<td style="padding:8px 14px;font-size:12px;color:#777777">'+(a.time||'—')+'</td>' +
                       '<td style="padding:8px 14px"><span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:'+(cancelled?'#f9fafb':a.verified?'#f0fdf4':'#fffbeb')+';color:'+(cancelled?'#9ca3af':a.verified?'#16a34a':'#b45309')+';border:1px solid '+(cancelled?'#e5e7eb':a.verified?'#86efac':'#fcd34d')+'">'+( cancelled?'Cancelled':a.verified?'Verified':'Pending')+'</span></td>' +
                     '</tr>';
                   }).join('') +
                   '</tbody></table>'
-              : '<div style="padding:16px;text-align:center;font-size:13px;color:#94a3b8">No appointment history</div>') +
+              : '<div style="padding:16px;text-align:center;font-size:13px;color:#777777">No appointment history</div>') +
           '</div>' +
         '</div>' +
         _pfSidePanel(pt) +
@@ -4667,16 +4999,16 @@ function _rPatientFile() {
     '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
       '<div>' +
         '<div style="margin-bottom:24px">' +
-          '<div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:6px">Patient Files</div>' +
-          '<div style="font-size:15px;color:#64748b">Search by SA ID or passport number to find and manage a patient profile.</div>' +
+          '<div style="font-size:24px;font-weight:800;color:#111111;margin-bottom:6px">Patient Files</div>' +
+          '<div style="font-size:15px;color:#777777">Search by SA ID or passport number to find and manage a patient profile.</div>' +
         '</div>' +
-        '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:22px;margin-bottom:14px">' +
-          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:10px">SA ID / PASSPORT NUMBER</div>' +
+        '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px;margin-bottom:14px">' +
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#555555;margin-bottom:10px">SA ID / PASSPORT NUMBER</div>' +
           '<div style="display:flex;gap:10px">' +
             '<input id="pf-search-id" type="text" value="'+(pf.id||'')+'" placeholder="e.g. 8203041234083" ' +
-            'style="flex:1;padding:12px 16px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;font-family:inherit;outline:none;color:#0f172a" ' +
-            'onfocus="this.style.borderColor=\"#0d9488\"" onblur="this.style.borderColor=\"#e2e8f0\"">' +
-            '<button onclick="_rPfSearch()" style="display:flex;align-items:center;gap:8px;padding:12px 24px;border-radius:10px;border:none;background:#0d9488;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">' +
+            'style="flex:1;padding:12px 16px;border:1.5px solid #e0e0e0;border-radius:10px;font-size:15px;font-family:inherit;outline:none;color:#111111" ' +
+            'onfocus="this.style.borderColor=\"#0F6E56\"" onblur="this.style.borderColor=\"#e0e0e0\"">' +
+            '<button onclick="_rPfSearch()" style="display:flex;align-items:center;gap:8px;padding:12px 24px;border-radius:10px;border:none;background:#0F6E56;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">' +
               '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Search' +
             '</button>' +
           '</div>' +
@@ -4685,30 +5017,30 @@ function _rPatientFile() {
                 '<div style="font-size:13px;color:#dc2626;margin-bottom:10px">No profile exists for ID <strong>'+pf.id+'</strong> in NIHMS. A patient profile must be created before an appointment can be booked or a check-in issued.</div>' +
                 '<button onclick="_rTab(\'register\')" style="padding:8px 18px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">+ Create Patient Profile</button>' +
               '</div>' +
-              '<button onclick="_rTab(\'register\')" style="margin-top:10px;width:100%;padding:14px;border-radius:10px;border:2px dashed #0d9488;background:transparent;color:#0d9488;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
-                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
+              '<button onclick="_rTab(\'register\')" style="margin-top:10px;width:100%;padding:14px;border-radius:10px;border:2px dashed #0F6E56;background:transparent;color:#0F6E56;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">' +
+                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>' +
                 'Register new patient →' +
               '</button>'
             : '') +
         '</div>' +
         /* All patients list */
-        '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
-          '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">All Registered Patients ('+NIHMS_PATIENTS.length+')</div>' +
+        '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;overflow:hidden">' +
+          '<div style="padding:12px 16px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:700;color:#111111">All Registered Patients ('+NIHMS_PATIENTS.length+')</div>' +
           NIHMS_PATIENTS.map(function(p,i){
-            return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid #f8fafc;background:'+(i%2===0?'#fff':'#f8fafc')+'">' +
-              '<div style="width:32px;height:32px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(((p.firstName||'?')[0])+((p.lastName||'?')[0])).toUpperCase()+'</div>' +
+            return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid #f4f5f0;background:'+(i%2===0?'#fff':'#f4f5f0')+'">' +
+              '<div style="width:32px;height:32px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(((p.firstName||'?')[0])+((p.lastName||'?')[0])).toUpperCase()+'</div>' +
               '<div style="flex:1;min-width:0">' +
-                '<div style="font-size:13px;font-weight:600;color:#0f172a">'+(p.firstName||'')+' '+(p.lastName||'')+'</div>' +
-                '<div style="font-size:11px;color:#94a3b8">'+p.id+(p.phone?' · '+p.phone:'')+'</div>' +
+                '<div style="font-size:13px;font-weight:600;color:#111111">'+(p.firstName||'')+' '+(p.lastName||'')+'</div>' +
+                '<div style="font-size:11px;color:#777777">'+p.id+(p.phone?' · '+p.phone:'')+'</div>' +
               '</div>' +
-              '<button onclick="_rOpenPatientFile(\''+p.id+'\')" style="padding:5px 12px;border-radius:6px;border:1px solid #e2e8f0;background:#fff;font-size:12px;color:#0d9488;cursor:pointer;font-family:inherit;font-weight:600">Open file</button>' +
+              '<button onclick="_rOpenPatientFile(\''+p.id+'\')" style="padding:5px 12px;border-radius:6px;border:1px solid #e0e0e0;background:#fff;font-size:12px;color:#0F6E56;cursor:pointer;font-family:inherit;font-weight:600">Open file</button>' +
             '</div>';
           }).join('') +
         '</div>' +
       '</div>' +
-      '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:16px">' +
-        '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:12px">Quick tips</div>' +
-        '<div style="font-size:12px;color:#64748b;line-height:1.7">' +
+      '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:16px">' +
+        '<div style="font-size:13px;font-weight:700;color:#111111;margin-bottom:12px">Quick tips</div>' +
+        '<div style="font-size:12px;color:#777777;line-height:1.7">' +
           '• Search by SA ID or passport number<br>' +
           '• Click <strong>Open file</strong> to view a patient record<br>' +
           '• Click <strong>Edit profile</strong> to update contact details<br>' +
@@ -4727,22 +5059,22 @@ function _pfSidePanel(pt) {
   }).sort(function(a,b){ return (a.date||'') < (b.date||'') ? -1 : 1; }).slice(0,5);
   var today = new Date().toISOString().slice(0,10);
   return '<div style="display:flex;flex-direction:column;gap:14px">' +
-    '<div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden">' +
-      '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#0f172a">Upcoming for this patient</div>' +
+    '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;overflow:hidden">' +
+      '<div style="padding:12px 16px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:700;color:#111111">Upcoming for this patient</div>' +
       (ptApts.filter(function(a){return (a.date||'').slice(0,10)>=today;}).length
         ? ptApts.filter(function(a){return (a.date||'').slice(0,10)>=today;}).map(function(a){
-            return '<div style="padding:9px 14px;border-bottom:1px solid #f8fafc">' +
-              '<div style="font-size:12px;font-weight:700;color:#0f172a">'+a.ref+'</div>' +
-              '<div style="font-size:11px;color:#64748b">'+(a.dept||'')+'</div>' +
-              '<div style="font-size:11px;color:#94a3b8">'+(a.date||'')+' @ '+(a.time||'')+'</div>' +
+            return '<div style="padding:9px 14px;border-bottom:1px solid #f4f5f0">' +
+              '<div style="font-size:12px;font-weight:700;color:#111111">'+a.ref+'</div>' +
+              '<div style="font-size:11px;color:#777777">'+(a.dept||'')+'</div>' +
+              '<div style="font-size:11px;color:#777777">'+(a.date||'')+' @ '+(a.time||'')+'</div>' +
             '</div>';
           }).join('')
-        : '<div style="padding:14px;text-align:center;font-size:12px;color:#94a3b8">No upcoming appointments</div>') +
+        : '<div style="padding:14px;text-align:center;font-size:12px;color:#777777">No upcoming appointments</div>') +
     '</div>' +
     '<div style="background:#f0fdfa;border-radius:14px;border:1px solid #99f6e4;padding:14px">' +
-      '<div style="font-size:12px;font-weight:700;color:#0d9488;margin-bottom:6px">Patient summary</div>' +
-      '<div style="font-size:12px;color:#475569">'+_R.appointments.filter(function(a){return a.patientId===pt.id||a.patientId===pt.nationalId;}).length+' total appointments</div>' +
-      '<div style="font-size:12px;color:#475569">'+_R.appointments.filter(function(a){return (a.patientId===pt.id||a.patientId===pt.nationalId)&&a.verified;}).length+' verified</div>' +
+      '<div style="font-size:12px;font-weight:700;color:#0F6E56;margin-bottom:6px">Patient summary</div>' +
+      '<div style="font-size:12px;color:#555555">'+_R.appointments.filter(function(a){return a.patientId===pt.id||a.patientId===pt.nationalId;}).length+' total appointments</div>' +
+      '<div style="font-size:12px;color:#555555">'+_R.appointments.filter(function(a){return (a.patientId===pt.id||a.patientId===pt.nationalId)&&a.verified;}).length+' verified</div>' +
     '</div>' +
   '</div>';
 }
@@ -4882,6 +5214,8 @@ window._rCheckinSearch = async function() {
   var today  = new Date().toISOString().slice(0,10);
 
   var appt = _R.appointments.find(function(a) {
+    /* Skip cancelled appointments — cannot check in a cancelled booking */
+    if (a.status === 'cancelled') return false;
     /* Match by patient ObjectId OR by the SA ID / passport entered */
     var aPatId = (a.patientId || a.patient || '').toString().trim();
     var match  = aPatId === pid || aPatId === id ||
@@ -4903,6 +5237,7 @@ window._rCheckinSearch = async function() {
       if (aRes && aRes.data && aRes.data.length) {
         /* Take the closest upcoming/today appointment */
         var todayApts = aRes.data.filter(function(a) {
+          if (a.status === 'cancelled') return false;
           return (a.date || a.appointmentDate || '').slice(0,10) >= today;
         });
         if (todayApts.length) {
@@ -5138,31 +5473,65 @@ window._rCheckinIssue = async function() {
   /* If still no date, default to today (walk-in) */
   if (!ci.selectedDate) ci.selectedDate = todayStr;
 
-  var dept=(document.getElementById('ci-slot-dept')||document.getElementById('ci-dept')||{value:ci.dept}).value||ci.dept;
-  _R.ci.dept = dept;
-  var token = _genToken(dept);
-
-  /* Immunisation patients go to nurse immunisation queue */
-  if (dept==='Immunisation') {
-    var immuReq = {
-      id:'REQ-IMM-'+token, patientId:ci.patient._id||ci.patient.id,
-      patientName:(ci.patient.firstName||'')+' '+(ci.patient.lastName||''),
-      age:ci.patient.age||'—', sex:ci.patient.sex||ci.patient.gender||'—',
-      complaint:'Immunisation appointment', priority:'Normal',
-      requestedBy:'Reception', requestedAt:_fmtTime(),
-      notes:'Patient scheduled for immunisation. Token: '+token+'. Directed to Nurse Immunisation Station.',
-      seen:false, isImmunisation:true
-    };
-    if(window._nurseAddRequest) window._nurseAddRequest(immuReq);
-    else{if(!window._NURSE_REQUESTS)window._NURSE_REQUESTS=[];window._NURSE_REQUESTS.push(immuReq);}
+  /* ── Fix: use appointment's actual department (Case A: booked appt, no dept dropdown) ── */
+  if (ci.appt && ci.appt.dept && (!ci.dept || ci.dept === 'General Consultation')) {
+    ci.dept = ci.appt.dept;
   }
 
-  _R.queue.push({ token:token, id:ci.patient.id, name:(ci.patient.firstName||ci.patient.name||'')+(ci.patient.lastName?' '+ci.patient.lastName:''), department:dept, priority:'normal', status:'waiting', checkedInAt:new Date().toISOString() });
+  var dept=(document.getElementById('ci-slot-dept')||document.getElementById('ci-dept')||{value:ci.dept}).value||(ci.appt&&ci.appt.dept)||ci.dept||'General Consultation';
+  _R.ci.dept = dept;
 
-  /* Notify nurse */
-  var req={ id:'REQ-'+token, patientId:ci.patient._id||ci.patient.id, patientName:(ci.patient.firstName||'')+(ci.patient.lastName?' '+ci.patient.lastName:''), age:ci.patient.age||'—', sex:ci.patient.sex||ci.patient.gender||'—', complaint:'Walk-in queue check-in', priority:'Normal', requestedBy:'Reception', requestedAt:_fmtTime(), notes:'Patient '+token+' checked in at '+dept+'. Directed to nurses station for vitals.', seen:false };
-  if(window._nurseAddRequest) window._nurseAddRequest(req);
-  else { if(!window._NURSE_REQUESTS) window._NURSE_REQUESTS=[]; window._NURSE_REQUESTS.push(req); }
+  /* ── Duplicate check-in prevention ── */
+  var ptId = (ci.patient._id || ci.patient.id || ci.patient.nationalId || '');
+  var todayDate = new Date().toISOString().slice(0,10);
+  var alreadyIn = _R.queue.find(function(q) {
+    var qDate = (q.checkedInAt || '').slice(0,10);
+    var qName = (q.name || '').trim();
+    var ptFullName = ((ci.patient.firstName||'')+(ci.patient.lastName?' '+ci.patient.lastName:'')).trim();
+    return ((ptId && (q.id === ptId || q.patientId === ptId)) || (qName && ptFullName && qName === ptFullName))
+      && qDate === todayDate && q.status !== 'done';
+  });
+  if (alreadyIn) {
+    var _dupName = ((ci.patient.firstName||'')+' '+(ci.patient.lastName||'')).trim();
+    UI.showToast('⚠ ' + _dupName + ' is already checked in today (Token: ' + alreadyIn.token + ')', 'err');
+    var _old = document.getElementById('ci-dup-banner'); if (_old) _old.remove();
+    var _db = document.createElement('div');
+    _db.id = 'ci-dup-banner';
+    _db.style.cssText = 'position:fixed;top:72px;left:50%;transform:translateX(-50%);z-index:8888;background:#f0f4f8;border:1.5px solid #cbd5e1;border-radius:14px;padding:20px 24px;box-shadow:0 4px 24px rgba(0,0,0,.10);max-width:520px;width:92%';
+    _db.innerHTML = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><div style="font-size:20px">🚫</div><div style="font-size:15px;font-weight:700;color:#0F4C3A">Patient Already Checked In</div></div><div style="font-size:13px;color:#374151;line-height:1.7;margin-bottom:14px"><strong>' + _dupName + '</strong> has already been checked in today.<br>Token: <strong style="font-family:monospace;font-size:14px;color:#0F6E56">' + alreadyIn.token + '</strong> &nbsp;·&nbsp; Department: <strong>' + (alreadyIn.department||'') + '</strong></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="document.getElementById(\'ci-dup-banner\').remove();if(window._rResetCheckin)window._rResetCheckin();" style="padding:9px 18px;border-radius:22px;border:none;background:#0F6E56;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">+ Check In Another Patient</button><button onclick="document.getElementById(\'ci-dup-banner\').remove()" style="padding:9px 18px;border-radius:22px;border:1.5px solid #9ca3af;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">✕ Dismiss</button></div>';
+    document.body.appendChild(_db);
+    setTimeout(function(){ var b=document.getElementById('ci-dup-banner'); if(b){b.style.transition='opacity .4s';b.style.opacity='0';setTimeout(function(){b.remove();},400);} }, 8000);
+    return;
+  }
+
+  var token = _genToken(dept);
+  var isImm = (dept === 'Immunisation');
+
+  /* ── Route to nurse: immunisation → immQueue, all others → vitals ── */
+  if (isImm) {
+    var immuReq = {
+      id:          'REQ-IMM-' + token,
+      patientId:   ci.patient._id || ci.patient.id,
+      patientName: (ci.patient.firstName||'') + ' ' + (ci.patient.lastName||''),
+      age:         ci.patient.age || '—',
+      sex:         ci.patient.sex || ci.patient.gender || '—',
+      complaint:   'Scheduled Immunisation',
+      priority:    'Normal',
+      requestedBy: 'Reception',
+      requestedAt: _fmtTime(),
+      notes:       'Immunisation appointment. Token: ' + token + '. Directed to Nurse Immunisation Station.',
+      seen:        false,
+      isImmunisation: true,
+      autoAccept:  true,
+      department:  'Immunisation',
+    };
+    _sendToNurseTab(immuReq);
+  } else {
+    var req = { id:'REQ-'+token, patientId:ci.patient._id||ci.patient.id, patientName:(ci.patient.firstName||'')+(ci.patient.lastName?' '+ci.patient.lastName:''), age:ci.patient.age||'—', sex:ci.patient.sex||ci.patient.gender||'—', complaint:ci.appt ? (ci.appt.type||'Appointment') : 'Walk-in', priority:'Normal', requestedBy:'Reception', requestedAt:_fmtTime(), notes:'Patient '+token+' checked in at '+dept+'. Directed to nurses station for vitals.', seen:false, autoAccept:true, department:dept };
+    _sendToNurseTab(req);
+  }
+
+  _R.queue.push({ token:token, id:ptId, patientId:ptId, name:(ci.patient.firstName||ci.patient.name||'')+(ci.patient.lastName?' '+ci.patient.lastName:''), department:dept, priority:'normal', status:'waiting', checkedInAt:new Date().toISOString() });
 
   /* ── Send SMS + Email notifications ── */
   var sms=false, email=false;
@@ -5196,7 +5565,7 @@ window._rCheckinIssue = async function() {
     'NIHMS CHECK-IN CONFIRMED. Dear ' + ptName + '. ' +
     'Queue token: ' + token + '. Dept: ' + dept + '. ' +
     'Date: ' + apptDate + ' at ' + apptTime + '. ' +
-    'Go to the Nurses Station for vitals. ' +
+    (isImm ? 'Go to the Nurse Immunisation Station. ' : 'Go to the Nurses Station for vitals. ') +
     'Patient dashboard: https://nihms.netlify.app/patient . ' +
     'Emergency: 10177 | NIHMS Jhb CHC';
 
@@ -5205,31 +5574,31 @@ window._rCheckinIssue = async function() {
 
   var emailHtml =
     '<div style="font-family:system-ui,-apple-system,Arial,sans-serif;max-width:540px;margin:0 auto;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10)">' +
-      '<div style="background:linear-gradient(135deg,#0d9488,#0f766e);padding:28px 24px;text-align:center">' +
+      '<div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);padding:28px 24px;text-align:center">' +
         '<div style="font-size:36px;margin-bottom:8px">✅</div>' +
         '<h1 style="color:#fff;margin:0;font-size:22px;font-weight:800">Check-In Confirmed</h1>' +
         '<p style="color:rgba(255,255,255,.85);margin:6px 0 0;font-size:13px">National Integrated Healthcare Management System · Johannesburg CHC</p>' +
       '</div>' +
-      '<div style="background:#f8fafc;padding:28px;border-radius:0 0 12px 12px">' +
-        '<p style="font-size:15px;color:#475569;margin:0 0 20px">Dear <strong>' + ptName.trim() + '</strong>,</p>' +
-        '<div style="background:#fff;border-radius:14px;padding:24px;text-align:center;border:2.5px solid #0d9488;margin-bottom:20px">' +
-          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#94a3b8;margin-bottom:10px">Your Queue Token</div>' +
-          '<div style="font-size:72px;font-weight:900;font-family:monospace;color:#0d9488;line-height:1;letter-spacing:.05em">' + token + '</div>' +
-          '<div style="margin-top:10px;font-size:13px;color:#0d9488;font-weight:600">' + dept + '</div>' +
-          '<div style="margin-top:4px;font-size:12px;color:#94a3b8">' + apptDate + ' · ' + apptTime + '</div>' +
+      '<div style="background:#f4f5f0;padding:28px;border-radius:0 0 12px 12px">' +
+        '<p style="font-size:15px;color:#555555;margin:0 0 20px">Dear <strong>' + ptName.trim() + '</strong>,</p>' +
+        '<div style="background:#fff;border-radius:14px;padding:24px;text-align:center;border:2.5px solid #0F6E56;margin-bottom:20px">' +
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#777777;margin-bottom:10px">Your Queue Token</div>' +
+          '<div style="font-size:72px;font-weight:900;font-family:monospace;color:#0F6E56;line-height:1;letter-spacing:.05em">' + token + '</div>' +
+          '<div style="margin-top:10px;font-size:13px;color:#0F6E56;font-weight:600">' + dept + '</div>' +
+          '<div style="margin-top:4px;font-size:12px;color:#777777">' + apptDate + ' · ' + apptTime + '</div>' +
         '</div>' +
         '<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:16px;text-align:center;margin-bottom:20px">' +
           '<div style="font-size:13px;color:#14532d;font-weight:600;margin-bottom:6px">📱 View your token on your Patient Dashboard</div>' +
-          '<a href="' + dashboardUrl + '" style="display:inline-block;padding:10px 22px;background:#0d9488;color:#fff;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none">Open Patient Dashboard →</a>' +
-          '<div style="font-size:11px;color:#64748b;margin-top:8px">Or visit: https://nihms.netlify.app/patient</div>' +
+          '<a href="' + dashboardUrl + '" style="display:inline-block;padding:10px 22px;background:#0F6E56;color:#fff;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none">Open Patient Dashboard →</a>' +
+          '<div style="font-size:11px;color:#777777;margin-top:8px">Or visit: https://nihms.netlify.app/patient</div>' +
         '</div>' +
         '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
-          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#94a3b8;width:40%">Department</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#0f172a">' + dept + '</td></tr>' +
-          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#94a3b8">Date</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#0f172a">' + apptDate + '</td></tr>' +
-          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#94a3b8">Time</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#0f172a">' + apptTime + '</td></tr>' +
-          '<tr><td style="padding:10px 14px;font-size:13px;color:#94a3b8">Checked in at</td><td style="padding:10px 14px;font-size:13px;font-weight:600;color:#0f172a">' + _fmtTime() + '</td></tr>' +
+          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;color:#777777;width:40%">Department</td><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:600;color:#111111">' + dept + '</td></tr>' +
+          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;color:#777777">Date</td><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:600;color:#111111">' + apptDate + '</td></tr>' +
+          '<tr><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;color:#777777">Time</td><td style="padding:10px 14px;border-bottom:1px solid #f0f1ec;font-size:13px;font-weight:600;color:#111111">' + apptTime + '</td></tr>' +
+          '<tr><td style="padding:10px 14px;font-size:13px;color:#777777">Checked in at</td><td style="padding:10px 14px;font-size:13px;font-weight:600;color:#111111">' + _fmtTime() + '</td></tr>' +
         '</table>' +
-        '<div style="background:#eff6ff;border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:13px;color:#1d4ed8">' +
+        '<div style="background:#E6F1FB;border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:13px;color:#185FA5">' +
           '<strong>📋 What to do next:</strong><br>' +
           '1. Proceed to the <strong>Nurses Station</strong> for vitals<br>' +
           '2. Wait to be called by your token number<br>' +
@@ -5327,7 +5696,7 @@ window._rBookSearch = async function() {
   if(!patient) patient = await _apiSearchPatient(id).catch(function(){ return null; });
 
   if(!patient){ _R.bk.notFound=true; _rRec(); return; }
-  _R.bk.patient=patient; _R.bk.step='slot'; _rRec();
+  _R.bk.patient=_normPt(patient)||patient; _R.bk.step='found'; _rRec();
 };
 
 /* _rBookRegisterNew — used by the new booking form (bk-reg-* field IDs) */
@@ -5370,7 +5739,7 @@ window._rBookConfirm = async function() {
 
   /* Notify patient */
   var smsMsg = 'NIHMS APPOINTMENT CONFIRMED. Dear '+name.trim()+', your appointment ('+ref+') is booked at '+dept+' on '+bk.selectedDate+' at '+bk.selectedSlot+'. Please arrive 10 min early. Clinic: 07:00-17:00. Emergencies: 10177.';
-  var emailHtml = '<div style="font-family:inherit;max-width:520px;margin:0 auto"><div style="background:linear-gradient(135deg,#3b82f6,#2563eb);padding:24px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Confirmed</h2></div><div style="background:#f8fafc;padding:24px;border-radius:0 0 10px 10px"><p>Dear <strong>'+name.trim()+'</strong>,</p><table style="width:100%;border-collapse:collapse;margin:16px 0"><tr><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#94a3b8;font-size:13px">Reference</td><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#3b82f6">'+ref+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#94a3b8;font-size:13px">Department</td><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-weight:600">'+dept+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#94a3b8;font-size:13px">Date</td><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-weight:600">'+bk.selectedDate+'</td></tr><tr><td style="padding:8px 12px;color:#94a3b8;font-size:13px">Time</td><td style="padding:8px 12px;font-weight:600">'+bk.selectedSlot+'</td></tr></table><p style="font-size:13px;color:#475569">Please arrive 10 minutes before your appointment time.</p><p style="font-size:12px;color:#94a3b8">Johannesburg CHC · Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Emergencies: 10177</p></div></div>';
+  var emailHtml = '<div style="font-family:inherit;max-width:520px;margin:0 auto"><div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);padding:24px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Confirmed</h2></div><div style="background:#f4f5f0;padding:24px;border-radius:0 0 10px 10px"><p>Dear <strong>'+name.trim()+'</strong>,</p><table style="width:100%;border-collapse:collapse;margin:16px 0"><tr><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#777777;font-size:13px">Reference</td><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;font-weight:700;color:#0F6E56">'+ref+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#777777;font-size:13px">Department</td><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;font-weight:600">'+dept+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#777777;font-size:13px">Date</td><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;font-weight:600">'+bk.selectedDate+'</td></tr><tr><td style="padding:8px 12px;color:#777777;font-size:13px">Time</td><td style="padding:8px 12px;font-weight:600">'+bk.selectedSlot+'</td></tr></table><p style="font-size:13px;color:#555555">Please arrive 10 minutes before your appointment time.</p><p style="font-size:12px;color:#777777">Johannesburg CHC · Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Emergencies: 10177</p></div></div>';
   try {
     if(pt.phone) await API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:pt.phone,message:smsMsg})}).catch(function(){});
     if(pt.email) await API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:pt.email,subject:'NIHMS — Appointment confirmed: '+ref,html:emailHtml})}).catch(function(){});
@@ -5394,9 +5763,8 @@ window._rQueueAdvance = function(token, newStatus) {
   if(newStatus==='at-nurse') {
     var req={id:'REQ-'+token+'-adv',patientId:p.id,patientName:p.name,age:p.age||'—',sex:p.sex||'—',
       complaint:p.complaint||'Queue check-in',priority:p.priority==='urgent'?'Emergency':'Normal',
-      requestedBy:'Reception',requestedAt:_fmtTime(),notes:'Patient '+token+' sent to nurse station from queue.',seen:false};
-    if(window._nurseAddRequest) window._nurseAddRequest(req);
-    else{if(!window._NURSE_REQUESTS)window._NURSE_REQUESTS=[];window._NURSE_REQUESTS.push(req);}
+      requestedBy:'Reception',requestedAt:_fmtTime(),notes:'Patient '+token+' redirected to Nurse Station for vitals.',seen:false,autoAccept:true};
+    _sendToNurseTab(req);
   }
   _rRec();
   var labels={'at-nurse':'sent to nurses station','with-doctor':p.department==='Telemedicine'?'sent to telemedicine queue':'sent to doctor','done':'marked complete'};
@@ -5540,7 +5908,7 @@ window._rSendMsg = async function() {
             body: JSON.stringify({
               to:      lastPt.email,
               subject: 'Message from NIHMS Reception',
-              html:    '<div style="font-family:inherit;padding:20px"><p>' + body + '</p><p style="font-size:12px;color:#94a3b8">NIHMS · Johannesburg CHC</p></div>',
+              html:    '<div style="font-family:inherit;padding:20px"><p>' + body + '</p><p style="font-size:12px;color:#777777">NIHMS · Johannesburg CHC</p></div>',
               text:    body,
             })
           }).catch(function(){});
@@ -5587,9 +5955,9 @@ function _bindAptEditGrid() {
     if (_R._editApt) _R._editApt._newTime = t;
     container.querySelectorAll('[data-edit-slot]').forEach(function(b) {
       var sel = b.getAttribute('data-edit-slot') === t;
-      b.style.border     = '1.5px solid ' + (sel ? '#3b82f6' : '#e2e8f0');
+      b.style.border     = '1.5px solid ' + (sel ? '#0F6E56' : '#e0e0e0');
       b.style.background = sel ? '#eff6ff' : '#fff';
-      b.style.color      = sel ? '#1d4ed8' : '#0f172a';
+      b.style.color      = sel ? '#185FA5' : '#111111';
       b.style.fontWeight = sel ? '700' : '400';
     });
     var lbl = document.getElementById('ae-selected-slot');
@@ -5606,8 +5974,8 @@ function _rBind() {
   /* Update tab nav highlights */
   document.querySelectorAll('[id^="rn-"]').forEach(function(btn){
     var t=btn.id.replace('rn-','');
-    btn.style.borderBottomColor=t===_R.tab?'#0d9488':'transparent';
-    btn.style.color=t===_R.tab?'#0d9488':'#64748b';
+    btn.style.borderBottomColor=t===_R.tab?'#0F6E56':'transparent';
+    btn.style.color=t===_R.tab?'#0F6E56':'#777777';
     btn.style.fontWeight=t===_R.tab?'700':'500';
   });
   /* Enter on ID inputs */
@@ -5660,7 +6028,7 @@ window._rAptSaveEdit = async function() {
 
   /* ── Notify patient ── */
   var msg = 'NIHMS: Your appointment '+apt.ref+' has been updated. New details: '+dept+' on '+date+' at '+slot+'. Please arrive 10 minutes early. Johannesburg CHC.';
-  var emailHtml = '<div style="font-family:inherit;max-width:500px;margin:0 auto"><div style="background:#3b82f6;padding:20px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Updated</h2></div><div style="background:#f8fafc;padding:20px;border-radius:0 0 10px 10px"><p>Dear patient,</p><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Reference</td><td style="padding:8px;font-weight:700;color:#3b82f6">'+apt.ref+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">Department</td><td style="padding:8px;font-weight:600">'+dept+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">New Date</td><td style="padding:8px;font-weight:600">'+date+'</td></tr><tr><td style="padding:8px;color:#94a3b8;font-size:13px">New Time</td><td style="padding:8px;font-weight:600">'+slot+'</td></tr></table><p style="font-size:12px;color:#94a3b8;margin-top:16px">Please contact reception if you need to reschedule. Johannesburg CHC.</p></div></div>';
+  var emailHtml = '<div style="font-family:inherit;max-width:500px;margin:0 auto"><div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);padding:20px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Updated</h2></div><div style="background:#f4f5f0;padding:20px;border-radius:0 0 10px 10px"><p>Dear patient,</p><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;color:#777777;font-size:13px">Reference</td><td style="padding:8px;font-weight:700;color:#0F6E56">'+apt.ref+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">Department</td><td style="padding:8px;font-weight:600">'+dept+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">New Date</td><td style="padding:8px;font-weight:600">'+date+'</td></tr><tr><td style="padding:8px;color:#777777;font-size:13px">New Time</td><td style="padding:8px;font-weight:600">'+slot+'</td></tr></table><p style="font-size:12px;color:#777777;margin-top:16px">Please contact reception if you need to reschedule. Johannesburg CHC.</p></div></div>';
   try {
     if (apt.phone||apt.patientPhone) await API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:apt.phone||apt.patientPhone,message:msg})}).catch(function(){});
     if (apt.email||apt.patientEmail) await API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:apt.email||apt.patientEmail,subject:'NIHMS — Appointment updated: '+apt.ref,html:emailHtml})}).catch(function(){});
@@ -5806,7 +6174,7 @@ window._rIdFileSelect = function(inputEl) {
 window._rIdFileDrop = function(ev) {
   ev.preventDefault();
   var zone = document.getElementById('nr-id-drop');
-  if (zone) { zone.style.borderColor = '#e2e8f0'; zone.style.background = '#f9fafb'; }
+  if (zone) { zone.style.borderColor = '#e0e0e0'; zone.style.background = '#f9fafb'; }
   var file = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
   if (file) _rIdLoadFile(file);
 };
@@ -5854,11 +6222,11 @@ function _rIdShowPreview(dataUrl, file) {
 
   var isImage = file.type.startsWith('image/');
   var thumb = isImage
-    ? '<img src="' + dataUrl + '" style="width:100%;max-height:180px;object-fit:contain;border-radius:8px;border:1px solid #e2e8f0;background:#f8fafc">'
-    : '<div style="padding:24px;text-align:center;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">' +
+    ? '<img src="' + dataUrl + '" style="width:100%;max-height:180px;object-fit:contain;border-radius:8px;border:1px solid #e0e0e0;background:#f4f5f0">'
+    : '<div style="padding:24px;text-align:center;background:#f4f5f0;border-radius:8px;border:1px solid #e0e0e0">' +
         '<div style="font-size:36px;margin-bottom:6px">📄</div>' +
-        '<div style="font-size:13px;font-weight:600;color:#0f172a">' + file.name + '</div>' +
-        '<div style="font-size:11px;color:#94a3b8">PDF · ' + Math.round(file.size/1024) + ' KB</div>' +
+        '<div style="font-size:13px;font-weight:600;color:#111111">' + file.name + '</div>' +
+        '<div style="font-size:11px;color:#777777">PDF · ' + Math.round(file.size/1024) + ' KB</div>' +
       '</div>';
 
   preview.style.display = 'block';
@@ -5973,7 +6341,7 @@ window._rIdFileSelect = function(inputEl) {
 window._rIdFileDrop = function(ev) {
   ev.preventDefault();
   var zone = document.getElementById('nr-id-drop');
-  if (zone) { zone.style.borderColor = '#e2e8f0'; zone.style.background = '#f9fafb'; }
+  if (zone) { zone.style.borderColor = '#e0e0e0'; zone.style.background = '#f9fafb'; }
   var file = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
   if (file) _rIdLoadFile(file);
 };
@@ -6021,11 +6389,11 @@ function _rIdShowPreview(dataUrl, file) {
 
   var isImage = file.type.startsWith('image/');
   var thumb = isImage
-    ? '<img src="' + dataUrl + '" style="width:100%;max-height:180px;object-fit:contain;border-radius:8px;border:1px solid #e2e8f0;background:#f8fafc">'
-    : '<div style="padding:24px;text-align:center;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">' +
+    ? '<img src="' + dataUrl + '" style="width:100%;max-height:180px;object-fit:contain;border-radius:8px;border:1px solid #e0e0e0;background:#f4f5f0">'
+    : '<div style="padding:24px;text-align:center;background:#f4f5f0;border-radius:8px;border:1px solid #e0e0e0">' +
         '<div style="font-size:36px;margin-bottom:6px">📄</div>' +
-        '<div style="font-size:13px;font-weight:600;color:#0f172a">' + file.name + '</div>' +
-        '<div style="font-size:11px;color:#94a3b8">PDF · ' + Math.round(file.size/1024) + ' KB</div>' +
+        '<div style="font-size:13px;font-weight:600;color:#111111">' + file.name + '</div>' +
+        '<div style="font-size:11px;color:#777777">PDF · ' + Math.round(file.size/1024) + ' KB</div>' +
       '</div>';
 
   preview.style.display = 'block';

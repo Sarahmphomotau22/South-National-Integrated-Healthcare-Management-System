@@ -4,6 +4,44 @@
  */
 if (typeof Pages === 'undefined') window.Pages = {};
 
+/* ── NIHMS design-system CSS — same as receptionist, injected once ── */
+(function _nihmsInjectDS() {
+  if (document.getElementById('nihms-ds-css')) return;
+  var s = document.createElement('style');
+  s.id = 'nihms-ds-css';
+  s.textContent = [
+    /* Reset */
+    '*, *::before, *::after { box-sizing: border-box; }',
+    '::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}',
+    /* Background — subtle green/navy mesh matching login header */
+    'body, #app, .page-root { background-color:#f4f5f0 !important; background-image: repeating-linear-gradient(135deg, rgba(15,110,86,.03) 0px, rgba(15,110,86,.03) 1px, transparent 1px, transparent 40px), repeating-linear-gradient(45deg, rgba(26,74,155,.02) 0px, rgba(26,74,155,.02) 1px, transparent 1px, transparent 40px) !important; background-attachment:fixed !important; }',
+    /* Alert colours — exact login.html values */
+    '.nihms-alert-err { background:#FCEBEB !important; color:#A32D2D !important; border-left:3px solid #E24B4A !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    '.nihms-alert-ok  { background:#E1F5EE !important; color:#0F6E56 !important; border-left:3px solid #1D9E75 !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    '.nihms-alert-warn{ background:#FAEEDA !important; color:#854F0B !important; border-left:3px solid #EF9F27 !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    '.nihms-alert-info{ background:#E6F1FB !important; color:#185FA5 !important; border-left:3px solid #378ADD !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    /* Primary button — pill shape, login-page teal/navy gradient */
+    '.btn-green { background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%) !important; border-color:#0F6E56 !important; border-radius:50px !important; color:#fff !important; }',
+    '.btn-green:hover { opacity:.9 !important; }',
+    /* Secondary/outline buttons — pill */
+    '.btn { border-radius:50px !important; }',
+    '.btn-sm { border-radius:50px !important; }',
+    '.btn-xs { border-radius:50px !important; }',
+    /* Any inline-styled teal button — ensure pill */
+    'button[style*="background:#0F6E56"], button[style*="background: #0F6E56"] { border-radius:50px !important; }',
+    /* Input focus ring — login-page green */
+    'input:focus, select:focus, textarea:focus { border-color:#0F6E56 !important; box-shadow:0 0 0 3px rgba(15,110,86,.12) !important; outline:none !important; }',
+    /* Card style — match receptionist white cards */
+    '.card { background:#fff !important; border-radius:14px !important; border:1px solid #e0e0e0 !important; box-shadow:0 1px 3px rgba(0,0,0,.06) !important; }',
+    '.nihms-card { background:#fff; border-radius:14px; border:1px solid #e0e0e0; box-shadow:0 1px 3px rgba(0,0,0,.06); }',
+    /* Table header */
+    'th { background:#f4f5f0 !important; color:#777777 !important; }',
+    /* CSS variable overrides to match receptionist exact values */
+    ':root { --green:#0F6E56 !important; --green-dark:#0a4f3e !important; --green-mid:#1D9E75 !important; --green-light:#E1F5EE !important; --bg:#f4f5f0 !important; --bg-surface:#f4f5f0 !important; --bg-card:#ffffff !important; --border:#e0e0e0 !important; --border-md:#e0e0e0 !important; --text:#111111 !important; --text-muted:#555555 !important; --text-hint:#777777 !important; --radius:8px !important; --radius-lg:14px !important; --radius-xl:16px !important; --shadow:0 1px 3px rgba(0,0,0,.06) !important; }',
+  ].join('\n');
+  document.head.appendChild(s);
+})();
+
 /* ── Shared: get patient record ── */
 async function _getMyPatientRecord() {
   try {
@@ -19,7 +57,17 @@ Pages['myhealth'] = () => {
   if (window._mhInt) clearInterval(window._mhInt);
   setTimeout(_mhLoad, 0);
   window._mhInt = setInterval(_mhLoad, 30000);
-  return '<div id="mh-alerts"></div><div class="page-title">My health overview</div><div id="mh-body" style="color:var(--text-muted)">Loading...</div>';
+  return '<div id="mh-alerts"></div>' +
+    '<div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);border-radius:16px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:14px">' +
+      '<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;flex-shrink:0">' +
+        '<i class="ti ti-heart-rate-monitor" style="font-size:22px;color:#fff"></i>' +
+      '</div>' +
+      '<div>' +
+        '<div style="font-size:18px;font-weight:700;color:#fff;margin-bottom:2px">My health overview</div>' +
+        '<div style="font-size:12px;color:rgba(255,255,255,.75)">Your health summary, queue status &amp; upcoming care</div>' +
+      '</div>' +
+    '</div>' +
+    '<div id="mh-body" style="color:var(--text-muted)">Loading...</div>';
 };
 
 async function _mhLoad() {
@@ -46,7 +94,7 @@ async function _mhLoad() {
     var alertEl = document.getElementById('mh-alerts');
     if (alertEl && alerts.length) {
       var styleMap = {
-        general:     { bg:'#EEF2FF', border:'#4A6CF7', ic:'ti-speakerphone', c:'#1A4A9B', label:'Facility Announcement' },
+        general:     { bg:'#f0fdfa', border:'#0F6E56', ic:'ti-speakerphone', c:'#0F6E56', label:'Facility Announcement' },
         delay:       { bg:'#FFFBEB', border:'#D97706', ic:'ti-clock-exclamation', c:'#92400E', label:'Delay Notice' },
         emergency:   { bg:'#FEF2F2', border:'#E24B4A', ic:'ti-urgent', c:'#991B1B', label:'Emergency Alert' },
         maintenance: { bg:'var(--bg-surface)', border:'#888', ic:'ti-tool', c:'#555', label:'Maintenance Notice' },
@@ -148,16 +196,28 @@ async function _mhLoad() {
                        .sort(function(a,b){ return new Date(a.scheduledAt) - new Date(b.scheduledAt); });
     var nextAppt = upcoming[0];
     var v = p.latestVitals || {};
-    var tokenBg = {emergency:'#E24B4A',priority:'#EF9F27',normal:'#4A6CF7',walkin:'#1D9E75'}[qTok && qTok.tokenType] || 'var(--green-dark)';
+    var tokenBg = '#0F6E56'; /* NIHMS teal for all token types */
     var tokenStatusMsg = {
-      waiting:'Please wait — you will be called shortly',
+      waiting:'Please wait in the waiting room — you will be called shortly',
+      'at-nurse':'Please proceed to the 🏥 Nurse Station',
+      'with-doctor':'You are currently with the doctor 🩺',
       called:"IT'S YOUR TURN — proceed to the consultation room",
       in_consultation:'You are currently in consultation',
       post_consultation:'Consultation complete',
       lab:'Please go to the Laboratory',
       pharmacy:'Please go to the Pharmacy',
+      done:'Your visit is complete. Thank you!',
       completed:'Your visit is complete. Thank you!'
     }[(qTok && qTok.status)] || 'Please wait';
+    /* Location banner data */
+    var _locMap = {
+      waiting:      {icon:'⏳',label:'Waiting Room',   col:'#d97706',bg:'#fef3c7'},
+      'at-nurse':   {icon:'🏥',label:'Nurse Station',  col:'#1A4A9B',bg:'#eff6ff'},
+      'with-doctor':{icon:'🩺',label:'Consultation',   col:'#0F6E56',bg:'#f0fdfa'},
+      done:         {icon:'✓', label:'Discharged',     col:'#16a34a',bg:'#dcfce7'},
+      completed:    {icon:'✓', label:'Visit Complete', col:'#16a34a',bg:'#dcfce7'}
+    };
+    var _loc = _locMap[qTok && qTok.status] || _locMap['waiting'];
 
     wrap.innerHTML =
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">' +
@@ -184,7 +244,7 @@ async function _mhLoad() {
         '</div>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
-        '<div class="card" id="mh-queue-card" style="' + (qTok&&qTok.status==='called'?'border:2px solid var(--green);box-shadow:0 0 0 4px rgba(13,148,136,.15)':'') + '">' +
+        '<div class="card" id="mh-queue-card" style="' + (qTok&&qTok.status==='called'?'border:2px solid #0F6E56;box-shadow:0 0 0 4px rgba(15,110,86,.15)':'') + '">' +
           '<div class="card-title" style="display:flex;align-items:center;justify-content:space-between">' +
             '<span><i class="ti ti-ticket"></i>My queue ticket</span>' +
             (qTok ? '<span style="font-size:10px;font-weight:500;color:var(--text-muted);background:var(--bg-surface);padding:2px 8px;border-radius:99px">Auto-refreshes</span>' : '') +
@@ -194,7 +254,7 @@ async function _mhLoad() {
 
             /* ── Active token ── */
             (qTok.status==='called' ?
-              '<div style="padding:10px 14px;background:var(--green);color:#fff;border-radius:10px;font-weight:700;font-size:14px;margin-bottom:12px;text-align:center;animation:_nihms-pulse 1.5s infinite">' +
+              '<div style="padding:10px 14px;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;border-radius:10px;font-weight:700;font-size:14px;margin-bottom:12px;text-align:center;animation:_nihms-pulse 1.5s infinite">' +
                 '🔔 IT\'S YOUR TURN — Please proceed now' +
               '</div>'
             : '') +
@@ -206,6 +266,35 @@ async function _mhLoad() {
               /* Department badge */
               (qTok.dept ? '<div style="display:inline-block;margin-top:8px;padding:3px 12px;background:var(--green-light);color:var(--green-dark);border-radius:99px;font-size:11px;font-weight:700">'+qTok.dept+'</div>' : '') +
             '</div>' +
+
+            /* ── Location banner + journey progress ── */
+            '<div style="margin:0 0 12px;padding:12px 14px;border-radius:12px;background:'+_loc.bg+';border:1.5px solid '+_loc.col+'22;display:flex;align-items:center;gap:10px">' +
+              '<span style="font-size:22px">'+_loc.icon+'</span>' +
+              '<div style="flex:1">' +
+                '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:'+_loc.col+';font-weight:700;margin-bottom:1px">Current location</div>' +
+                '<div style="font-size:15px;font-weight:800;color:'+_loc.col+'">'+_loc.label+'</div>' +
+              '</div>' +
+            '</div>' +
+            /* Journey progress steps */
+            (function(){
+              var _steps=[{k:'waiting',l:'Wait'},{k:'at-nurse',l:'Nurse'},{k:'with-doctor',l:'Doctor'},{k:'done',l:'Done'}];
+              var _stColors={waiting:'#d97706','at-nurse':'#1A4A9B','with-doctor':'#0F6E56',done:'#16a34a'};
+              var _cur=_steps.findIndex(function(s){return s.k===(qTok&&qTok.status);});
+              if(_cur<0)_cur=0;
+              return '<div style="display:flex;align-items:flex-start;gap:0;margin-bottom:14px">'+
+                _steps.map(function(s,i){
+                  var active=i<=_cur, isCur=i===_cur;
+                  var col=_stColors[s.k]||'#0F6E56';
+                  return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;position:relative">'+
+                    (i>0?'<div style="position:absolute;top:11px;right:50%;width:100%;height:2px;background:'+(active?col:'var(--border)')+'"></div>':'')+
+                    '<div style="width:22px;height:22px;border-radius:50%;background:'+(isCur?col:active?col+'99':'var(--bg-surface)')+';border:2px solid '+(active?col:'var(--border)')+';display:flex;align-items:center;justify-content:center;z-index:1;flex-shrink:0">'+
+                      (active?'<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg>':'')+
+                    '</div>'+
+                    '<div style="font-size:9px;font-weight:'+(isCur?'700':'400')+';color:'+(active?col:'var(--text-muted)')+';margin-top:4px;text-align:center">'+s.l+'</div>'+
+                  '</div>';
+                }).join('')+
+              '</div>';
+            })()+
 
             /* Now serving / Est. wait tiles — matches screenshot */
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">' +
@@ -249,8 +338,8 @@ async function _mhLoad() {
             (qTok.status==='completed' ?
               '<div style="text-align:center;margin-top:12px">' +
                 '<div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Your visit is complete!</div>' +
-                '<button class="btn btn-green" style="width:100%;padding:10px" onclick="_launchSurvey(\''+qTok._id+'\',null)">' +
-                  '<i class="ti ti-star"></i>Rate your experience' +
+                '<button style="width:100%;padding:12px;border:none;border-radius:50px;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:7px" onclick="_launchSurvey(\''+qTok._id+'\',null)">' +
+                  '<svg width="14" height="14" viewBox="0 0 24 24" fill="white" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Rate your experience' +
                 '</button>' +
               '</div>'
             : '')
@@ -261,8 +350,8 @@ async function _mhLoad() {
               '<div style="font-size:40px;margin-bottom:8px;opacity:.3">🎫</div>' +
               '<div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:4px">No queue ticket today</div>' +
               '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Your token will appear here after the receptionist checks you in</div>' +
-              '<a href="https://nihms.netlify.app/patient" style="display:block;padding:10px;background:var(--green);color:#fff;border-radius:10px;font-size:13px;font-weight:700;text-decoration:none;text-align:center" target="_blank">' +
-                '<i class="ti ti-external-link"></i> View token dashboard' +
+              '<a href="https://nihms.netlify.app/patient" style="display:block;padding:12px;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;border-radius:50px;font-size:13px;font-weight:700;text-decoration:none;text-align:center" target="_blank">' +
+                'View token dashboard' +
               '</a>' +
             '</div>'
           ) +
@@ -445,7 +534,15 @@ window._uploadAvatarFromTopbar = async function(input) {
 Pages['myrecords'] = () => {
   setTimeout(_mrLoad, 0);
   return `
-<div class="page-title">My medical records</div>
+<div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);border-radius:16px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:14px">
+  <div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+    <i class="ti ti-notes-medical" style="font-size:22px;color:#fff"></i>
+  </div>
+  <div>
+    <div style="font-size:18px;font-weight:700;color:#fff;margin-bottom:2px">My medical records</div>
+    <div style="font-size:12px;color:rgba(255,255,255,.75)">Consultations, lab results, prescriptions &amp; vitals</div>
+  </div>
+</div>
 
 <div style="display:flex;gap:2px;margin-bottom:16px;background:var(--bg-surface);border-radius:10px;padding:4px;max-width:680px">
   <button id="mr-tab-btn-1" onclick="_mrTab(1)" style="flex:1;padding:8px 12px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;background:var(--bg-card);color:var(--green-dark);box-shadow:0 1px 3px rgba(0,0,0,.08)"><i class="ti ti-stethoscope"></i> Consultations</button>
@@ -633,8 +730,18 @@ Pages['appointments'] = () => {
     } catch(e) { if(wrap) wrap.innerHTML='<div class="alert-box alert-danger"><i class="ti ti-alert-circle"></i>'+e.message+'</div>'; }
   }, 0);
 
-  return '<div class="page-title">My appointments</div>' +
-    '<div style="display:flex;justify-content:flex-end;margin-bottom:14px"><button class="btn btn-green" onclick="Router.setPage(\'book\')"><i class="ti ti-plus"></i>Book new visit</button></div>' +
+  return '<div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);border-radius:16px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:14px">' +
+      '<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;flex-shrink:0">' +
+        '<i class="ti ti-calendar-event" style="font-size:22px;color:#fff"></i>' +
+      '</div>' +
+      '<div style="flex:1">' +
+        '<div style="font-size:18px;font-weight:700;color:#fff;margin-bottom:2px">My appointments</div>' +
+        '<div style="font-size:12px;color:rgba(255,255,255,.75)">Upcoming visits, reschedule &amp; check-in</div>' +
+      '</div>' +
+      '<button class="btn btn-green" onclick="Router.setPage(\'book\')" style="background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.35);border-radius:50px;color:#fff;flex-shrink:0">' +
+        '<i class="ti ti-plus"></i>Book new visit' +
+      '</button>' +
+    '</div>' +
     '<div class="card"><div class="card-title"><i class="ti ti-calendar"></i>All appointments</div><div id="appt-list" style="color:var(--text-muted);padding:16px">Loading...</div></div>' +
     '<div id="reschedule-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;align-items:flex-start;justify-content:center;padding-top:40px;overflow-y:auto">' +
       '<div style="background:var(--bg-card);border-radius:var(--radius-xl);padding:24px;width:860px;max-width:96vw;box-shadow:0 24px 64px rgba(0,0,0,.3);margin-bottom:40px">' +
@@ -939,18 +1046,18 @@ async function _ciSendTokenNotification(tok) {
 }
 
 function _ciRenderToken(tok) {
-  var tokenBg = {emergency:'#E24B4A',priority:'#EF9F27',normal:'#4A6CF7',walkin:'#1D9E75'}[tok.tokenType]||'var(--green-dark)';
+  var tokenBg = '#0F6E56'; /* NIHMS teal */
   var statusInfo = {
     waiting:          {bg:'var(--bg-surface)',c:'var(--amber)',ic:'ti-clock',msg:'Please wait — you will be called shortly'},
     called:           {bg:'var(--green-light)',c:'var(--green-dark)',ic:'ti-bell-ringing',msg:'Please proceed to the consultation room NOW'},
     in_consultation:  {bg:'var(--green-light)',c:'var(--green-dark)',ic:'ti-stethoscope',msg:'You are in consultation'},
-    post_consultation:{bg:'var(--bg-surface)',c:'#4A6CF7',ic:'ti-checks',msg:'Consultation complete'},
-    lab:              {bg:'#EEF2FF',c:'#4A6CF7',ic:'ti-flask',msg:'Please go to the Laboratory'},
+    post_consultation:{bg:'#f0fdfa',c:'#0F6E56',ic:'ti-checks',msg:'Consultation complete'},
+    lab:              {bg:'#f0fdfa',c:'#0F6E56',ic:'ti-flask',msg:'Please go to the Laboratory'},
     pharmacy:         {bg:'var(--green-light)',c:'var(--green-dark)',ic:'ti-pill',msg:'Please go to the Pharmacy'},
     completed:        {bg:'var(--green-light)',c:'var(--green-dark)',ic:'ti-circle-check',msg:'Your visit is complete. Thank you!'},
   }[tok.status]||{bg:'var(--bg-surface)',c:'var(--amber)',ic:'ti-clock',msg:'Please wait'};
-  return '<div class="card"'+(tok.status==='called'?' style="border:2px solid var(--green)"':'')+' style="margin-bottom:14px;text-align:center">' +
-    (tok.status==='called'?'<div style="background:var(--green);color:#fff;padding:12px;margin:-1px -1px 16px;border-radius:var(--radius-xl) var(--radius-xl) 0 0;font-weight:700;font-size:15px">🔔 IT\'S YOUR TURN</div>':'') +
+  return '<div class="card"'+(tok.status==='called'?' style="border:2px solid #0F6E56;box-shadow:0 0 0 4px rgba(15,110,86,.12)"':'')+' style="margin-bottom:14px;text-align:center">' +
+    (tok.status==='called'?'<div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;padding:12px;margin:-1px -1px 16px;border-radius:var(--radius-xl) var(--radius-xl) 0 0;font-weight:700;font-size:15px">🔔 IT\'S YOUR TURN</div>':'') +
     '<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-hint);margin-bottom:4px">Your queue token</div>' +
     '<div style="font-size:76px;font-weight:900;color:'+tokenBg+';font-family:var(--mono);line-height:1;margin:4px 0">'+tok.token+'</div>' +
     '<div style="display:flex;justify-content:center;gap:32px;margin:14px 0">' +
@@ -963,7 +1070,7 @@ function _ciRenderToken(tok) {
       '<div style="text-align:center;margin-top:12px">' +
       '<div style="font-size:14px;font-weight:600;color:var(--green-dark);margin-bottom:4px">Your visit is complete!</div>' +
       '<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Help us improve by completing a short survey about your experience today.</div>' +
-      '<button class="btn btn-green" style="width:100%;padding:12px;font-size:14px;font-weight:700" onclick="_launchSurvey(\''+tok._id+'\',null)"><i class="ti ti-star"></i>Complete Patient Experience Survey</button>' +
+      '<button style="width:100%;padding:12px;border:none;border-radius:50px;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit" onclick="_launchSurvey(\''+tok._id+'\',null)"><i class="ti ti-star"></i>Complete Patient Experience Survey</button>' +
       '<div style="font-size:11px;color:var(--text-hint);margin-top:8px">Takes about 2–3 minutes</div>' +
       '</div>' : '') +
     '</div>' +
@@ -1992,3 +2099,512 @@ function _srvScoreCard(label, avg) {
   '</div>';
 }
 
+
+
+/* ══════════════════════════════════════════════════════════════════════
+   AI VIRTUAL ASSISTANT — appended from js/pages/chatbot.js
+   (Pages['assistant'] + all supporting functions)
+══════════════════════════════════════════════════════════════════════ */
+
+/* ── Knowledge base topics ── */
+function _getKbTopics() {
+  return [
+    { icon:'ti-virus',          label:'HIV & AIDS',                   q:'Explain HIV, AIDS, symptoms, CD4 count, and ARV treatment in South Africa' },
+    { icon:'ti-lungs',          label:'Tuberculosis (TB)',             q:'What is TB, how is it spread, what are symptoms, and how is it treated with DOTS?' },
+    { icon:'ti-droplet-half-2', label:'Diabetes explained',           q:'Explain type 1 and type 2 diabetes, blood sugar levels, symptoms, and management' },
+    { icon:'ti-heart-rate',     label:'High blood pressure',          q:'What causes hypertension, what are the symptoms and complications, and how is it treated?' },
+    { icon:'ti-pill',           label:'Understanding medications',     q:'How do I know if my medication is working and what are common side effects to watch for?' },
+    { icon:'ti-flask',          label:'Reading lab results',          q:'How do I read and understand blood test results like FBC, LFT, urea and cholesterol?' },
+    { icon:'ti-brain',          label:'Mental health in SA',          q:'What mental health conditions are common in South Africa and how can I get help?' },
+    { icon:'ti-gender-bigender',label:'Sexual & reproductive health', q:'What should I know about sexual health, STIs, contraception, and reproductive care?' },
+    { icon:'ti-baby-carriage',  label:'Pregnancy & maternal health',  q:'What do I need to know about pregnancy, antenatal care, and safe delivery in South Africa?' },
+    { icon:'ti-leaf',           label:'Traditional & modern medicine',q:'Can I use traditional medicine alongside modern medicine and what are the risks?' },
+    { icon:'ti-shield-check',   label:'Vaccinations & immunisation',  q:'What vaccines do adults and children need in South Africa and why are they important?' },
+    { icon:'ti-heart',          label:'Heart disease & stroke',       q:'What are the warning signs of a heart attack and stroke, and what should I do?' },
+  ];
+}
+
+/* ── Health tips bank ── */
+const _healthTips = [
+  { icon:'💧', color:'#1A4A9B', bg:'#EEF2FF', title:'Stay Hydrated',       body:'Drink 6–8 glasses of water daily. Proper hydration supports kidney function, energy levels, and skin health.',          category:'Wellness' },
+  { icon:'🚶', color:'#0F6E56', bg:'#E1F5EE', title:'Move Every Day',       body:'Even 30 minutes of brisk walking daily reduces the risk of heart disease, diabetes, and depression.',                    category:'Exercise' },
+  { icon:'🍎', color:'#E05D2A', bg:'#FEF3EC', title:'Eat the Rainbow',      body:'Include fruits and vegetables of different colours in your meals for essential vitamins and antioxidants.',               category:'Nutrition' },
+  { icon:'😴', color:'#7C3AED', bg:'#F5F3FF', title:'Prioritise Sleep',     body:'Adults need 7–9 hours of quality sleep. Poor sleep is linked to weight gain, weakened immunity, and mental health issues.',category:'Sleep' },
+  { icon:'🧘', color:'#D97706', bg:'#FFFBEB', title:'Manage Stress',        body:'Chronic stress raises blood pressure. Try deep breathing: inhale 4 counts, hold 4, exhale 6. Practice 5 minutes daily.', category:'Mental Health' },
+  { icon:'🩺', color:'#DC2626', bg:'#FEF2F2', title:'Regular Check-ups',    body:'Annual screenings catch problems early. Blood pressure, cholesterol, blood sugar, and cancer screenings save lives.',     category:'Prevention' },
+  { icon:'🚭', color:'#65A30D', bg:'#F7FEE7', title:'Avoid Smoking',        body:'Smoking causes 7 out of 10 lung cancer cases. Your clinic can provide free stop-smoking support.',                        category:'Lifestyle' },
+  { icon:'🤲', color:'#0F6E56', bg:'#E1F5EE', title:'Hand Hygiene',         body:'Washing hands with soap for 20 seconds prevents 80% of common infections.',                                               category:'Hygiene' },
+  { icon:'☀️', color:'#D97706', bg:'#FFFBEB', title:'Sunscreen Matters',    body:'Apply SPF 30+ sunscreen when outdoors. Skin cancer is one of the most preventable cancers.',                              category:'Prevention' },
+  { icon:'🦷', color:'#1A4A9B', bg:'#EEF2FF', title:'Oral Health Matters',  body:'Gum disease is linked to heart disease. Brush twice daily, floss, and visit a dentist every 6 months.',                  category:'Dental' },
+];
+
+let _tipIndex    = 0;
+let _chatHistory = [];
+let _isListening = false;
+
+function _initChatbot() {
+  _tipIndex = Math.floor(Math.random() * _healthTips.length);
+  _renderTip();
+}
+
+function _renderTip() {
+  const tip = _healthTips[_tipIndex % _healthTips.length];
+  const el  = document.getElementById('current-tip');
+  if (!el) return;
+  el.innerHTML = `
+    <div style="text-align:center;padding:8px 0 14px">
+      <div style="font-size:40px;margin-bottom:10px">${tip.icon}</div>
+      <span style="font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:3px 10px;border-radius:20px;background:${tip.bg};color:${tip.color}">${tip.category}</span>
+    </div>
+    <div style="font-weight:700;font-size:16px;color:#111;margin-bottom:10px">${tip.title}</div>
+    <div style="font-size:13px;color:#555;line-height:1.7">${tip.body}</div>
+    <button onclick="_askAboutTip('${tip.title}')"
+      style="margin-top:14px;width:100%;padding:9px;border-radius:10px;border:1.5px solid var(--green);background:transparent;color:var(--green-dark);font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s"
+      onmouseover="this.style.background='var(--green-light)'" onmouseout="this.style.background='transparent'">
+      <i class="ti ti-message-question"></i> Ask about this
+    </button>`;
+}
+
+window._refreshTip = () => {
+  _tipIndex++;
+  const el = document.getElementById('current-tip');
+  if (el) { el.style.animation='none'; el.offsetHeight; el.style.animation='fadeIn .4s ease'; }
+  _renderTip();
+};
+
+window._askAboutTip = (title) => {
+  const input = document.getElementById('chat-input');
+  if (input) { input.value = 'Tell me more about: ' + title; _sendMessage(); }
+};
+
+window._searchKnowledge = (query) => {
+  const input = document.getElementById('kb-search');
+  if (input) input.value = query;
+  const chatInput = document.getElementById('chat-input');
+  if (chatInput) { chatInput.value = query; _sendMessage(); }
+};
+
+window._sendQuickQ = (q) => {
+  const input = document.getElementById('chat-input');
+  if (input) { input.value = q; _sendMessage(); }
+};
+
+/* ── Send message — routes through backend proxy ── */
+window._sendMessage = async () => {
+  const input = document.getElementById('chat-input');
+  const text  = input?.value?.trim();
+  if (!text) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+
+  const qq = document.getElementById('quick-questions');
+  if (qq) qq.style.display = 'none';
+
+  _addMessage('user', text);
+  _chatHistory.push({ role:'user', content: text });
+
+  const typingId = _addTypingIndicator();
+  const btn = document.getElementById('send-btn');
+  if (btn) btn.disabled = true;
+
+  try {
+    const user = API.getStoredUser();
+
+    const systemPrompt = `You are a knowledgeable and compassionate medical health assistant for NIHMS (National Integrated Healthcare Management System) in South Africa. You help patients understand any medical question they have — no topic is off limits.
+
+Patient: ${user?.firstName || 'Patient'} ${user?.lastName || ''}
+
+You can help with ALL medical questions including symptoms, medications, lab results, mental health, sexual health, HIV, TB, diabetes, hypertension, pregnancy, surgery, cancer, traditional medicine, and anything else the patient asks.
+
+Response style:
+- Be thorough, clear, and compassionate
+- Use plain language
+- For emergency symptoms always say: "Call 10177 or go to your nearest emergency room immediately"
+- Reference South African context: public clinics, ARV programmes, DOTS therapy, NHI
+- Short paragraphs, plain text, avoid markdown symbols`;
+
+    const res   = await API._fetchDirect('/auth/chat', {
+      method: 'POST',
+      body:   JSON.stringify({ messages: _chatHistory.slice(-10), systemPrompt })
+    });
+    const reply = res?.reply || 'I\'m sorry, I couldn\'t process your question. Please try again.';
+
+    _removeTypingIndicator(typingId);
+    _addMessage('assistant', reply);
+    _chatHistory.push({ role:'assistant', content: reply });
+
+  } catch(e) {
+    _removeTypingIndicator(typingId);
+    _addMessage('assistant', 'I\'m having trouble connecting right now. Please try again in a moment, or speak to a nurse at your clinic for assistance.');
+  } finally {
+    if (btn) btn.disabled = false;
+    input?.focus();
+  }
+};
+
+function _addMessage(role, text) {
+  const wrap = document.getElementById('chat-messages');
+  if (!wrap) return;
+  const isUser = role === 'user';
+  const time   = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+  const formatted = text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/\n\n/g, '</p><p style="margin-top:8px">')
+    .replace(/\n/g, '<br>');
+
+  const div = document.createElement('div');
+  div.style.cssText = 'display:flex;gap:10px;align-items:flex-start;' + (isUser ? 'flex-direction:row-reverse' : '');
+  div.innerHTML = `
+    <div style="width:32px;height:32px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,${isUser?'#0F6E56,#1A4A9B':'#1A4A9B,#0F6E56'})">
+      <i class="ti ti-${isUser?'user':'robot'}" style="font-size:14px;color:#fff"></i>
+    </div>
+    <div style="max-width:75%">
+      <div style="${isUser
+        ? 'background:linear-gradient(135deg,#0F6E56,#1A4A9B);color:#fff;border-radius:12px 0 12px 12px'
+        : 'background:#fff;border:1px solid var(--border);border-radius:0 12px 12px 12px;color:#333;box-shadow:0 1px 3px rgba(0,0,0,.06)'};padding:12px 14px;font-size:14px;line-height:1.6">
+        <p style="margin:0">${formatted}</p>
+      </div>
+      <div style="font-size:11px;color:#aaa;margin-top:4px;${isUser?'text-align:right':''}padding:0 4px">${time}</div>
+    </div>`;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function _addTypingIndicator() {
+  const wrap = document.getElementById('chat-messages');
+  if (!wrap) return null;
+  const id  = 'typing-' + Date.now();
+  const div = document.createElement('div');
+  div.id    = id;
+  div.style.cssText = 'display:flex;gap:10px;align-items:flex-start';
+  div.innerHTML = `
+    <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#1A4A9B,#0F6E56);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <i class="ti ti-robot" style="font-size:14px;color:#fff"></i>
+    </div>
+    <div style="background:#fff;border:1px solid var(--border);border-radius:0 12px 12px 12px;padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,.06)">
+      <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+    </div>`;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+  return id;
+}
+
+function _removeTypingIndicator(id) {
+  if (!id) return;
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+window._clearChat = () => {
+  _chatHistory = [];
+  const wrap = document.getElementById('chat-messages');
+  if (wrap) wrap.innerHTML = '';
+  const qq = document.getElementById('quick-questions');
+  if (qq) qq.style.display = 'block';
+  _addMessage('assistant', 'Chat cleared. How can I help you today?');
+};
+
+window._toggleVoice = () => {
+  const SRClass = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  if (!SRClass) {
+    UI.showToast('Voice input not supported. Please use Chrome or Edge.', 'err');
+    return;
+  }
+  const btn = document.getElementById('voice-btn');
+
+  if (_isListening) {
+    if (window._recognition) window._recognition.stop();
+    return;
+  }
+
+  try {
+    window._recognition = new SRClass();
+    window._recognition.lang            = 'en-ZA';
+    window._recognition.continuous      = false;
+    window._recognition.interimResults  = false;
+    window._recognition.maxAlternatives = 1;
+
+    window._recognition.onstart = () => {
+      _isListening = true;
+      if (btn) {
+        btn.innerHTML = '<i class="ti ti-microphone" style="animation:pulse 1s infinite"></i> Listening…';
+        btn.style.background = 'rgba(231,76,60,.7)';
+      }
+    };
+
+    window._recognition.onresult = (e) => {
+      const text = Array.from(e.results).map(r => r[0].transcript).join(' ').trim();
+      if (text) {
+        const input = document.getElementById('chat-input');
+        if (input) { input.value = text; _sendMessage(); }
+      }
+    };
+
+    window._recognition.onerror = (e) => {
+      const msg = e.error === 'not-allowed'
+        ? 'Microphone access denied — please allow microphone in browser settings.'
+        : 'Voice input failed (' + (e.error || 'unknown') + '). Please type instead.';
+      UI.showToast(msg, 'err');
+    };
+
+    window._recognition.onend = () => {
+      _isListening = false;
+      if (btn) {
+        btn.innerHTML = '<i class="ti ti-microphone"></i> Speak';
+        btn.style.background = 'rgba(255,255,255,.15)';
+      }
+    };
+
+    window._recognition.start();
+
+  } catch(e) {
+    UI.showToast('Could not start microphone: ' + e.message, 'err');
+  }
+};
+
+/* ══════════════════════════════
+   VIRTUAL ASSISTANT PAGE
+══════════════════════════════ */
+Pages['assistant'] = () => {
+  setTimeout(() => _initChatbot(), 100);
+  return `
+    <div style="display:grid;grid-template-columns:1fr 360px;gap:16px;height:calc(100vh - 120px);min-height:500px">
+
+      <!-- LEFT: Chat panel -->
+      <div style="display:flex;flex-direction:column;background:var(--bg-card);border-radius:var(--radius-xl);border:1px solid var(--border);overflow:hidden">
+
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);padding:16px 20px;display:flex;align-items:center;gap:12px;flex-shrink:0">
+          <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center">
+            <i class="ti ti-robot" style="font-size:20px;color:#fff"></i>
+          </div>
+          <div style="flex:1">
+            <div style="font-weight:700;color:#fff;font-size:15px">NIHMS Virtual Assistant</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.75);display:flex;align-items:center;gap:5px">
+              <div style="width:7px;height:7px;border-radius:50%;background:#4ade80;animation:pulse 2s infinite"></div>
+              Online &middot; Powered by Groq AI
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button onclick="_clearChat()" style="background:rgba(255,255,255,.15);border:none;border-radius:8px;padding:6px 10px;cursor:pointer;color:#fff;font-size:12px">
+              <i class="ti ti-trash"></i> Clear
+            </button>
+            <button onclick="_toggleVoice()" id="voice-btn" style="background:rgba(255,255,255,.15);border:none;border-radius:8px;padding:6px 10px;cursor:pointer;color:#fff;font-size:12px">
+              <i class="ti ti-microphone"></i> Speak
+            </button>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:#fafafa">
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#0F6E56,#1A4A9B);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <i class="ti ti-robot" style="font-size:14px;color:#fff"></i>
+            </div>
+            <div style="max-width:75%">
+              <div style="background:#fff;border:1px solid var(--border);border-radius:0 12px 12px 12px;padding:12px 14px;font-size:14px;line-height:1.6;color:#333;box-shadow:0 1px 3px rgba(0,0,0,.06)">
+                Hello! I'm your NIHMS Medical Assistant. Ask me <strong>anything</strong> about your health.
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0;font-size:12px">
+                  <div style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:var(--bg-surface);border-radius:7px;color:#555"><i class="ti ti-pill" style="font-size:13px;color:var(--green-dark)"></i>Medications</div>
+                  <div style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:var(--bg-surface);border-radius:7px;color:#555"><i class="ti ti-flask" style="font-size:13px;color:var(--green-dark)"></i>Lab results</div>
+                  <div style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:var(--bg-surface);border-radius:7px;color:#555"><i class="ti ti-heart-rate" style="font-size:13px;color:var(--green-dark)"></i>Symptoms</div>
+                  <div style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:var(--bg-surface);border-radius:7px;color:#555"><i class="ti ti-brain" style="font-size:13px;color:var(--green-dark)"></i>Mental health</div>
+                  <div style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:var(--bg-surface);border-radius:7px;color:#555"><i class="ti ti-virus" style="font-size:13px;color:var(--green-dark)"></i>HIV &amp; TB</div>
+                  <div style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:var(--bg-surface);border-radius:7px;color:#555"><i class="ti ti-baby-carriage" style="font-size:13px;color:var(--green-dark)"></i>Pregnancy</div>
+                </div>
+                <div style="font-size:12px;color:#888;border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
+                  For emergencies call <strong>10177</strong> immediately.
+                </div>
+              </div>
+              <div style="font-size:11px;color:#aaa;margin-top:4px;padding-left:4px">Just now</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick questions -->
+        <div id="quick-questions" style="padding:10px 16px;border-top:1px solid var(--border);background:#fff;flex-shrink:0">
+          <div style="font-size:11px;color:#aaa;margin-bottom:8px;font-weight:500">SUGGESTED QUESTIONS</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap" id="quick-q-list"></div>
+        </div>
+
+        <!-- Input area -->
+        <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fff;flex-shrink:0">
+          <div style="display:flex;gap:8px;align-items:flex-end">
+            <div style="flex:1;position:relative">
+              <textarea id="chat-input" rows="1" placeholder="Type your health question or press the mic to speak…"
+                style="width:100%;padding:10px 14px;border:1.5px solid var(--border);border-radius:12px;font-family:inherit;font-size:14px;resize:none;outline:none;line-height:1.5;max-height:100px;overflow-y:auto;transition:border-color .15s"
+                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();_sendMessage();}"
+                oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"
+                onfocus="this.style.borderColor='var(--green)'" onblur="this.style.borderColor='var(--border)'">
+              </textarea>
+            </div>
+            <button id="send-btn" onclick="_sendMessage()"
+              style="width:42px;height:42px;border-radius:12px;border:none;background:linear-gradient(135deg,#0F6E56,#1A4A9B);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;transition:all .15s"
+              onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform=''">
+              <i class="ti ti-send"></i>
+            </button>
+          </div>
+          <div style="font-size:11px;color:#bbb;margin-top:6px;text-align:center">
+            Press Enter to send &middot; Shift+Enter for new line
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Knowledge + Health tips -->
+      <div style="display:flex;flex-direction:column;gap:12px;overflow-y:auto">
+
+        <!-- Knowledge Search -->
+        <div style="background:var(--bg-card);border-radius:var(--radius-xl);border:1px solid var(--border);overflow:hidden">
+          <div style="background:linear-gradient(135deg,#1A4A9B,#0F6E56);padding:14px 16px;display:flex;align-items:center;gap:10px">
+            <i class="ti ti-search" style="color:#fff;font-size:18px"></i>
+            <div style="font-weight:600;color:#fff;font-size:14px">Knowledge Search</div>
+          </div>
+          <div style="padding:14px">
+            <div style="position:relative;margin-bottom:10px">
+              <i class="ti ti-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#aaa;font-size:14px"></i>
+              <input id="kb-search" type="text" placeholder="Search health topics…"
+                style="width:100%;padding:9px 9px 9px 32px;border:1.5px solid var(--border);border-radius:10px;font-size:13px;outline:none;font-family:inherit;transition:border-color .15s"
+                onkeydown="if(event.key==='Enter')_searchKnowledge(this.value)"
+                onfocus="this.style.borderColor='var(--green)'" onblur="this.style.borderColor='var(--border)'">
+            </div>
+            <div id="kb-results" style="font-size:13px"></div>
+          </div>
+        </div>
+
+        <!-- Daily Health Tips -->
+        <div style="background:var(--bg-card);border-radius:var(--radius-xl);border:1px solid var(--border);overflow:hidden;flex:1">
+          <div style="background:linear-gradient(135deg,#EF9F27,#E05D2A);padding:14px 16px;display:flex;align-items:center;gap:10px">
+            <i class="ti ti-bulb" style="color:#fff;font-size:18px"></i>
+            <div style="font-weight:600;color:#fff;font-size:14px">Daily Health Tips</div>
+            <button onclick="_refreshTip()" style="margin-left:auto;background:rgba(255,255,255,.2);border:none;border-radius:6px;padding:4px 8px;cursor:pointer;color:#fff;font-size:11px">
+              <i class="ti ti-refresh"></i> New tip
+            </button>
+          </div>
+          <div id="health-tips-body" style="padding:14px">
+            <div id="current-tip" style="animation:fadeIn .4s ease"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+      @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes typing{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}
+      .typing-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#aaa;animation:typing 1.2s infinite;margin:0 2px}
+      .typing-dot:nth-child(2){animation-delay:.2s}
+      .typing-dot:nth-child(3){animation-delay:.4s}
+    </style>`;
+};
+
+/* ── Populate quick questions after DOM is available ── */
+(function _fillQuickQ() {
+  function _doFill() {
+    var el = document.getElementById('quick-q-list');
+    if (!el) return;
+    var qs = [
+      'What do my blood test results mean?',
+      'I have chest pain — is it serious?',
+      'What are HIV symptoms and treatment?',
+      'How do ARVs work?',
+      'What causes high blood pressure?',
+      'I feel depressed — what can help?',
+      'How does diabetes affect my body?',
+      'What should I know about TB?',
+      'What is a normal blood sugar level?',
+      'Can I mix alcohol with my medication?'
+    ];
+    el.innerHTML = qs.map(function(q) {
+      return '<button onclick="_sendQuickQ(\'' + q.replace(/'/g,"\\'") + '\')" style="font-size:12px;padding:5px 10px;border-radius:20px;border:1px solid var(--border);background:var(--bg-surface);color:#555;cursor:pointer;white-space:nowrap" onmouseover="this.style.background=\'var(--green-light)\';this.style.borderColor=\'var(--green)\';this.style.color=\'var(--green-dark)\'" onmouseout="this.style.background=\'var(--bg-surface)\';this.style.borderColor=\'var(--border)\';this.style.color=\'#555\'">' + q + '</button>';
+    }).join('');
+    // Also populate kb-results
+    var kb = document.getElementById('kb-results');
+    if (kb && !kb.innerHTML.trim()) {
+      kb.innerHTML = _getKbTopics().map(function(t) {
+        return '<div onclick="_searchKnowledge(\'' + t.q.replace(/'/g,"\\'") + '\')" style="padding:8px 10px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s;border:1px solid transparent;margin-bottom:4px" onmouseover="this.style.background=\'var(--green-light)\';this.style.borderColor=\'var(--green)\'" onmouseout="this.style.background=\'\';this.style.borderColor=\'transparent\'"><i class="ti ' + t.icon + '" style="color:var(--green-dark);font-size:14px;flex-shrink:0"></i><span style="color:#333">' + t.label + '</span></div>';
+      }).join('');
+    }
+  }
+  // Patch _initChatbot to also fill quick questions
+  var _origInit = _initChatbot;
+  window._initChatbot = _initChatbot = function() {
+    _origInit();
+    setTimeout(_doFill, 50);
+  };
+})();
+
+/* ══════════════════════════════════════════════════════════════════════
+   PATIENT SIDEBAR NAV INJECTION
+   Adds "AI Assistant" nav item whenever the patient sidebar renders.
+   Works regardless of whether router.js or app.js builds the sidebar.
+══════════════════════════════════════════════════════════════════════ */
+(function _injectAssistantNav() {
+  function _addNavItem() {
+    var sidebar = document.getElementById('sidebar');
+    if (!sidebar) return;
+    // Only inject once, and only for patient role
+    if (sidebar.querySelector('[data-nav="assistant"]')) return;
+    // Check role — if receptionist/nurse sidebar is present, skip
+    if (document.getElementById('nurse-sidebar')) return;
+
+    // Find a good insertion point: after the last nav-item or at end of sidebar
+    // Add a divider section label + the nav item
+    var divider = document.createElement('div');
+    divider.className = 'nav-section';
+    divider.textContent = 'AI Tools';
+
+    var item = document.createElement('div');
+    item.className = 'nav-item';
+    item.setAttribute('data-nav', 'assistant');
+    item.setAttribute('data-page', 'assistant');
+    item.innerHTML = '<i class="ti ti-robot"></i> AI Assistant';
+    item.onclick = function() {
+      // Remove active from all nav items
+      document.querySelectorAll('#sidebar .nav-item').forEach(function(n) { n.classList.remove('active'); });
+      item.classList.add('active');
+      if (typeof Router !== 'undefined') Router.setPage('assistant');
+    };
+
+    sidebar.appendChild(divider);
+    sidebar.appendChild(item);
+  }
+
+  // Try now (in case sidebar already exists)
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() { setTimeout(_addNavItem, 500); });
+  } else {
+    setTimeout(_addNavItem, 500);
+  }
+
+  // Also observe sidebar for when Router populates it
+  var _obs = null;
+  function _startObserver() {
+    var sidebar = document.getElementById('sidebar');
+    if (!sidebar) { setTimeout(_startObserver, 300); return; }
+    _addNavItem();
+    _obs = new MutationObserver(function() { setTimeout(_addNavItem, 100); });
+    _obs.observe(sidebar, { childList: true, subtree: false });
+  }
+  setTimeout(_startObserver, 200);
+
+  // Also hook Router.setPage to keep nav active state in sync
+  var _routerHook = setInterval(function() {
+    if (typeof Router === 'undefined' || !Router.setPage) return;
+    clearInterval(_routerHook);
+    var _origSetPage = Router.setPage.bind(Router);
+    Router.setPage = function(page) {
+      _origSetPage(page);
+      // Re-inject if sidebar was rebuilt
+      setTimeout(function() {
+        _addNavItem();
+        // Highlight active
+        document.querySelectorAll('#sidebar .nav-item').forEach(function(n) {
+          if (n.getAttribute('data-page') === page) n.classList.add('active');
+          else if (n.getAttribute('data-nav') === 'assistant' && page !== 'assistant') n.classList.remove('active');
+        });
+      }, 150);
+    };
+  }, 200);
+})();

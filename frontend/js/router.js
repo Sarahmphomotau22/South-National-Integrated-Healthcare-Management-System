@@ -54,28 +54,29 @@ window.Router = (() => {
 
     doctor: {
       label: 'Doctor', icon: 'ti-stethoscope',
-      default: 'doc_dashboard',
+      default: 'doctor',
       nav: [
         { section: 'Today' },
-        { id: 'doc_dashboard',   icon: 'ti-layout-dashboard', label: 'My dashboard'     },
-        { id: 'appointments',    icon: 'ti-calendar',         label: 'Appointments'      },
-        { id: 'doc_tasks',       icon: 'ti-check',            label: 'Clinical tasks'    },
+        { id: 'doctor',           icon: 'ti-layout-dashboard',  label: 'Dashboard'         },
+        { id: 'doc_appointments', icon: 'ti-calendar-event',    label: 'Appointments'      },
+        { id: 'doc_tasks',        icon: 'ti-checkbox',          label: 'Clinical Tasks'    },
         { section: 'Patients' },
-        { id: 'patients',        icon: 'ti-users',            label: 'Patient 360°'      },
-        { id: 'consult',         icon: 'ti-stethoscope',      label: 'Consultations'     },
-        { id: 'medical_notes',   icon: 'ti-notes',            label: 'Medical notes'     },
+        { id: 'patient_file',     icon: 'ti-folder-open',       label: 'Patient File'      },
+        { id: 'patients',         icon: 'ti-users',             label: 'Patient 360°'      },
+        { id: 'medical_notes',    icon: 'ti-notes',             label: 'Medical Notes'     },
         { section: 'Orders & Results' },
-        { id: 'prescriptions',   icon: 'ti-pill',             label: 'Prescriptions'     },
-        { id: 'lab',             icon: 'ti-flask',            label: 'Lab orders'        },
-        { id: 'lab_results',     icon: 'ti-chart-bar',        label: 'Lab results'       },
-        { id: 'radiology',       icon: 'ti-scan',             label: 'Radiology'         },
-        { id: 'referrals',       icon: 'ti-arrows-exchange',  label: 'Referrals'         },
+        { id: 'prescriptions',    icon: 'ti-pill',              label: 'Prescriptions'     },
+        { id: 'lab',              icon: 'ti-flask',             label: 'Lab Orders'        },
+        { id: 'lab_results',      icon: 'ti-chart-bar',         label: 'Lab Results'       },
+        { id: 'radiology',        icon: 'ti-camera',            label: 'Radiology'         },
+        { id: 'referrals',        icon: 'ti-arrows-exchange',   label: 'Referrals'         },
         { section: 'Communication' },
-        { id: 'telemedicine',    icon: 'ti-video',            label: 'Telemedicine'      },
-        { id: 'messages',        icon: 'ti-message',          label: 'Messages'          },
-        { id: 'notifications',   icon: 'ti-bell',             label: 'Notifications'     },
+        { id: 'telemedicine',     icon: 'ti-video',             label: 'Telemedicine'      },
+        { id: 'messages',         icon: 'ti-message',           label: 'Messages'          },
+        { id: 'notifications',    icon: 'ti-bell',              label: 'Notifications'     },
         { section: 'Documents' },
-        { id: 'med_certs',       icon: 'ti-file-certificate', label: 'Medical certs'     },
+        { id: 'med_certs',        icon: 'ti-file-certificate',  label: 'Issue Certificate' },
+        { id: 'doc_all_certs',    icon: 'ti-certificate',       label: 'Cert Registry'     },
       ]
     },
 
@@ -139,7 +140,8 @@ window.Router = (() => {
         { id: 'myhealth',    icon: 'ti-heart-rate',        label: 'Overview' },
         { id: 'myrecords',   icon: 'ti-clipboard-list',    label: 'Medical records' },
         { id: 'appointments',icon: 'ti-calendar-event',    label: 'My appointments' },
-        { id: 'billing',     icon: 'ti-credit-card',       label: 'Billing & medical aid' },
+        { id: 'billing',       icon: 'ti-credit-card',   label: 'Billing & medical aid' },
+        { id: 'my_med_certs',  icon: 'ti-certificate',   label: 'Medical Certificates'  },
       ]
     }
   };
@@ -161,8 +163,21 @@ window.Router = (() => {
 
   function setPage(id) {
     current.page = id;
-    UI.renderSidebar(current.role, id);
-    UI.renderContent(id);
+    /* Doctor shell manages its own internal sidebar via _dRender().
+       Skip the outer UI.renderSidebar call when the shell is active
+       to prevent a duplicate sidebar appearing inside the page area. */
+    if (!document.getElementById('doc-main')) {
+      UI.renderSidebar(current.role, id);
+    }
+    /* For doctor pages: if the shell (#doc-main) is already in the DOM,
+       _dPage() already re-rendered in place and returned ''.
+       Calling UI.renderContent again would inject a duplicate shell.
+       We let UI.renderContent run only on first mount (no #doc-main yet). */
+    if (document.getElementById('doc-main') && Pages[id]) {
+      Pages[id](); // switch view in place — no DOM injection
+    } else {
+      UI.renderContent(id);
+    }
   }
 
   return { roleConfig, current, setRole, setPage };

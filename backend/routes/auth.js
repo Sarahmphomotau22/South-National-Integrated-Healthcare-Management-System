@@ -159,8 +159,108 @@ router.post('/resend-verification', async (req, res, next) => {
 
 module.exports = router;
 
+// ── Shared AI helpers (used by /chat and /chat/status) ──────────────────────
+const _makeAiRequest = (lib, options, body) => new Promise((resolve, reject) => {
+  const http  = require('http');
+  const https = require('https');
+  const r = (lib === 'https' ? https : http).request(options, (res) => {
+    let raw = '';
+    res.on('data', c => raw += c);
+    res.on('end', () => resolve({ status: res.statusCode, body: raw }));
+  });
+  r.on('error', reject);
+  r.setTimeout(20000, () => { r.destroy(); reject(new Error('timeout')); });
+  if (body) r.write(body);
+  r.end();
+});
+
+// Current live Groq models (verified Oct 2026 — see console.groq.com/docs/models)
+// Update GROQ_MODEL in .env to pin a specific model; otherwise these are tried in order
+const _groqModels = () => [
+  process.env.GROQ_MODEL,          // .env override — always first
+  'llama-3.1-8b-instant',          // production, universally available, fast
+  'llama-3.3-70b-versatile',       // production, higher quality (some accounts only)
+  'qwen/qwen3.8-27b',              // preview fallback
+].filter(Boolean);
+
+// GET /api/v1/auth/chat/status — check which AI providers are configured & reachable
+// Useful for debugging: visit /api/v1/auth/chat/status in your browser
+router.get('/chat/status', async (req, res) => {
+  const https  = require('https');
+  const http   = require('http');
+  const status = {
+    groq:      { configured: !!process.env.GROQ_API_KEY, reachable: false, model: null, error: null },
+    anthropic: { configured: !!process.env.ANTHROPIC_API_KEY, reachable: false, error: null },
+    ollama:    { configured: true, reachable: false, error: null },
+  };
+
+  // Check Groq
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const body = JSON.stringify({ model: _groqModels()[0], max_tokens: 5, temperature: 0,
+        messages: [{ role: 'user', content: 'Hi' }] });
+      const resp = await _makeAiRequest('https', {
+        hostname: 'api.groq.com', port: 443,
+        path: '/openai/v1/chat/completions', method: 'POST',
+        headers: { 'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
+          'Content-Length': Buffer.byteLength(body) }
+      }, body);
+      const data = JSON.parse(resp.body);
+      if (resp.status === 200 && data.choices?.[0]) {
+        status.groq.reachable = true;
+        status.groq.model = data.model;
+      } else {
+        status.groq.error = data.error?.message || ('HTTP ' + resp.status);
+      }
+    } catch (e) { status.groq.error = e.message; }
+  } else {
+    status.groq.error = 'GROQ_API_KEY not set in .env';
+  }
+
+  // Check Ollama
+  try {
+    const ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
+    const url = new URL(ollamaHost + '/api/tags');
+    const lib = url.protocol === 'https:' ? 'https' : 'http';
+    const resp = await _makeAiRequest(lib, {
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname, method: 'GET'
+    }, null);
+    if (resp.status === 200) { status.ollama.reachable = true; }
+    else { status.ollama.error = 'HTTP ' + resp.status; }
+  } catch (e) { status.ollama.error = e.message; }
+
+  // Check Anthropic
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const body = JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 5,
+        messages: [{ role: 'user', content: 'Hi' }] });
+      const resp = await _makeAiRequest('https', {
+        hostname: 'api.anthropic.com', port: 443,
+        path: '/v1/messages', method: 'POST',
+        headers: { 'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Length': Buffer.byteLength(body) }
+      }, body);
+      const data = JSON.parse(resp.body);
+      if (resp.status === 200 && data.content?.[0]) { status.anthropic.reachable = true; }
+      else { status.anthropic.error = data.error?.message || ('HTTP ' + resp.status); }
+    } catch (e) { status.anthropic.error = e.message; }
+  } else {
+    status.anthropic.error = 'ANTHROPIC_API_KEY not set in .env';
+  }
+
+  const anyWorking = status.groq.reachable || status.anthropic.reachable || status.ollama.reachable;
+  res.json({ success: true, anyWorking, providers: status,
+    hint: anyWorking ? 'At least one AI provider is working.' :
+      'No AI provider is reachable. Add GROQ_API_KEY=gsk_... to your .env file and restart the server. Get a free key at https://console.groq.com' });
+});
+
 // POST /api/v1/auth/chat — AI chatbot proxy
-// Tries providers in order: Ollama (local) → Anthropic → error
+// Tries providers in order: Ollama (local, free) → Groq (free cloud) → Anthropic → offline reply
 router.post('/chat', async (req, res, next) => {
   try {
     const { messages, systemPrompt } = req.body;
@@ -172,22 +272,8 @@ router.post('/chat', async (req, res, next) => {
     const https  = require('https');
     const logger = require('../utils/logger');
 
-    // ── Helper: make HTTP(S) request ──
-    const makeRequest = (lib, options, body) => new Promise((resolve, reject) => {
-      const req = lib.request(options, (r) => {
-        let raw = '';
-        r.on('data', c => raw += c);
-        r.on('end', () => resolve({ status: r.statusCode, body: raw }));
-      });
-      req.on('error', reject);
-      req.setTimeout(15000, () => { req.destroy(); reject(new Error('timeout')); });
-      if (body) req.write(body);
-      req.end();
-    });
-
-    /* Use provided systemPrompt (clinical or patient) or detect role */
+    /* Use provided systemPrompt or build from role */
     const userRole = req.user?.role || 'patient';
-    const isClinical = systemPrompt && systemPrompt.includes('PATIENT CONTEXT');
 
     const sys = systemPrompt || (
       ['doctor','nurse','facility_admin'].includes(userRole)
@@ -214,35 +300,29 @@ RULES:
 - Keep replies under 400 words`
     );
 
-    // ── 1. Try Ollama (local, free, no API key) ──
-    const ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
+    // ── 1. Try Ollama (local, free, no API key needed) ──────────────────────
+    const ollamaHost  = process.env.OLLAMA_HOST  || 'http://localhost:11434';
     const ollamaModel = process.env.OLLAMA_MODEL || 'llama3.2';
     try {
-      // Build prompt for Ollama (uses /api/chat with OpenAI-style messages)
       const ollamaBody = JSON.stringify({
         model:    ollamaModel,
         messages: [{ role: 'system', content: sys }, ...messages.slice(-10)],
         stream:   false,
         options:  { temperature: 0.7, num_predict: 800 }
       });
-
       const ollamaUrl  = new URL(ollamaHost + '/api/chat');
-      const ollamaOpts = {
+      const lib = ollamaUrl.protocol === 'https:' ? 'https' : 'http';
+      const resp = await _makeAiRequest(lib, {
         hostname: ollamaUrl.hostname,
         port:     ollamaUrl.port || (ollamaUrl.protocol === 'https:' ? 443 : 80),
-        path:     ollamaUrl.pathname,
-        method:   'POST',
+        path:     ollamaUrl.pathname, method: 'POST',
         headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(ollamaBody) }
-      };
-
-      const lib  = ollamaUrl.protocol === 'https:' ? https : http;
-      const resp = await makeRequest(lib, ollamaOpts, ollamaBody);
-
+      }, ollamaBody);
       if (resp.status === 200) {
         const data  = JSON.parse(resp.body);
         const reply = data.message?.content || data.response || '';
         if (reply) {
-          logger.info('[AI] Ollama responded successfully');
+          logger.info('[AI] Ollama responded');
           return res.json({ success: true, reply, provider: 'ollama' });
         }
       }
@@ -250,20 +330,9 @@ RULES:
       logger.info('[AI] Ollama not available: ' + ollamaErr.message);
     }
 
-    // ── 2. Try Groq (free cloud) — model fallback chain ──────────────────
+    // ── 2. Try Groq (free cloud — get key at console.groq.com) ──────────────
     if (process.env.GROQ_API_KEY) {
-      // Try models in order until one works (handles decommissioned models)
-      // Current live Groq models as of Aug 2026 — verified from Groq API
-      // Models confirmed working — qwen first (known working on this account)
-      const groqModels = [
-        process.env.GROQ_MODEL,           // .env override — always first
-        'qwen/qwen3.6-27b',               // confirmed working
-        'qwen/qwen3-32b',                 // fallback
-        'meta-llama/llama-4-maverick-17b-128e-instruct', // try if available
-      ].filter(Boolean);
-
-      let groqSuccess = false;
-      for (const groqModel of groqModels) {
+      for (const groqModel of _groqModels()) {
         try {
           const groqBody = JSON.stringify({
             model:       groqModel,
@@ -271,7 +340,7 @@ RULES:
             temperature: 0.7,
             messages:    [{ role: 'system', content: sys }, ...messages.slice(-10)]
           });
-          const groqOpts = {
+          const resp = await _makeAiRequest('https', {
             hostname: 'api.groq.com', port: 443,
             path:     '/openai/v1/chat/completions', method: 'POST',
             headers: {
@@ -279,63 +348,45 @@ RULES:
               'Authorization':  'Bearer ' + process.env.GROQ_API_KEY,
               'Content-Length': Buffer.byteLength(groqBody)
             }
-          };
-          const resp = await makeRequest(https, groqOpts, groqBody);
+          }, groqBody);
           const data = JSON.parse(resp.body);
 
           if (resp.status === 200 && data.choices?.[0]?.message?.content) {
-            logger.info('[AI] Groq responded with model: ' + groqModel);
+            logger.info('[AI] Groq responded — model: ' + groqModel);
             let reply = data.choices[0].message.content;
-
-            // Strip thinking tokens — Qwen and some reasoning models leak their
-            // internal chain-of-thought wrapped in <think>...</think> blocks
+            // Strip <think>...</think> blocks that reasoning models sometimes leak
             reply = reply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-
-            // Also strip numbered "thinking process" headers that some models output
-            // e.g. "1. Analyze User Input:" style preambles before the real answer
-            const thinkingPatterns = [
-              /^[\s\S]*?(?=Hello|Good\s(?:morning|afternoon|evening)|Dear|I\s(?:understand|can\s(?:see|help|explain)|would))/i,
-            ];
-            for (const pattern of thinkingPatterns) {
-              const match = reply.match(pattern);
-              if (match && match[0].length > 200 && match[0].includes('\n')) {
-                // Only strip if there's a substantial preamble (likely thinking output)
-                const stripped = reply.replace(pattern, '').trim();
-                if (stripped.length > 50) reply = stripped;
-              }
-            }
-
             return res.json({ success: true, reply, provider: 'groq', model: groqModel });
           }
 
-          // Log the specific error so you can see it in nodemon console
           const errMsg = data.error?.message || ('HTTP ' + resp.status);
           logger.warn('[AI] Groq model ' + groqModel + ' failed: ' + errMsg);
 
-          // If model is decommissioned or not found, try next
-          if (data.error?.code === 'model_not_found' || data.error?.code === 'model_decommissioned' ||
+          // Model gone — try the next one in the list
+          if (resp.status === 404 || data.error?.code === 'model_not_found' ||
+              data.error?.code === 'model_decommissioned' ||
               errMsg.includes('decommissioned') || errMsg.includes('not found') ||
-              errMsg.includes('does not exist') || resp.status === 404) {
-            continue; // try next model
+              errMsg.includes('does not exist')) {
+            continue;
           }
-
-          // For auth errors or rate limits, no point trying other models
+          // Auth / rate-limit — no point trying other models with same key
           if (resp.status === 401 || resp.status === 403) {
             logger.error('[AI] Groq auth error — check GROQ_API_KEY in .env');
             break;
           }
           if (resp.status === 429) {
-            logger.warn('[AI] Groq rate limited — try again in a moment');
+            logger.warn('[AI] Groq rate limited');
             break;
           }
-
         } catch (groqErr) {
           logger.warn('[AI] Groq model ' + groqModel + ' error: ' + groqErr.message);
         }
       }
+    } else {
+      logger.warn('[AI] GROQ_API_KEY not set — skipping Groq. Add it to .env to enable NOMI.');
     }
 
-    // ── 3. Try Anthropic Claude (needs API key) ──
+    // ── 3. Try Anthropic Claude ──────────────────────────────────────────────
     if (process.env.ANTHROPIC_API_KEY) {
       try {
         const claudeBody = JSON.stringify({
@@ -344,7 +395,7 @@ RULES:
           system:     sys,
           messages:   messages.slice(-10)
         });
-        const claudeOpts = {
+        const resp = await _makeAiRequest('https', {
           hostname: 'api.anthropic.com', port: 443,
           path:     '/v1/messages', method: 'POST',
           headers: {
@@ -353,31 +404,26 @@ RULES:
             'anthropic-version': '2023-06-01',
             'Content-Length':    Buffer.byteLength(claudeBody)
           }
-        };
-        const resp = await makeRequest(https, claudeOpts, claudeBody);
+        }, claudeBody);
         const data = JSON.parse(resp.body);
         if (resp.status === 200 && data.content?.[0]?.text) {
           logger.info('[AI] Anthropic Claude responded');
           return res.json({ success: true, reply: data.content[0].text, provider: 'anthropic' });
         }
+        logger.warn('[AI] Anthropic error: ' + (data.error?.message || 'HTTP ' + resp.status));
       } catch (claudeErr) {
         logger.warn('[AI] Anthropic error: ' + claudeErr.message);
       }
     }
 
-    // ── 4. No AI provider available ──
+    // ── 4. All providers failed — friendly offline reply ────────────────────
+    logger.error('[AI] All providers failed. Add GROQ_API_KEY to .env — free at console.groq.com');
     return res.json({
-      success: true,
+      success:  true,
       provider: 'none',
-      reply: [
-              'Hello! I am NOMI, the NIHMS Health Assistant.',
-              '',
-              'I am currently having trouble connecting to the AI service.',
-              'This usually means the API key needs to be refreshed.',
-              '',
-              'Please speak to a nurse or doctor at your clinic for health questions.',
-              'For emergencies, call 10177 immediately.'
-             ].join('\n')
+      reply: 'I\'m not able to connect to the AI service right now. ' +
+             'For health questions, please speak to a nurse or doctor at your clinic. ' +
+             'For emergencies, call 10177 immediately.'
     });
 
   } catch (err) { next(err); }

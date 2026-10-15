@@ -192,16 +192,10 @@ function _da_section(icon, title, content, borderColor) {
 /* ════════════════════════════════════════════════════════════════════
    MAIN PAGE
 ════════════════════════════════════════════════════════════════════ */
-/* Override Pages['assistant'] for clinical roles only — patients keep NOMI chatbot */
-const _originalAssistantPage = Pages['assistant'];
-Pages['assistant'] = () => {
-  const role = (API.getStoredUser && API.getStoredUser()?.role) || '';
-  const clinicalRoles = ['doctor','nurse','facility_admin','admin','super_admin'];
-  if (!clinicalRoles.includes(role)) {
-    /* Fall back to patient NOMI chatbot */
-    return typeof _originalAssistantPage === 'function' ? _originalAssistantPage() : '<div class="page-title">AI Assistant</div>';
-  }
-  /* Clinical decision support UI */
+/* Register clinical decision support under its own page key.
+   Pages['assistant'] is left untouched — it remains the patient NOMI chatbot.
+   The doctor portal links to 'doc_assistant' via the doctor.js nav. */
+Pages['doc_assistant'] = function() {
   return _doctorAssistantPage();
 };
 
