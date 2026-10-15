@@ -1081,183 +1081,258 @@ function _dPat360(){
    CONSULTATION
 ══════════════════════════════════════════════════════════════════ */
 function _dConsult(){
-  var wf = _D.workflow;
-  var waiting = window._DOCTOR_QUEUE||[];
-  var p = _D.consultPat || null;
-  var today = new Date().toISOString().slice(0,10);
-  var timeNow = new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'});
-  var outcomes = ['Diagnosis Required','Investigation Required','Medication Required',
-                  'Referral Required','Follow-Up Required','Emergency Escalation','No Further Action'];
-  var consultTypes = ['New Consultation','Follow-Up','Emergency','Chronic Care','Post-Discharge','Other'];
+  var p       = _D.consultPat || _D.selectedPat || null;
+  var u       = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  var today   = new Date();
+  var todayFmt= today.toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
+  var todayIso= today.toISOString().slice(0,10);
+  var timeNow = today.toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'});
 
-  var patBar = p
-    ? '<div style="background:'+C.blueLt+';border:1px solid '+C.blueBd+';border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px">'+
-        '<div style="width:40px;height:40px;border-radius:50%;background:'+C.blue+';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0">'+
-          p.name.split(' ').map(function(n){return n[0];}).join('').slice(0,2)+'</div>'+
-        '<div style="flex:1"><div style="font-size:15px;font-weight:800;color:'+C.text+'">'+p.name+'</div>'+
-          '<div style="font-size:12px;color:'+C.muted+'">ID: '+(p.id||'—')+' · Age: '+(p.age||'—')+(p.sex?' · '+p.sex:'')+(p.mlRiskLevel?' · ML Risk: <strong style="color:'+(p.mlRiskLevel==='HIGH'?C.red:p.mlRiskLevel==='MEDIUM'?C.amber:C.green)+'">'+p.mlRiskLevel+'</strong>':'')+'</div></div>'+
-        '<button onclick="_D.consultPat=null;_D.consultPatId=null;_dRender()" style="font-size:11px;color:'+C.muted+';border:1px solid '+C.border+';background:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">Change patient</button>'+
-      '</div>'
-    : '';
+  /* Resolve clinician info from logged-in user */
+  var docName     = u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'');
+  var docHpcsa    = u.hpcsaNumber||u.hpcsa||u.registrationNumber||u.regNo||u.licenseNumber||'';
+  var docFacility = (typeof u.facility==='string'?u.facility:'')||(u.facility&&u.facility.name)||(u.primaryFacility&&u.primaryFacility.name)||u.facilityName||'';
 
-  var form = p
-    ? '<div style="display:flex;flex-direction:column;gap:14px">'+
-        /* Facility / Consultation Details */
-        '<div style="background:'+C.bg+';border:1px solid '+C.border+';border-radius:10px;padding:14px">'+
-          '<div style="font-size:12px;font-weight:700;color:'+C.blue+';text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">CONSULTATION DETAILS</div>'+
-          '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'+
-            _inp('cs-date','Consultation Date','','date',today)+
-            _inp('cs-time','Consultation Time','','time',timeNow)+
-            _sel('cs-type','Consultation Type',consultTypes,'New Consultation')+
-          '</div>'+
-          '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px">'+
-            _inp('cs-clinician','Clinician','Full name')+
-            _inp('cs-reg','Professional Registration No.','e.g. MP 1234567')+
-            _inp('cs-facility','Facility / Clinic','e.g. Johannesburg CHC')+
-          '</div>'+
-        '</div>'+
-        /* Chief Complaint */
-        '<div style="background:'+C.bg+';border:1px solid '+C.border+';border-radius:10px;padding:14px">'+
-          '<div style="font-size:12px;font-weight:700;color:'+C.blue+';text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">CHIEF COMPLAINT</div>'+
-          _ta('cs-complaint','Chief Complaint','Describe the main reason for today\'s visit…',3)+
-        '</div>'+
-        /* History */
-        '<div style="background:'+C.bg+';border:1px solid '+C.border+';border-radius:10px;padding:14px">'+
-          '<div style="font-size:12px;font-weight:700;color:'+C.blue+';text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">HISTORY OF PRESENTING COMPLAINT</div>'+
-          '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'+
-            _inp('cs-onset','Onset','e.g. Sudden, gradual')+
-            _inp('cs-duration','Duration','e.g. 3 days, 2 weeks')+
-            _inp('cs-severity','Severity','Mild / Moderate / Severe')+
-          '</div>'+
-          _ta('cs-symptoms','Symptoms','Describe all symptoms reported by the patient…',3)+
-        '</div>'+
-        /* Medical History / Meds / Allergies */
-        '<div style="background:'+C.bg+';border:1px solid '+C.border+';border-radius:10px;padding:14px">'+
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
-            _ta('cs-medhistory','Relevant Medical History','Past diagnoses, surgeries, hospitalisations…',3)+
-            _ta('cs-currentmeds','Current Medications','List all current medications…',3)+
-          '</div>'+
-          '<div style="margin-top:10px">'+
-            '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px">Allergies</label>'+
-            '<div style="display:flex;gap:14px;margin-bottom:6px">'+
-              '<label style="font-size:13px;color:'+C.text+';display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="allergy" value="none" checked> No Known Allergies</label>'+
-              '<label style="font-size:13px;color:'+C.text+';display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="allergy" value="known"> Known Allergies</label>'+
-            '</div>'+
-            _inp('cs-allergies','Allergy Details','None known')+
-          '</div>'+
-        '</div>'+
-        /* Vital Signs (pre-filled from nurse record) */
-        (p.vitals ? (function(){
-          var vr = p.vitalsRecord || null;
-          var hasFlagged = p.flags && p.flags.length > 0;
-          var vDate  = vr ? (vr.recordedDate || '') : '';
-          var vTime  = vr ? (vr.recordedTime || '') : '';
-          var vPlace = vr ? (vr.facility || 'Nurse Station') : 'Nurse Station';
-          var vWard  = vr ? (vr.ward || '') : '';
-          var vBy    = vr ? (vr.recordedBy || 'Nurse') : 'Nurse';
-          var flaggedFields = (p.flags||[]).map(function(f){return (f.field||f).toLowerCase();});
-          var vitalRows = [
-            ['BP',           p.vitals.bp,     'mmHg',  'bp'],
-            ['Pulse / HR',   p.vitals.hr,     'bpm',   'heartRate'],
-            ['Temperature',  p.vitals.temp,   '°C',    'temperature'],
-            ['SpO₂',         p.vitals.spo2,   '%',     'spo2'],
-            ['Resp. Rate',   p.vitals.rr,     '/min',  'rr'],
-            ['Weight',       p.vitals.weight, 'kg',    'weight'],
-          ];
-          var mlBadge = p.mlRiskLevel ? '<span style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:'+(p.mlRiskLevel==='HIGH'?'#fee2e2':p.mlRiskLevel==='MEDIUM'?'#fef3c7':'#dcfce7')+';color:'+(p.mlRiskLevel==='HIGH'?C.red:p.mlRiskLevel==='MEDIUM'?C.amber:C.green)+'">'+(p.mlRiskLevel==='HIGH'?'⚠ HIGH RISK':p.mlRiskLevel==='MEDIUM'?'⚡ MEDIUM RISK':'✓ LOW RISK')+'</span>' : '';
-          var bg    = hasFlagged ? '#fff9f9' : C.greenLt;
-          var bd    = hasFlagged ? '#fca5a5' : C.greenBd;
-          var hdr   = hasFlagged ? C.red     : C.green;
-          return '<div style="background:'+bg+';border:1px solid '+bd+';border-radius:10px;padding:14px">'+
-            '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:10px">'+
-              '<div>'+
-                '<div style="font-size:12px;font-weight:700;color:'+hdr+';text-transform:uppercase;letter-spacing:.07em">'+(hasFlagged?'⚑ VITAL SIGNS — FLAGGED ABNORMALS':'✓ VITAL SIGNS — Recorded by Nurse')+'</div>'+
-                '<div style="font-size:11px;color:'+C.muted+';margin-top:3px">'+
-                  (vDate?'<strong>Date:</strong> '+vDate+'&nbsp;&nbsp;':'')+(vTime?'<strong>Time:</strong> '+vTime+'&nbsp;&nbsp;':'')+(vPlace?'<strong>Facility:</strong> '+vPlace:'')+(vWard?'&nbsp;&middot;&nbsp;'+vWard:'')+'<br>'+
-                  '<strong>Recorded by:</strong> '+vBy+
-                '</div>'+
-              '</div>'+
-              mlBadge+
-            '</div>'+
-            '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:'+(hasFlagged?'10':'0')+'px">'+
-              vitalRows.map(function(r){
-                var isFlagged = flaggedFields.some(function(f){return f.includes(r[3].toLowerCase())||r[3].toLowerCase().includes(f);});
-                return '<div style="padding:10px;background:#fff;border-radius:8px;border:1.5px solid '+(isFlagged?C.red:bd)+'">'+
-                  '<div style="font-size:10px;color:'+C.muted+';font-weight:600;text-transform:uppercase;letter-spacing:.05em">'+r[0]+'</div>'+
-                  '<div style="font-size:16px;font-weight:800;color:'+(isFlagged?C.red:C.text)+';margin-top:2px">'+(r[1]||'—')+' <span style="font-size:11px;font-weight:400;color:'+C.muted+'">'+r[2]+'</span></div>'+
-                  (isFlagged?'<div style="font-size:9px;color:'+C.red+';font-weight:700;margin-top:2px">⚑ FLAGGED</div>':'')+
-                '</div>';
-              }).join('')+
-            '</div>'+
-            (hasFlagged && p.flags.length ? '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:7px;padding:9px 12px">'+
-              '<div style="font-size:11px;font-weight:700;color:'+C.red+';margin-bottom:4px">Clinical Alerts — Requires Review:</div>'+
-              p.flags.map(function(f){
-                var label = typeof f==='string' ? f : ((f.field||'')+(f.value?' = '+f.value:'')+(f.reason?' — '+f.reason:'')+(f.status?' ('+f.status+')':''));
-                return '<div style="font-size:11px;color:'+C.red+';padding:2px 0">⚑ '+label+'</div>';
-              }).join('')+
-              (p.aiRisk?'<div style="font-size:11px;color:#92400e;margin-top:5px;background:#fef3c7;border-radius:5px;padding:5px 8px">🤖 AI: '+p.aiRisk+'</div>':'')+
-            '</div>' : '')+
-          '</div>';
-        })() : '')+
-        /* Clinical Examination */
-        '<div style="background:'+C.bg+';border:1px solid '+C.border+';border-radius:10px;padding:14px">'+
-          '<div style="font-size:12px;font-weight:700;color:'+C.blue+';text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">CLINICAL EXAMINATION</div>'+
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
-            _ta('cs-general','General Examination','General appearance, nutrition, hydration…',3)+
-            _ta('cs-systems','System Examination','Cardiovascular, respiratory, abdominal, neuro…',3)+
-          '</div>'+
-        '</div>'+
-        /* Clinician Notes */
-        '<div style="background:'+C.bg+';border:1px solid '+C.border+';border-radius:10px;padding:14px">'+
-          '<div style="font-size:12px;font-weight:700;color:'+C.blue+';text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">CLINICIAN NOTES</div>'+
-          _ta('cs-notes','Notes','Additional observations, clinical reasoning…',3)+
-        '</div>'+
-        /* Consultation Outcome */
-        '<div style="background:'+C.bg+';border:1px solid '+C.border+';border-radius:10px;padding:14px">'+
-          '<div style="font-size:12px;font-weight:700;color:'+C.blue+';text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">CONSULTATION OUTCOME</div>'+
-          '<div style="display:flex;flex-wrap:wrap;gap:10px">'+
-            outcomes.map(function(o){
-              return '<label style="display:flex;align-items:center;gap:5px;font-size:13px;color:'+C.text+';cursor:pointer">'+
-                '<input type="checkbox" value="'+o+'" class="cs-outcome"> '+o+'</label>';
-            }).join('')+
-          '</div>'+
-        '</div>'+
-        /* Actions */
-        '<div style="display:flex;gap:10px;flex-wrap:wrap;padding-bottom:20px">'+
-          _btn('✓ Save Consultation &amp; Continue to Diagnosis →','_dSaveConsult()',C.green)+
-          _btn('💊 Prescription',"_D.view='prescriptions';_dRender()",C.blue,true)+
-          _btn('🧪 Lab Order',"_D.labNewOrder=true;_D.view='lab';_dRender()",C.blue,true)+
-          _btn('🩻 Radiology',"_D.view='radiology';_dRender()",C.blue,true)+
-          _btn('🔄 Referral',"_D.selectedPat=_D.pat360Data;_D.view='referrals';_dRender()",C.blue,true)+
-        '</div>'+
-      '</div>'
-    : '<div style="padding:40px;text-align:center;color:'+C.muted+'">'+
-        '<div style="font-size:36px;margin-bottom:10px">🩺</div>'+
-        '<div style="font-size:14px;font-weight:700;color:'+C.text+';margin-bottom:4px">Select a patient to begin consultation</div>'+
-        '<div style="font-size:12px">Patients appear here after nurse records vitals</div>'+
-      '</div>';
+  /* Resolve patient */
+  var patFirst  = p ? (p.firstName||p.first_name||p.name||'') : '';
+  var patLast   = p ? (p.lastName||p.last_name||p.surname||'') : '';
+  var patName   = p ? (p.fullName||((patFirst+(patLast?' '+patLast:'')).trim())||p.name||'—') : '—';
+  var patId     = p ? (p.nationalId||p.idNumber||p.id_number||p.passport||p.mrn||p._id||p.id||'—') : '—';
+  var patDob    = p && (p.dateOfBirth||p.date_of_birth||p.dob)
+    ? new Date(p.dateOfBirth||p.date_of_birth||p.dob).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'})
+    : '—';
 
-  return _dHeader('Clinical Consultation','',
-    _btn('+ New','_dNewConsult()',C.blue))+
-    '<div style="flex:1;overflow:auto;padding:16px 20px">'+
-      '<div style="display:grid;grid-template-columns:1fr;gap:14px">'+
-        /* Patient list hidden — form takes full width */
-        (false && _card('<div style="font-size:11px;font-weight:700;color:'+C.muted+';text-transform:uppercase;margin-bottom:10px">Waiting Patients</div>'+
-          (waiting.length
-            ? waiting.map(function(pt,i){
-                var active = _D.consultPatId===pt.id;
-                _D._consultPats = _D._consultPats||{}; _D._consultPats[pt.id]=pt;
-                return '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1.5px solid '+(active?C.blue:C.border)+';background:'+(active?C.blueLt:'#fff')+';margin-bottom:6px;cursor:pointer" onclick="_dSelectConsultPat(\''+pt.id+'\');">'+
-                  '<div style="width:28px;height:28px;border-radius:50%;background:'+C.blue+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">'+pt.name.split(' ').map(function(n){return n[0];}).join('').slice(0,2)+'</div>'+
-                  '<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+pt.name+'</div>'+
-                  '<div style="font-size:10px;color:'+(pt.mlRiskLevel==='HIGH'?C.red:pt.mlRiskLevel==='MEDIUM'?C.amber:C.muted)+'">'+( pt.mlRiskLevel||pt.priority||'Normal')+'</div></div>'+
-                '</div>';
-              }).join('')
-            : '<div style="font-size:12px;color:'+C.muted+';padding:10px;text-align:center">No patients waiting</div>')+
-          '<button onclick="_dNewConsult()" style="margin-top:6px;width:100%;padding:7px;border-radius:7px;border:1.5px dashed '+C.border+';background:transparent;font-size:11px;color:'+C.blue+';cursor:pointer;font-family:inherit">+ Add patient manually</button>'))+
-        /* Form — full width */
-        _card(patBar+form)+
+  /* Vital signs (from nurse record if present) */
+  var vitals = p && p.vitals ? p.vitals : null;
+  var vBp     = vitals ? (vitals.bp||vitals.bloodPressure||'') : '';
+  var vHr     = vitals ? (vitals.hr||vitals.pulse||vitals.heartRate||'') : '';
+  var vTemp   = vitals ? (vitals.temp||vitals.temperature||'') : '';
+  var vSpo2   = vitals ? (vitals.spo2||vitals.oxygenSaturation||'') : '';
+  var vRr     = vitals ? (vitals.rr||vitals.respiratoryRate||'') : '';
+  var vWt     = vitals ? (vitals.weight||'') : '';
+  var hasFlagged = p && p.flags && p.flags.length > 0;
+
+  /* Field helpers */
+  function _csF(id,label,ph,type,val){
+    return '<div>'+
+      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:5px">'+label+'</label>'+
+      '<input id="'+id+'" type="'+(type||'text')+'" placeholder="'+(ph||'')+'"'+(val?' value="'+val+'"':'')+' style="width:100%;padding:10px 12px;border:1.5px solid '+C.border+';border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;background:#fff;color:'+C.text+'">'+
+    '</div>';
+  }
+  function _csS(id,label,opts,val){
+    return '<div>'+
+      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:5px">'+label+'</label>'+
+      '<select id="'+id+'" style="width:100%;padding:10px 12px;border:1.5px solid '+C.border+';border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;background:#fff;color:'+C.text+'">'+
+        opts.map(function(o){return '<option value="'+o+'"'+(o===val?' selected':'')+'>'+o+'</option>';}).join('')+
+      '</select>'+
+    '</div>';
+  }
+  function _csTa(id,label,ph,rows,val){
+    return '<div>'+
+      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:5px">'+label+'</label>'+
+      '<textarea id="'+id+'" rows="'+(rows||3)+'" placeholder="'+(ph||'')+'" style="width:100%;padding:10px 12px;border:1.5px solid '+C.border+';border-radius:8px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;background:#fff;color:'+C.text+';resize:vertical">'+(val||'')+'</textarea>'+
+    '</div>';
+  }
+  function _csRO(label,value){
+    return '<div>'+
+      '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C.muted+';margin-bottom:4px">'+label+'</div>'+
+      '<div style="font-size:14px;font-weight:700;color:'+C.text+'">'+value+'</div>'+
+    '</div>';
+  }
+  function _csCard(title,content){
+    return '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:20px 24px;margin-bottom:16px">'+
+      (title?'<div style="font-size:15px;font-weight:800;color:'+C.text+';margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid '+C.border+'">'+title+'</div>':'')+
+      content+
+    '</div>';
+  }
+
+  var consultTypes = ['New Consultation','Follow-Up','Emergency','Chronic Care','Post-Discharge','Telemedicine','Other'];
+  var outcomes     = ['Diagnosis Required','Investigation Required','Medication Required',
+                      'Referral Required','Follow-Up Required','Emergency Escalation','No Further Action'];
+
+  /* ── Sidebar ── */
+  var wfSteps = [
+    {key:'consult',    label:'Consultation', active:true},
+    {key:'diagnosis',  label:'Diagnosis',    active:false},
+    {key:'orders',     label:'Lab & Radiology',active:false},
+    {key:'referral',   label:'Referral',     active:false},
+    {key:'followup',   label:'Follow-Up',    active:false},
+    {key:'appointment',label:'Appointment',  active:false},
+  ];
+  var sidebar =
+    '<div style="width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:12px">'+
+      /* Clinician card */
+      '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:16px">'+
+        '<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:'+C.muted+';margin-bottom:12px">Clinician Details</div>'+
+        '<div style="display:flex;flex-direction:column;gap:10px">'+
+          '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">Consulting Clinician</div>'+
+            '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+(docName||'—')+'</div></div>'+
+          '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">HPCSA / Reg. No.</div>'+
+            '<div style="font-size:12px;font-weight:600;color:'+(docHpcsa?C.text:C.muted)+';font-family:monospace">'+(docHpcsa||'Not on record')+'</div></div>'+
+          '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">Facility</div>'+
+            '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+(docFacility||'—')+'</div></div>'+
+          '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">Date</div>'+
+            '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+todayFmt+'</div></div>'+
+        '</div>'+
       '</div>'+
+      /* Clinical workflow tracker */
+      '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:16px">'+
+        '<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:'+C.muted+';margin-bottom:12px">Clinical Workflow</div>'+
+        '<div style="display:flex;flex-direction:column;gap:6px">'+
+          wfSteps.map(function(s){
+            var icon = s.active ? '→' : '○';
+            var col  = s.active ? C.teal : C.muted;
+            var wt   = s.active ? '800' : '500';
+            return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:'+(s.active?C.blueLt:'transparent')+';border:1.5px solid '+(s.active?C.teal:'transparent')+'">'+
+              '<span style="color:'+col+';font-size:12px;font-weight:700;width:14px;text-align:center">'+icon+'</span>'+
+              '<span style="font-size:12px;font-weight:'+wt+';color:'+col+'">'+s.label+'</span>'+
+            '</div>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+    '</div>';
+
+  /* ── No patient state ── */
+  if (!p) {
+    return _dHeader('Clinical Consultation','Consultation management · Clinical record','') +
+      '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px">'+
+        '<div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center">'+
+          '<div style="text-align:center;color:'+C.muted+'">'+
+            '<div style="font-size:48px;margin-bottom:12px">🩺</div>'+
+            '<div style="font-size:15px;font-weight:700;color:'+C.text+';margin-bottom:4px">Select a patient to begin consultation</div>'+
+            '<div style="font-size:13px">Patients appear here after a nurse records vitals</div>'+
+          '</div>'+
+        '</div>'+
+        sidebar+
+      '</div>';
+  }
+
+  /* ── Main form ── */
+  var mainCol =
+    '<div style="flex:1;min-width:0">'+
+
+    /* Patient Banner */
+    '<div style="background:'+C.blueLt+';border:1.5px solid '+C.blueBd+';border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px">'+
+      '<div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;flex-shrink:0">'+
+        (patName!=='—' ? patName.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase() : '?')+
+      '</div>'+
+      '<div style="flex:1">'+
+        '<div style="font-size:15px;font-weight:800;color:'+C.text+'">'+patName+'</div>'+
+        '<div style="font-size:12px;color:'+C.muted+'">ID: '+patId+' · DOB: '+patDob+(p&&p.sex?' · '+(p.sex||p.gender||''):'')+'</div>'+
+      '</div>'+
+      (hasFlagged?'<span style="padding:3px 10px;border-radius:8px;background:#fee2e2;color:'+C.red+';font-size:11px;font-weight:700">⚑ FLAGGED VITALS</span>':
+       (p&&p.mlRiskLevel?'<span style="padding:3px 10px;border-radius:8px;font-size:11px;font-weight:700;background:'+(p.mlRiskLevel==='HIGH'?'#fee2e2':p.mlRiskLevel==='MEDIUM'?'#fef3c7':'#dcfce7')+';color:'+(p.mlRiskLevel==='HIGH'?C.red:p.mlRiskLevel==='MEDIUM'?C.amber:C.green)+'">'+(p.mlRiskLevel==='HIGH'?'⚠ HIGH RISK':p.mlRiskLevel==='MEDIUM'?'⚡ MEDIUM RISK':'✓ LOW RISK')+'</span>':''))+
+      '<button onclick="_D.consultPat=null;_D.selectedPat=null;_D.consultPatId=null;_dRender()" style="font-size:11px;color:'+C.muted+';border:1px solid '+C.border+';background:#fff;border-radius:6px;padding:5px 12px;cursor:pointer;font-family:inherit">Change patient</button>'+
+    '</div>'+
+
+    /* 1. Consultation Details */
+    _csCard('Consultation Details',
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'+
+        _csF('cs-date','Consultation Date','','date',todayIso)+
+        _csF('cs-time','Consultation Time','','time',timeNow)+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">'+
+        _csS('cs-type','Consultation Type',consultTypes,'New Consultation')+
+        _csF('cs-clinician','Clinician','e.g. Dr. Thabo Mokoena','text',docName)+
+        _csF('cs-reg','Professional Registration No.','e.g. MP 1234567','text',docHpcsa)+
+      '</div>'+
+      '<div style="margin-top:12px">'+
+        _csF('cs-facility','Facility / Clinic','e.g. District Hospital','text',docFacility)+
+      '</div>'
+    )+
+
+    /* 2. Chief Complaint */
+    _csCard('Chief Complaint',
+      _csTa('cs-complaint','Chief Complaint','Describe the main reason for today\'s visit…',3,'')
+    )+
+
+    /* 3. History of Presenting Complaint */
+    _csCard('History of Presenting Complaint',
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'+
+        _csF('cs-onset','Onset','e.g. 3 days ago')+
+        _csF('cs-duration','Duration','e.g. 3 days')+
+        _csF('cs-severity','Severity','Mild / Moderate / Severe')+
+      '</div>'+
+      _csTa('cs-symptoms','Symptoms','Describe all symptoms reported by the patient…',3)+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">'+
+        _csTa('cs-medhistory','Relevant Medical History','Past diagnoses, surgeries, hospitalisations…',3)+
+        _csTa('cs-currentmeds','Current Medications','List all current medications and dosages…',3)+
+      '</div>'+
+      '<div style="margin-top:12px">'+
+        '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:8px">Allergies</label>'+
+        '<div style="display:flex;gap:20px;margin-bottom:8px">'+
+          '<label style="font-size:13px;color:'+C.text+';display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="cs-allergy-opt" value="none" checked> No Known Allergies</label>'+
+          '<label style="font-size:13px;color:'+C.text+';display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="cs-allergy-opt" value="known"> Known Allergies</label>'+
+        '</div>'+
+        _csF('cs-allergies','Allergy Details','Specify allergen and reaction type if known','text','')+
+      '</div>'
+    )+
+
+    /* 4. Vital Signs */
+    '<div style="background:#fff;border:1.5px solid '+(hasFlagged?C.red:C.border)+';border-radius:12px;padding:20px 24px;margin-bottom:16px">'+
+      '<div style="font-size:15px;font-weight:800;color:'+C.text+';margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid '+C.border+'">'+
+        (hasFlagged?'⚑ Vital Signs — Flagged Abnormals':'Vital Signs')+
+        (vitals?'<span style="font-size:11px;font-weight:500;color:'+C.muted+';margin-left:10px">Recorded by Nurse Station</span>':
+          '<span style="font-size:11px;font-weight:500;color:'+C.amber+';margin-left:10px">Enter manually if not recorded</span>')+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">'+
+        (function(){
+          var vRows = [
+            {id:'cs-v-bp',   label:'Blood Pressure',    unit:'mmHg', val:vBp,   ph:'e.g. 118/76'},
+            {id:'cs-v-hr',   label:'Pulse / HR',        unit:'bpm',  val:vHr,   ph:'e.g. 88'},
+            {id:'cs-v-temp', label:'Temperature',       unit:'°C',   val:vTemp, ph:'e.g. 38.0'},
+            {id:'cs-v-spo2', label:'SpO₂',              unit:'%',    val:vSpo2, ph:'e.g. 97'},
+            {id:'cs-v-rr',   label:'Respiratory Rate',  unit:'/min', val:vRr,   ph:'e.g. 18'},
+            {id:'cs-v-wt',   label:'Weight',            unit:'kg',   val:vWt,   ph:'Not recorded'},
+          ];
+          return vRows.map(function(r){
+            return '<div style="background:#f8fafc;border:1.5px solid '+C.border+';border-radius:10px;padding:14px">'+
+              '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:'+C.muted+';margin-bottom:6px">'+r.label+'</div>'+
+              '<div style="display:flex;align-items:center;gap:8px">'+
+                '<input id="'+r.id+'" type="text" value="'+(r.val||'')+'" placeholder="'+r.ph+'" style="flex:1;min-width:0;padding:8px 10px;border:1.5px solid '+C.border+';border-radius:7px;font-size:15px;font-weight:700;font-family:inherit;outline:none;background:#fff;color:'+C.text+'">'+
+                '<span style="font-size:11px;color:'+C.muted+';white-space:nowrap;font-weight:600">'+r.unit+'</span>'+
+              '</div>'+
+            '</div>';
+          }).join('');
+        })()+
+      '</div>'+
+    '</div>'+
+
+    /* 5. Clinical Examination */
+    _csCard('Clinical Examination',
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
+        _csTa('cs-general','General Examination','General appearance, nutrition, hydration, consciousness…',4)+
+        _csTa('cs-systems','System Examination','Cardiovascular, respiratory, abdominal, neurological findings…',4)+
+      '</div>'
+    )+
+
+    /* 6. Clinician Notes */
+    _csCard('Clinician Notes',
+      _csTa('cs-notes','Notes','Additional observations, clinical reasoning, and clinical impression…',4)
+    )+
+
+    /* 7. Consultation Outcome */
+    _csCard('Consultation Outcome',
+      '<div style="display:flex;flex-wrap:wrap;gap:10px">'+
+        outcomes.map(function(o){
+          return '<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:'+C.text+';cursor:pointer;padding:8px 14px;border:1.5px solid '+C.border+';border-radius:8px;background:#f8fafc">'+
+            '<input type="checkbox" value="'+o+'" class="cs-outcome" style="cursor:pointer"> '+o+'</label>';
+        }).join('')+
+      '</div>'
+    )+
+
+    /* Actions */
+    '<div style="display:flex;gap:12px;flex-wrap:wrap;padding-bottom:24px">'+
+      '<button onclick="_dSaveConsult()" style="flex:1;padding:13px 24px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">✓ Save Consultation &amp; Continue to Diagnosis</button>'+
+      '<button onclick="_D.view=\'dashboard\';_dRender()" style="padding:13px 24px;border:1.5px solid '+C.border+';border-radius:10px;background:#fff;color:'+C.muted+';font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+    '</div>'+
+
+    '</div>'; /* end mainCol */
+
+  return _dHeader('Clinical Consultation','Consultation management · Clinical record','')+
+    '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px">'+
+      mainCol+
+      sidebar+
     '</div>';
 }
 
@@ -1830,31 +1905,152 @@ function _dLab(){
     var o=ORDERS.find(function(x){return x.id===window._labOrdersView;})||ORDERS[0];
     var st=stCfg[o.status]||stCfg.pending;
     var pr=prCfg[o.priority]||prCfg.Routine;
-    return _dHeader('Lab Orders','Laboratory requests and tracking',
-        _btn('← Back',"window._labOrdersView=null;if(typeof _dRender==='function')_dRender()",C.muted,true))+
-      '<div style="flex:1;overflow:auto;padding:16px 20px">'+
-        '<div style="max-width:680px">'+
-        _card(
-          '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px">'+
-            '<div><div style="font-size:16px;font-weight:800;color:'+C.text+'">'+o.test+'</div>'+
-            '<div style="font-size:12px;font-family:monospace;color:'+C.muted+';margin-top:3px">'+o.id+'</div></div>'+
-            '<span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;background:'+st.bg+';color:'+st.c+';border:1px solid '+st.bd+'">'+st.l+'</span>'+
+
+    /* Read-only field helper for detail view */
+    function _lov(label,value){
+      return '<div>'+
+        '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C.muted+';margin-bottom:4px">'+label+'</div>'+
+        '<div style="font-size:14px;font-weight:700;color:'+C.text+'">'+value+'</div>'+
+      '</div>';
+    }
+    function _lovCard(title,content){
+      return '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:20px 24px;margin-bottom:16px">'+
+        '<div style="font-size:15px;font-weight:800;color:'+C.text+';margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid '+C.border+'">'+title+'</div>'+
+        content+
+      '</div>';
+    }
+
+    /* Format DOB */
+    var dobFmt = o.dob
+      ? (function(){ try { return new Date(o.dob).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'}); } catch(_){ return o.dob; } })()
+      : '—';
+
+    /* Sidebar */
+    var detailSidebar =
+      '<div style="width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:12px">'+
+        /* Order summary card */
+        '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:16px">'+
+          '<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:'+C.muted+';margin-bottom:12px">Order Summary</div>'+
+          '<div style="display:flex;flex-direction:column;gap:10px">'+
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">Order No.</div>'+
+              '<div style="font-size:12px;font-weight:700;color:'+C.text+';font-family:monospace">'+o.id+'</div></div>'+
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">Status</div>'+
+              '<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:'+st.bg+';color:'+st.c+';border:1px solid '+st.bd+'">'+st.l+'</span></div>'+
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">Priority</div>'+
+              '<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:'+pr.bg+';color:'+pr.c+'">'+o.priority+'</span></div>'+
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">Date Ordered</div>'+
+              '<div style="font-size:12px;font-weight:700;color:'+C.text+'">'+o.date+'</div></div>'+
           '</div>'+
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">'+
-            _rof('Patient',o.patient)+_rof('Patient ID',o.patId)+
-            _rof('Date of Birth',o.dob)+_rof('Date Ordered',o.date)+
-            _rof('Specimen',o.specimen)+
-            _rof('Priority','<span style="padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:'+pr.bg+';color:'+pr.c+'">'+o.priority+'</span>')+
-            _rof('Ordering Doctor',o.doctor)+_rof('Facility',o.facility)+
-            _rof('Clinical Indication',o.indication,'full')+
-          '</div>'+
-          '<div style="border-top:1px solid '+C.border+';padding-top:14px;display:flex;gap:8px">'+
-            (o.resultId
-              ? _btn('📊 View Result',"window._lrDetailView='"+o.resultId+"';_setView('lab_results')",C.green)
-              : '<div style="display:flex;align-items:center;gap:8px;font-size:13px;color:'+C.muted+'"><span>🕐</span> Result not yet available — check back after the lab processes the specimen</div>')+
-          '</div>'
-        )+
         '</div>'+
+        /* Clinical workflow tracker */
+        '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:16px">'+
+          '<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:'+C.muted+';margin-bottom:12px">Clinical Workflow</div>'+
+          '<div style="display:flex;flex-direction:column;gap:6px">'+
+            ['Consultation','Diagnosis','Lab Orders','Radiology','Prescription','Referral','Follow-Up'].map(function(step){
+              var active = step==='Lab Orders';
+              var done   = ['Consultation','Diagnosis'].indexOf(step)>-1;
+              var icon   = done?'✓':(active?'→':'○');
+              var col    = active?C.teal:(done?C.green:C.muted);
+              var wt     = active?'800':(done?'600':'500');
+              return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:'+(active?C.blueLt:'transparent')+';border:1.5px solid '+(active?C.teal:'transparent')+'">'+
+                '<span style="color:'+col+';font-size:12px;font-weight:700;width:14px;text-align:center">'+icon+'</span>'+
+                '<span style="font-size:12px;font-weight:'+wt+';color:'+col+'">'+step+'</span>'+
+              '</div>';
+            }).join('')+
+          '</div>'+
+        '</div>'+
+      '</div>';
+
+    /* Result panel content */
+    var resultPanel = o.status==='completed'
+      ? '<div style="background:'+C.greenLt+';border:1.5px solid '+C.greenBd+';border-radius:10px;padding:16px">'+
+          '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'+
+            '<span style="font-size:20px">✅</span>'+
+            '<div style="font-size:14px;font-weight:800;color:'+C.green+'">Test completed</div>'+
+          '</div>'+
+          '<div style="font-size:13px;color:#065f46;line-height:1.6;margin-bottom:16px">'+
+            'The laboratory order is marked as completed. View the report for the actual test values and interpretation.'+
+          '</div>'+
+          (o.resultId
+            ? '<button onclick="window._lrDetailView=\''+o.resultId+'\';_setView(\'lab_results\')" '+
+                'style="display:inline-flex;align-items:center;gap:8px;padding:11px 22px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">'+
+                '📊 View Result'+
+              '</button>'
+            : '<div style="font-size:13px;color:'+C.muted+'">Result document not yet linked.</div>')+
+        '</div>'
+      : o.status==='in_progress'
+        ? '<div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px">'+
+            '<span style="font-size:24px">🔬</span>'+
+            '<div>'+
+              '<div style="font-size:14px;font-weight:700;color:#1d4ed8;margin-bottom:4px">Processing in laboratory</div>'+
+              '<div style="font-size:13px;color:#1d4ed8">The specimen is being analysed. Results will be available once processing is complete.</div>'+
+            '</div>'+
+          '</div>'
+        : '<div style="background:#fff7ed;border:1.5px solid #fde68a;border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px">'+
+            '<span style="font-size:24px">🕐</span>'+
+            '<div>'+
+              '<div style="font-size:14px;font-weight:700;color:#92400e;margin-bottom:4px">Awaiting specimen collection</div>'+
+              '<div style="font-size:13px;color:#92400e">The order has been submitted. Results will appear here once the laboratory processes the specimen.</div>'+
+            '</div>'+
+          '</div>';
+
+    return _dHeader('Lab Order Detail','Laboratory requests and tracking',
+        '<button onclick="window._labOrdersView=null;if(typeof _dRender===\'function\')_dRender()" style="padding:7px 16px;border:1.5px solid '+C.border+';border-radius:8px;background:#fff;font-size:13px;font-weight:600;color:'+C.muted+';cursor:pointer;font-family:inherit">← Back to Orders</button>')+
+      '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px;align-items:flex-start">'+
+
+        /* Main column */
+        '<div style="flex:1;min-width:0">'+
+
+          /* Title + status row */
+          '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:20px 24px;margin-bottom:16px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'+
+            '<div>'+
+              '<div style="font-size:18px;font-weight:800;color:'+C.text+'">'+o.test+'</div>'+
+              '<div style="font-size:12px;font-family:monospace;color:'+C.muted+';margin-top:4px">Order No: '+o.id+'</div>'+
+            '</div>'+
+            '<span style="padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;background:'+st.bg+';color:'+st.c+';border:1px solid '+st.bd+';flex-shrink:0">'+st.l+'</span>'+
+          '</div>'+
+
+          /* Patient Information */
+          _lovCard('Patient Information',
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
+              _lov('Patient Name',o.patient)+
+              _lov('Patient ID',o.patId)+
+              _lov('Date of Birth',dobFmt)+
+              _lov('Date Ordered',o.date)+
+            '</div>'
+          )+
+
+          /* Order Details */
+          _lovCard('Order Details',
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">'+
+              _lov('Laboratory Test',o.test)+
+              _lov('Specimen',o.specimen)+
+              _lov('Priority','<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:'+pr.bg+';color:'+pr.c+'">'+o.priority+'</span>')+
+            '</div>'+
+            _lov('Clinical Indication',o.indication)
+          )+
+
+          /* Ordering Information */
+          _lovCard('Ordering Information',
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
+              _lov('Ordering Doctor',o.doctor)+
+              _lov('Facility',o.facility)+
+            '</div>'
+          )+
+
+          /* Laboratory Result */
+          _lovCard('Laboratory Result', resultPanel)+
+
+          /* Actions row */
+          '<div style="display:flex;gap:10px;padding-bottom:24px">'+
+            '<button onclick="window._labOrdersView=null;if(typeof _dRender===\'function\')_dRender()" style="padding:11px 22px;border:1.5px solid '+C.border+';border-radius:10px;background:#fff;font-size:13px;font-weight:600;color:'+C.muted+';cursor:pointer;font-family:inherit">← Back to Orders</button>'+
+            (o.resultId&&o.status==='completed'
+              ? '<button onclick="window._lrDetailView=\''+o.resultId+'\';_setView(\'lab_results\')" style="padding:11px 22px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">📊 View Result</button>'
+              : '')+
+          '</div>'+
+
+        '</div>'+
+        detailSidebar+
       '</div>';
   }
 
@@ -2884,11 +3080,12 @@ function _dMedicalNotes(){
           '<div style="font-size:12px;color:'+C.muted+';margin-bottom:14px">Save the diagnosis, then continue with the required clinical orders.</div>'+
           '<div style="display:flex;flex-wrap:wrap;gap:10px">'+
             [
-              {label:'🧪 Order Lab',     onclick:"_D.labNewOrder=true;_D.view='lab';_dRender()"},
-              {label:'🩻 Radiology',     onclick:"_D.view='radiology';_dRender()"},
-              {label:'💊 Prescription',  onclick:"_D.view='prescriptions';_dRender()"},
-              {label:'🔄 Referral',      onclick:"_D.view='referrals';_dRender()"},
-              {label:'📅 Follow-up',     onclick:"_D.view='follow_up';_dRender()"}
+              {label:'🧪 Order Lab',           onclick:"_D.labNewOrder=true;_D.view='lab';_dRender()"},
+              {label:'🩻 Radiology',           onclick:"_D.view='radiology';_dRender()"},
+              {label:'💊 Prescription',        onclick:"_D.view='prescriptions';_dRender()"},
+              {label:'🔄 Referral',            onclick:"_D.view='referrals';_dRender()"},
+              {label:'📅 Follow-up',           onclick:"_D.view='follow_up';_dRender()"},
+              {label:'📋 Issue Med Certificate',onclick:"_D.view='med_certs';_dRender()"}
             ].map(function(a){
               return '<button onclick="'+a.onclick+'" '+
                 'style="padding:9px 16px;border-radius:8px;border:1.5px solid '+C.border+';background:#fff;font-size:13px;font-weight:700;color:'+C.text+';cursor:pointer;font-family:inherit">'+
@@ -3328,52 +3525,322 @@ window._dEndTeleCall = async function(appointmentId){
    MESSAGES
 ══════════════════════════════════════════════════════════════════ */
 function _dMessages(){
-  var msgs = _D.messages;
-  var threads = [
-    {role:'Nurse',       label:'Nurse Station',   icon:'🏥', color:'#0f766e', bg:'#f0fdfa'},
-    {role:'Receptionist',label:'Reception',        icon:'🧑‍💼', color:C.blue,   bg:C.blueLt},
-    {role:'Doctor',      label:'Colleagues',       icon:'👨‍⚕️', color:'#7c3aed', bg:'#f5f3ff'},
-    {role:'Pharmacy',    label:'Pharmacy',          icon:'💊', color:'#c2410c', bg:'#fff7ed'},
+  var msgs   = _D.messages;
+  var u      = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  var docName= u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'Doctor');
+
+  var unreadCount = msgs.filter(function(m){return m.unread;}).length;
+  var sentCount   = msgs.filter(function(m){return m.from==='Dr (You)';}).length + 12; /* sample sent */
+
+  /* State flags */
+  window._msgView    = window._msgView    || 'inbox';   /* inbox | sent | important | compose */
+  window._msgThread  = window._msgThread  || null;
+
+  /* Recipients list */
+  var RECIPIENTS = [
+    {value:'Nurse Station',       label:'Nurse Station',         icon:'🏥'},
+    {value:'Reception',           label:'Reception',             icon:'🧑‍💼'},
+    {value:'Pharmacy',            label:'Pharmacy',              icon:'💊'},
+    {value:'Laboratory',          label:'Laboratory',            icon:'🔬'},
+    {value:'Radiology',           label:'Radiology',             icon:'🩻'},
+    {value:'Another Doctor',      label:'Another Doctor',        icon:'👨‍⚕️'},
+    {value:'Specific staff member',label:'Specific staff member',icon:'👤'},
   ];
-  var activeThread = _D.msgThread||'Nurse';
-  var threadMsgs = msgs.filter(function(m){return m.role===activeThread;});
 
-  var threadList = threads.map(function(th){
-    var unread = msgs.filter(function(m){return m.role===th.role&&m.unread;}).length;
-    var active = activeThread===th.role;
-    var tdOnclick = '_D.msgThread=\''+th.role+'\';_dRender()';
-    return '<button onclick="'+tdOnclick+'" style="display:flex;align-items:center;gap:10px;width:100%;padding:11px 14px;border:none;border-bottom:1px solid '+C.border+';background:'+(active?th.bg:'#fff')+';cursor:pointer;text-align:left;font-family:inherit">'+
-      '<span style="font-size:17px">'+th.icon+'</span>'+
-      '<div style="flex:1"><div style="font-size:13px;font-weight:'+(active?'700':'500')+';color:'+C.text+'">'+th.label+'</div></div>'+
-      (unread?'<span style="min-width:18px;height:18px;border-radius:9px;background:'+C.red+';color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 3px">'+unread+'</span>':'')+
-    '</button>';
-  }).join('');
+  /* Field helpers */
+  function _msgFld(){
+    return 'width:100%;padding:10px 12px;border:1.5px solid '+C.border+';border-radius:8px;font-size:14px;font-family:inherit;color:'+C.text+';background:#fff;box-sizing:border-box;outline:none';
+  }
+  function _msgLabel(t,req){
+    return '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:6px">'+t+(req?' <span style="color:'+C.red+'">*</span>':'')+'</label>';
+  }
+  function _msgCard(title,content){
+    return '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:20px 24px;margin-bottom:16px">'+
+      (title?'<div style="font-size:15px;font-weight:800;color:'+C.text+';margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid '+C.border+'">'+title+'</div>':'')+
+      content+
+    '</div>';
+  }
 
-  var msgBubbles = threadMsgs.length
-    ? threadMsgs.map(function(m){
-        var isDoctor = m.from==='Dr (You)';
-        return '<div style="margin-bottom:12px;display:flex;flex-direction:column;align-items:'+(isDoctor?'flex-end':'flex-start')+'">'+
-          '<div style="font-size:10px;color:'+C.muted+';margin-bottom:3px">'+(isDoctor?'You':m.from)+' · '+m.time+'</div>'+
-          '<div style="max-width:70%;padding:10px 14px;border-radius:10px;font-size:13px;line-height:1.5;background:'+(isDoctor?C.blue:'#f1f5f9')+';color:'+(isDoctor?'#fff':C.text)+'">'+m.text+'</div>'+
-          (m.unread&&!isDoctor?'<span style="font-size:10px;color:'+C.blue+';margin-top:2px">Unread</span>':'')+
-        '</div>';
-      }).join('')
-    : '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:'+C.muted+';font-size:13px">No messages in this thread</div>';
+  /* ── Sidebar ── */
+  var folders = [
+    {key:'inbox',     label:'Inbox',     icon:'📥', desc:'Messages received by the doctor', badge:unreadCount},
+    {key:'sent',      label:'Sent',      icon:'📤', desc:'Messages sent to staff',           badge:sentCount},
+    {key:'important', label:'Important', icon:'⭐', desc:'Flagged messages',                 badge:0},
+  ];
+  var sidebar =
+    '<div style="width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:12px">'+
 
-  var activeT = threads.find(function(t){return t.role===activeThread;})||threads[0];
-  return _dHeader('Messages',msgs.filter(function(m){return m.unread;}).length+' unread')+
-    '<div style="flex:1;display:flex;min-height:0;overflow:hidden">'+
-      '<div style="width:200px;flex-shrink:0;border-right:1px solid '+C.border+';overflow-y:auto;background:#fff">'+
-        threadList+
+      /* Stats card */
+      '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:16px">'+
+        '<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:'+C.muted+';margin-bottom:12px">Messages</div>'+
+        '<div style="font-size:11px;color:'+C.muted+';margin-bottom:10px">Internal communication</div>'+
+        '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">'+
+          '<div style="display:flex;justify-content:space-between;align-items:center">'+
+            '<span style="font-size:12px;color:'+C.muted+'">Unread messages</span>'+
+            '<span style="font-size:14px;font-weight:800;color:'+C.red+'">'+unreadCount+'</span>'+
+          '</div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center">'+
+            '<span style="font-size:12px;color:'+C.muted+'">Sent messages</span>'+
+            '<span style="font-size:14px;font-weight:800;color:'+C.text+'">'+sentCount+'</span>'+
+          '</div>'+
+        '</div>'+
+        '<button onclick="window._msgView=\'compose\';if(typeof _dRender===\'function\')_dRender()" '+
+          'style="width:100%;padding:10px 14px;border:none;border-radius:9px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;text-align:center">'+
+          '✉ Compose Message'+
+        '</button>'+
       '</div>'+
-      '<div style="flex:1;display:flex;flex-direction:column;overflow:hidden;background:#fff">'+
-        '<div style="padding:10px 14px;border-bottom:1px solid '+C.border+';background:'+activeT.bg+';font-size:13px;font-weight:700;color:'+activeT.color+'">'+activeT.icon+' '+activeT.label+'</div>'+
-        '<div style="flex:1;overflow-y:auto;padding:14px">'+msgBubbles+'</div>'+
-        '<div style="padding:10px 14px;border-top:1px solid '+C.border+';display:flex;gap:8px">'+
-          '<textarea id="doc-msg-compose" rows="2" placeholder="" style="flex:1;padding:8px 10px;border:1.5px solid '+C.border+';border-radius:8px;font-size:13px;font-family:inherit;resize:none;outline:none"></textarea>'+
-          _btn('Send','_dSendMsg()',C.blue)+
+
+      /* Folders card */
+      '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:16px">'+
+        '<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:'+C.muted+';margin-bottom:12px">Folders</div>'+
+        '<div style="display:flex;flex-direction:column;gap:2px">'+
+          folders.map(function(f){
+            var active = window._msgView===f.key;
+            return '<button onclick="window._msgView=\''+f.key+'\';window._msgThread=null;if(typeof _dRender===\'function\')_dRender()" '+
+              'style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border:none;border-radius:8px;background:'+(active?C.blueLt:'transparent')+';cursor:pointer;text-align:left;font-family:inherit;border:1.5px solid '+(active?C.teal:'transparent')+'">'+
+              '<span style="font-size:15px">'+f.icon+'</span>'+
+              '<div style="flex:1;min-width:0">'+
+                '<div style="font-size:13px;font-weight:'+(active?'700':'500')+';color:'+(active?C.teal:C.text)+'">'+f.label+'</div>'+
+                '<div style="font-size:10px;color:'+C.muted+';line-height:1.3">'+f.desc+'</div>'+
+              '</div>'+
+              (f.badge?'<span style="min-width:18px;height:18px;border-radius:9px;background:'+C.red+';color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 3px">'+f.badge+'</span>':'')+
+            '</button>';
+          }).join('')+
         '</div>'+
       '</div>'+
+
+    '</div>';
+
+  /* ── COMPOSE VIEW ── */
+  if(window._msgView==='compose'){
+    var mainCompose =
+      '<div style="flex:1;min-width:0">'+
+
+      /* Title banner */
+      '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">'+
+        '<div>'+
+          '<div style="font-size:18px;font-weight:800;color:'+C.text+'">New Message</div>'+
+          '<div style="font-size:13px;color:'+C.muted+';margin-top:2px">From: '+docName+'</div>'+
+        '</div>'+
+        '<button onclick="window._msgView=\'inbox\';if(typeof _dRender===\'function\')_dRender()" '+
+          'style="padding:7px 16px;border:1.5px solid '+C.border+';border-radius:8px;background:#fff;font-size:13px;font-weight:600;color:'+C.muted+';cursor:pointer;font-family:inherit">'+
+          '← Back'+
+        '</button>'+
+      '</div>'+
+
+      /* Recipient */
+      _msgCard('Recipient',
+        _msgLabel('Send To',true)+
+        '<div style="display:flex;flex-direction:column;gap:8px">'+
+          RECIPIENTS.map(function(r,i){
+            return '<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid '+C.border+';border-radius:9px;cursor:pointer;font-size:13px;font-weight:600;color:'+C.text+';background:#fff" '+
+              'onmouseenter="this.style.borderColor=\''+C.teal+'\';this.style.background=\''+C.blueLt+'\'" '+
+              'onmouseleave="this.style.borderColor=\''+C.border+'\';this.style.background=\'#fff\'">'+
+              '<input type="radio" name="msg-recipient" value="'+r.value+'"'+(i===0?' checked':'')+' style="accent-color:'+C.teal+'"> '+
+              '<span style="font-size:15px">'+r.icon+'</span>'+
+              '<span>'+r.label+'</span>'+
+            '</label>';
+          }).join('')+
+        '</div>'+
+        '<div style="margin-top:12px">'+
+          _msgLabel('Specific Staff Member (optional)',false)+
+          '<input id="msg-specific-staff" type="text" placeholder="e.g. Sr. Dlamini, Dr. Khumalo" style="'+_msgFld()+'">'+
+        '</div>'
+      )+
+
+      /* Priority */
+      _msgCard('Priority',
+        _msgLabel('Message Priority',true)+
+        '<div style="display:flex;flex-direction:column;gap:8px">'+
+          [
+            {val:'Normal',   label:'Normal',                        icon:'🔵', desc:'Standard internal communication'},
+            {val:'High',     label:'High Priority',                 icon:'🟠', desc:'Requires prompt attention'},
+            {val:'Urgent',   label:'Urgent Clinical Communication', icon:'🔴', desc:'Immediate clinical action required'},
+          ].map(function(p,i){
+            return '<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid '+C.border+';border-radius:9px;cursor:pointer;font-size:13px;background:#fff" '+
+              'onmouseenter="this.style.borderColor=\''+C.teal+'\'" onmouseleave="this.style.borderColor=\''+C.border+'\'">'+
+              '<input type="radio" name="msg-priority" value="'+p.val+'"'+(i===0?' checked':'')+' style="accent-color:'+C.teal+'">'+
+              '<span style="font-size:15px">'+p.icon+'</span>'+
+              '<div><div style="font-weight:700;color:'+C.text+'">'+p.label+'</div>'+
+                '<div style="font-size:11px;color:'+C.muted+'">'+p.desc+'</div>'+
+              '</div>'+
+            '</label>';
+          }).join('')+
+        '</div>'
+      )+
+
+      /* Subject + Patient ID */
+      _msgCard('Subject &amp; Patient',
+        '<div style="display:flex;flex-direction:column;gap:12px">'+
+          '<div>'+_msgLabel('Subject',true)+'<input id="msg-subject" type="text" placeholder="Enter message subject…" style="'+_msgFld()+'"></div>'+
+          '<div>'+
+            _msgLabel('Patient ID (optional)',false)+
+            '<input id="msg-patient-id" type="text" placeholder="e.g. PT-00231" style="'+_msgFld()+'">'+
+            '<div style="font-size:11px;color:'+C.muted+';margin-top:5px">Link the message to a patient when clinically relevant.</div>'+
+          '</div>'+
+        '</div>'
+      )+
+
+      /* Message body */
+      _msgCard('Message',
+        _msgLabel('Message',true)+
+        '<textarea id="msg-body" rows="6" placeholder="Type your message here…" style="'+_msgFld()+';resize:vertical"></textarea>'+
+        '<div style="margin-top:8px;padding:10px 12px;background:#f8fafc;border:1px solid '+C.border+';border-radius:8px;font-size:11px;color:'+C.muted+';line-height:1.6">'+
+          '💡 This is a form prototype. It does not send a real hospital message.<br>'+
+          'In your system: the message is saved to MongoDB (sender, recipients, timestamp, priority, patient ref), '+
+          'the recipient is notified via Socket.IO, and delivery/read status is tracked in real time.'+
+        '</div>'
+      )+
+
+      /* Actions */
+      '<div style="display:flex;gap:12px;padding-bottom:24px">'+
+        '<button onclick="_dSendMessage()" style="flex:1;padding:13px 24px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">✉ Send Message</button>'+
+        '<button onclick="window._msgView=\'inbox\';if(typeof _dRender===\'function\')_dRender()" style="padding:13px 24px;border:1.5px solid '+C.border+';border-radius:10px;background:#fff;color:'+C.muted+';font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+      '</div>'+
+
+      '</div>'; /* end mainCompose */
+
+    window._dSendMessage = async function(){
+      var g = function(id){ return (document.getElementById(id)||{value:''}).value.trim(); };
+      var recpEl = document.querySelector('input[name="msg-recipient"]:checked');
+      var prioEl = document.querySelector('input[name="msg-priority"]:checked');
+      var recip  = recpEl ? recpEl.value : '';
+      var specific = g('msg-specific-staff');
+      var subject  = g('msg-subject');
+      var patId    = g('msg-patient-id');
+      var body     = g('msg-body');
+      var priority = prioEl ? prioEl.value : 'Normal';
+
+      if(!subject){ if(window.UI&&UI.showToast)UI.showToast('Please enter a subject','err'); return; }
+      if(!body){    if(window.UI&&UI.showToast)UI.showToast('Please enter a message','err'); return; }
+
+      var payload = {
+        from:      docName,
+        to:        specific||recip,
+        recipient: recip,
+        staffMember: specific||'',
+        subject:   subject,
+        patientId: patId||null,
+        body:      body,
+        priority:  priority,
+        sentAt:    new Date().toISOString(),
+        read:      false,
+      };
+      try {
+        await (window.API&&API._fetchDirect('/messages',{method:'POST',body:JSON.stringify(payload)})).catch(function(){});
+      } catch(_){}
+
+      /* Add to local sent list for demo */
+      _D.messages.unshift({id:Date.now(),from:'Dr (You)',role:recip,text:body,time:new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}),unread:false});
+      if(window.UI&&UI.showToast) UI.showToast('Message sent to '+(specific||recip),'ok');
+      window._msgView='sent';
+      _dRender();
+    };
+
+    return _dHeader('Messages','Internal communication · Secure team messaging','')+
+      '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px;align-items:flex-start">'+
+        mainCompose+
+        sidebar+
+      '</div>';
+  }
+
+  /* ── INBOX / SENT / IMPORTANT VIEW ── */
+  var folder     = window._msgView||'inbox';
+  var folderMeta = folders.find(function(f){return f.key===folder;})||folders[0];
+
+  var visibleMsgs = folder==='sent'
+    ? msgs.filter(function(m){return m.from==='Dr (You)';})
+    : folder==='important'
+      ? msgs.filter(function(m){return m.important;})
+      : msgs.filter(function(m){return m.from!=='Dr (You)';});
+
+  /* Thread detail */
+  if(window._msgThread!==null){
+    var threadMsg = msgs.find(function(m){return m.id===window._msgThread;})||msgs[0];
+    /* Mark as read */
+    var mi = msgs.findIndex(function(m){return m.id===window._msgThread;});
+    if(mi>-1) msgs[mi].unread=false;
+
+    var detailMain =
+      '<div style="flex:1;min-width:0">'+
+        '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:20px 24px;margin-bottom:16px">'+
+          '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px">'+
+            '<div>'+
+              '<div style="font-size:17px;font-weight:800;color:'+C.text+'">'+threadMsg.text.slice(0,60)+(threadMsg.text.length>60?'…':'')+'</div>'+
+              '<div style="font-size:12px;color:'+C.muted+';margin-top:4px">From: <strong>'+threadMsg.from+'</strong> · <strong>'+threadMsg.role+'</strong> · '+threadMsg.time+'</div>'+
+            '</div>'+
+            '<button onclick="window._msgThread=null;if(typeof _dRender===\'function\')_dRender()" style="padding:7px 14px;border:1.5px solid '+C.border+';border-radius:8px;background:#fff;font-size:12px;font-weight:600;color:'+C.muted+';cursor:pointer;font-family:inherit">← Back</button>'+
+          '</div>'+
+          '<div style="background:#f8fafc;border-radius:10px;padding:16px;font-size:14px;color:'+C.text+';line-height:1.7">'+threadMsg.text+'</div>'+
+        '</div>'+
+        /* Reply box */
+        '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:20px 24px;margin-bottom:24px">'+
+          '<div style="font-size:14px;font-weight:700;color:'+C.text+';margin-bottom:12px">Reply</div>'+
+          '<textarea id="msg-reply-body" rows="4" placeholder="Type your reply…" style="width:100%;padding:10px 12px;border:1.5px solid '+C.border+';border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box"></textarea>'+
+          '<div style="display:flex;gap:10px;margin-top:12px">'+
+            '<button onclick="var b=(document.getElementById(\'msg-reply-body\')||{value:\'\'}).value.trim();if(b){_D.messages.unshift({id:Date.now(),from:\'Dr (You)\',role:\''+threadMsg.role+'\',text:b,time:new Date().toLocaleTimeString(\'en-ZA\',{hour:\'2-digit\',minute:\'2-digit\'}),unread:false});window._msgThread=null;_dRender();}else{if(window.UI&&UI.showToast)UI.showToast(\'Enter a reply\',\'err\');}" '+
+              'style="flex:1;padding:11px 20px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Send Reply</button>'+
+            '<button onclick="window._msgThread=null;if(typeof _dRender===\'function\')_dRender()" style="padding:11px 20px;border:1.5px solid '+C.border+';border-radius:10px;background:#fff;color:'+C.muted+';font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+
+    return _dHeader('Messages','Internal communication · Secure team messaging','')+
+      '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px;align-items:flex-start">'+
+        detailMain+sidebar+
+      '</div>';
+  }
+
+  /* Message list */
+  var listMain =
+    '<div style="flex:1;min-width:0">'+
+
+    /* Folder header + Compose button */
+    '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">'+
+      '<div>'+
+        '<div style="font-size:18px;font-weight:800;color:'+C.text+'">'+folderMeta.icon+' '+folderMeta.label+'</div>'+
+        '<div style="font-size:13px;color:'+C.muted+';margin-top:2px">'+folderMeta.desc+'</div>'+
+      '</div>'+
+      '<button onclick="window._msgView=\'compose\';if(typeof _dRender===\'function\')_dRender()" '+
+        'style="display:flex;align-items:center;gap:8px;padding:10px 18px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'+
+        '✉ Compose Message'+
+      '</button>'+
+    '</div>'+
+
+    /* Message rows */
+    '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;overflow:hidden;margin-bottom:24px">'+
+      (visibleMsgs.length
+        ? visibleMsgs.map(function(m,i){
+            var unread = m.unread && m.from!=='Dr (You)';
+            var prios  = {Normal:'',High:'🟠 ',Urgent:'🔴 '};
+            return '<div onclick="window._msgThread='+m.id+';if(typeof _dRender===\'function\')_dRender()" '+
+              'style="display:flex;align-items:flex-start;gap:12px;padding:14px 18px;border-bottom:1px solid '+C.border+';background:'+(unread?C.blueLt:'#fff')+';cursor:pointer" '+
+              'onmouseenter="this.style.background=\''+C.blueLt+'\'" onmouseleave="this.style.background=\''+(unread?C.blueLt:'#fff')+'\'">'+
+              '<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;font-weight:700">'+
+                m.from.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase()+
+              '</div>'+
+              '<div style="flex:1;min-width:0">'+
+                '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
+                  '<div style="font-size:14px;font-weight:'+(unread?'700':'500')+';color:'+C.text+'">'+m.from+' <span style="font-size:11px;color:'+C.muted+';font-weight:400">· '+m.role+'</span></div>'+
+                  '<div style="font-size:11px;color:'+C.muted+';flex-shrink:0">'+m.time+'</div>'+
+                '</div>'+
+                '<div style="font-size:13px;color:'+C.muted+';margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+m.text.slice(0,80)+(m.text.length>80?'…':'')+'</div>'+
+                (unread?'<span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:10px;background:'+C.blueLt+';color:'+C.teal+';font-size:10px;font-weight:700">Unread</span>':'')+
+              '</div>'+
+            '</div>';
+          }).join('')
+        : '<div style="padding:40px;text-align:center;color:'+C.muted+'">'+
+            '<div style="font-size:32px;margin-bottom:8px">📭</div>'+
+            '<div style="font-size:14px;font-weight:600;color:'+C.text+'">No messages in '+folderMeta.label+'</div>'+
+          '</div>'
+      )+
+    '</div>'+
+
+    '</div>'; /* end listMain */
+
+  return _dHeader('Messages','Internal communication · Secure team messaging','')+
+    '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px;align-items:flex-start">'+
+      listMain+sidebar+
     '</div>';
 }
 
@@ -3956,29 +4423,63 @@ window._dNewConsult = function() {
 };
 
 window._dSaveConsult = async function() {
+  var g = function(id){ return (document.getElementById(id)||{value:''}).value; };
+  var outcomes = [];
+  document.querySelectorAll('.cs-outcome:checked').forEach(function(cb){ outcomes.push(cb.value); });
+
+  var complaint = g('cs-complaint');
+  if (!complaint.trim()) { if(window.UI&&UI.showToast) UI.showToast('Please enter the chief complaint','err'); return; }
+
   var data = {
-    patient:     _D.consultPatId || (_D.consultPat&&(_D.consultPat.pid||_D.consultPat.id)) || '',
-    visitType:   (document.getElementById('cs-type')||{value:'Consultation'}).value,
-    complaints:  (document.getElementById('cs-complaints')||{value:''}).value,
-    examination: (document.getElementById('cs-examination')||{value:''}).value,
-    diagnosis:   (document.getElementById('cs-diagnosis')||{value:''}).value,
-    treatment:   (document.getElementById('cs-treatment')||{value:''}).value,
-    notes:       (document.getElementById('cs-notes')||{value:''}).value,
-    consultedAt: new Date().toISOString(),
+    patient:        _D.consultPatId || (_D.consultPat&&(_D.consultPat._id||_D.consultPat.pid||_D.consultPat.id)) || '',
+    consultationDate: g('cs-date'),
+    consultationTime: g('cs-time'),
+    visitType:      g('cs-type'),
+    clinician:      g('cs-clinician'),
+    registrationNo: g('cs-reg'),
+    facility:       g('cs-facility'),
+    chiefComplaint: complaint,
+    onset:          g('cs-onset'),
+    duration:       g('cs-duration'),
+    severity:       g('cs-severity'),
+    symptoms:       g('cs-symptoms'),
+    relevantHistory:g('cs-medhistory'),
+    currentMeds:    g('cs-currentmeds'),
+    allergies:      (function(){ var r=document.querySelector('input[name="cs-allergy-opt"]:checked'); return r?r.value:'none'; })(),
+    allergyDetails: g('cs-allergies'),
+    vitals: {
+      bloodPressure:    g('cs-v-bp'),
+      pulse:            g('cs-v-hr'),
+      temperature:      g('cs-v-temp'),
+      spo2:             g('cs-v-spo2'),
+      respiratoryRate:  g('cs-v-rr'),
+      weight:           g('cs-v-wt'),
+    },
+    generalExamination: g('cs-general'),
+    systemExamination:  g('cs-systems'),
+    clinicianNotes:     g('cs-notes'),
+    outcomes:           outcomes,
+    consultedAt:        new Date().toISOString(),
   };
-  if (!data.complaints) { UI.showToast('Please enter at least the chief complaints','err'); return; }
+
   try {
-    await API._fetchDirect('/consultations',{method:'POST',body:JSON.stringify(data)}).catch(function(){});
+    var res = await API._fetchDirect('/consultations',{method:'POST',body:JSON.stringify(data)}).catch(function(){return null;});
+    if (res && res._id) { _D.workflow.consultationId = res._id; }
   } catch(_){}
+
   /* Mark patient as done in doctor queue */
   if (_D.consultPatId) {
-    var p = (window._DOCTOR_QUEUE||[]).find(function(x){return x.id===_D.consultPatId;});
-    if (p) p.status='done';
+    var qp = (window._DOCTOR_QUEUE||[]).find(function(x){return x.id===_D.consultPatId;});
+    if (qp) qp.status='done';
   }
   _dTaskDone('T4');
-  UI.showToast('Consultation saved','ok');
-  _D.consultPat=null; _D.consultPatId=null;
-  _D.view='dashboard'; _dRender();
+  if(window.UI&&UI.showToast) UI.showToast('Consultation saved — proceeding to Diagnosis','ok');
+
+  /* Preserve patient context and navigate to medical notes */
+  if (!_D.selectedPat && _D.consultPat) _D.selectedPat = _D.consultPat;
+  if (!_D.consultPat  && _D.selectedPat) _D.consultPat  = _D.selectedPat;
+  _D.view = 'medical_notes';
+  _dRender();
 };
 
 window._dSaveRx = async function() {
