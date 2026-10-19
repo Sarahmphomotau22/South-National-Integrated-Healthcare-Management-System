@@ -12,13 +12,8 @@
   <link rel="stylesheet" href="css/layout.css" />
   <link rel="stylesheet" href="css/components.css" />
   <link rel="stylesheet" href="css/pages.css" />
+  <link rel="stylesheet" href="css/nihms-shared.css">
 
-<script src="js/pages/queue_management.js"></script>
-  <script src="js/pages/dashboards.js"></script>
-  <script src="js/patient_alerts.js"></script>
-  <script src="js/pages/patient.js?v=9"></script>
-  <script src="js/pages/pharmacy.js"></script>
-  <script src="/js/pages/doctor.js"></script>
   <style>
     /* ═══════════════════════════════════
        FULL-SCREEN AUTH WITH BACKGROUND
@@ -56,16 +51,20 @@
 
     /* Screen layout */
     .auth-screen {
-      position: relative; z-index: 1;
-      min-height: 100vh;
+      position: fixed;
+      inset: 0;
+      z-index: 50;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 30px 16px;
+      overflow-y: auto;
     }
 
     /* Floating card */
     .auth-card {
+      position: relative;
+      z-index: 60;
       width: 100%;
       max-width: 460px;
       background: rgba(255,255,255,0.93);
@@ -297,31 +296,6 @@
     /* Hide app shell on auth page — app.js overrides these on login */
     #app { display: none; }
     #toast { display: none; }
-
-    /* Auth screen fixed full-page overlay */
-    .auth-screen {
-      position: fixed;
-      inset: 0;
-      z-index: 50;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 30px 16px;
-      overflow-y: auto;
-    }
-
-    /* Background fixed full screen */
-    .auth-bg {
-      position: fixed;
-      inset: 0;
-      z-index: 0;
-    }
-
-    /* Card always on top */
-    .auth-card {
-      position: relative;
-      z-index: 60;
-    }
   </style>
 </head>
 <body>
@@ -693,8 +667,6 @@
             <i class="ti ti-shield-check"></i><span>Set new password</span>
           </button>
         </div>
-
-
       </div>
 
     </div><!-- end .card-body -->
@@ -739,18 +711,13 @@
   // On login page load, clear any stale session so old logged-in user
   // doesn't auto-appear behind the login card
   sessionStorage.clear();
-  // Keep localStorage refresh token so "remember me" still works on next visit
-  // but force re-authentication on this page
 </script>
 <script>
-  // Fix function names that auth.js calls with old class names
   function showPanel(name) {
     document.querySelectorAll('.auth-panel').forEach(p => p.classList.remove('active'));
     const el = document.getElementById('panel-' + name);
     if (el) el.classList.add('active');
-    // Clear alerts
     document.querySelectorAll('.alert').forEach(a => { if(!a.id?.includes('toast')) a.classList.add('hidden'); });
-    // Update step dots for register
     if (name === 'register') _updateDots(1);
   }
   function togglePwd(id, btn) {
@@ -767,42 +734,45 @@
       d.className = 'dot' + (i===n?' active':i<n?' done':'');
     }
   }
-  // Override _showRegTab to also update dots
-  const _origShowRegTab = typeof _showRegTab !== 'undefined' ? _showRegTab : null;
-  window._showRegTabWithDots = function(n) {
-    if (typeof _showRegTab === 'function') _showRegTab(n);
-    _updateDots(n);
-  };
 </script>
-<link rel="stylesheet" href="/css/nihms-shared.css">
+
+<!-- Core framework — order matters -->
 <script src="js/accessibility.js"></script>
 <script src="js/api.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/router.js"></script>
+<script src="js/patient_alerts.js"></script>
+
+<!-- Page modules -->
 <script src="js/pages/doctor.js"></script>
 <script src="js/pages/nurse.js"></script>
 <script src="js/pages/patient.js"></script>
 <script src="js/pages/pharmacy.js"></script>
 <script src="js/pages/admin.js"></script>
 <script src="js/pages/telemedicine.js"></script>
-<script src="js/pages/chatbot.js"></script>
 <script src="js/pages/queue_management.js"></script>
-<script src="js/pages/doctor_dashboard.js"></script>
+<script src="js/lab_worker.js"></script>
 <script src="js/pages/receptionist.js"></script>
 <script src="js/pages/facility_admin.js"></script>
 <script src="js/pages/queue_dashboard.js"></script>
+
+<!-- App bootstrap -->
 <script src="js/app.js"></script>
+
 <script>
-  // After scripts load, patch _showRegTab to update dots
-  const _origTab = _showRegTab;
-  window._showRegTab = function(n) {
-    _origTab(n);
-    _updateDots(n);
-  };
-  // Enter key
-  document.getElementById('login-email')?.addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('login-password')?.focus(); });
-  document.getElementById('login-password')?.addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+  // Patch _showRegTab to update progress dots
+  document.addEventListener('DOMContentLoaded', function() {
+    if (typeof _showRegTab === 'function') {
+      const _origTab = _showRegTab;
+      window._showRegTab = function(n) {
+        _origTab(n);
+        _updateDots(n);
+      };
+    }
+    document.getElementById('login-email')?.addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('login-password')?.focus(); });
+    document.getElementById('login-password')?.addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+  });
 </script>
 </body>
 </html>

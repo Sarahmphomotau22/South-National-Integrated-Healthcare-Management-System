@@ -3601,12 +3601,23 @@ window._rRec=_rRec;
 window._rResetCheckin = function() {
   _R.tab = 'checkin';
   _R.ci = { step:'search', id:'', patient:null, appt:null, dept:'General Consultation', result:null, notFound:false };
-  _rRec();
+
+  /* If #rec-body is present, re-render directly */
+  if (document.getElementById('rec-body')) {
+    _rRec();
+  } else if (typeof UI !== 'undefined' && UI.renderContent) {
+    /* Receptionist shell was unmounted (router navigated away) — re-mount via router */
+    UI.renderContent('receptionist');
+  } else {
+    /* Last resort: try _rRec anyway */
+    _rRec();
+  }
+
   /* After re-render, focus the ID input */
   setTimeout(function() {
     var idInput = document.getElementById('ci-id');
     if (idInput) { idInput.value = ''; idInput.focus(); }
-  }, 80);
+  }, 120);
 };
 
 window._rAptSaveEdit = async function() {

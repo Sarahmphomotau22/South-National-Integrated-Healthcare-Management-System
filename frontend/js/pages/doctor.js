@@ -185,8 +185,20 @@ Pages['doc_dashboard'] = function(){
     _D.view='dashboard'; _dRender(); return '';
   }
 
+  /* Paint skeleton immediately — _dRender fills it in on next tick */
   return '<div style="display:flex;height:calc(100vh - 120px);overflow:hidden">'+
-    '<main id="doc-main" style="flex:1;min-width:0;overflow:hidden;display:flex;flex-direction:column;background:'+C.bg+'"></main>'+
+    '<main id="doc-main" style="flex:1;min-width:0;overflow:hidden;display:flex;flex-direction:column;background:'+C.bg+'">'+
+      '<div style="padding:24px;display:flex;flex-direction:column;gap:14px;animation:_dPulse 1.2s ease-in-out infinite">'+
+        '<div style="height:80px;background:#e2e8f0;border-radius:14px"></div>'+
+        '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">'+
+          '<div style="height:80px;background:#e2e8f0;border-radius:12px"></div>'.repeat(4)+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">'+
+          '<div style="height:220px;background:#e2e8f0;border-radius:12px"></div>'+
+          '<div style="height:220px;background:#e2e8f0;border-radius:12px"></div>'+
+        '</div>'+
+      '</div>'+
+    '</main>'+
   '</div>';
 };
 
@@ -206,18 +218,14 @@ function _dPage(view) {
       /* Return empty string so the router doesn't inject a duplicate shell */
       return '';
     }
-    /* Shell not in DOM — set view then mount once DOM is ready */
+    /* Shell not in DOM — mount it, then render on next tick */
     _D.view = view;
-    (function waitForShell(tries){
-      if (document.getElementById('doc-main')) { _dRender(); return; }
-      if (tries > 0) setTimeout(function(){ waitForShell(tries-1); }, 50);
-    })(20);
-    var user = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{firstName:'',lastName:'',role:'doctor'};
     window._DOCTOR_QUEUE = window._DOCTOR_QUEUE || [];
     window._dcAddPatient = function(pt){
       window._DOCTOR_QUEUE.push(pt);
       if(document.getElementById('doc-main')) _dRender();
     };
+    setTimeout(_dRender, 40);
     return '<div style="display:flex;height:calc(100vh - 120px);overflow:hidden">'+
       '<main id="doc-main" style="flex:1;min-width:0;overflow:hidden;display:flex;flex-direction:column;background:'+C.bg+'"></main>'+
     '</div>';
@@ -243,9 +251,21 @@ Pages['doc_all_certs']  = _dPage('doc_all_certs');
 Pages['patient_file']   = _dPage('patient_file');
 Pages['queue']         = _dPage('dashboard');
 
+/* ─── View HTML cache — invalidated only when _dRenderBust(view) called ── */
+var _dCache = {};
+function _dRenderBust(view){ if(view) delete _dCache[view]; else _dCache={}; }
+
+/* Views that must always re-render (live data changes every visit) */
+var _dNoCache = { dashboard:1, patients:1, doc_appointments:1, messages:1, notifications:1, doc_tasks:1 };
+
 /* ─── Render engine ────────────────────────────────────────────────── */
 function _dRender(){
-  if(!document.getElementById('nihms-style')){var s=document.createElement('style');s.id='nihms-style';s.textContent='*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}body{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif}';document.head.appendChild(s);}
+  if(!document.getElementById('nihms-style')){
+    var s=document.createElement('style');s.id='nihms-style';
+    s.textContent='*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}body{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif}'+
+      '@keyframes _dPulse{0%,100%{opacity:1}50%{opacity:.5}}';
+    document.head.appendChild(s);
+  }
   var main = document.getElementById('doc-main');
   if(!main) return;
   var views = {
@@ -269,15 +289,26 @@ function _dRender(){
     doc_tasks:   _dTasks,
     patient_file:_dPatientFile,
   };
-  main.innerHTML = (views[_D.view]||_dDashboard)();
+  var v = _D.view;
+  /* Use cached HTML for static views; rebuild live views every time */
+  if (!_dNoCache[v] && _dCache[v]) {
+    main.innerHTML = _dCache[v];
+  } else {
+    var html = (views[v] || _dDashboard)();
+    if (!_dNoCache[v]) _dCache[v] = html;
+    main.innerHTML = html;
+  }
   _dBindEvents();
 }
 
-/* ─── Sidebar ──────────────────────────────────────────────────────── */
+/* ─── Sidebar (cached by badge fingerprint) ────────────────────────── */
+var _dSidebarCache = { key:'', html:'' };
 function _dSidebar(){
   var unreadN = _D.notifications.filter(function(n){return !n.read;}).length;
   var unreadM = _D.messages.filter(function(m){return m.unread;}).length;
   var pendingT= _D.tasks.filter(function(t){return !t.done;}).length;
+  var cacheKey = _D.view+'|'+unreadN+'|'+unreadM+'|'+pendingT;
+  if (_dSidebarCache.key === cacheKey) return _dSidebarCache.html;
 
   function nav(label, icon, view, badge, badgeColor){
     var active = _D.view===view || (_D.view==='pat360' && view==='patients');
@@ -294,28 +325,31 @@ function _dSidebar(){
   var ini  = ((user.firstName||'D')[0]+((user.lastName||'')[0]||'')).toUpperCase()||'DR';
   var docName = (user.firstName||user.lastName) ? 'Dr '+(user.firstName||'')+(user.lastName?' '+user.lastName:'') : 'Dr Molefe';
 
-  return '<div style="padding:14px;border-bottom:1px solid '+C.border+';display:flex;align-items:center;gap:9px">'+
+  _dSidebarCache.key = cacheKey;
+  var _sb = '<div style="padding:14px;border-bottom:1px solid '+C.border+';display:flex;align-items:center;gap:9px">'+
     '<div style="width:32px;height:32px;border-radius:50%;background:'+C.bannerL+';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0">'+ini+'</div>'+
     '<div><div style="font-size:13px;font-weight:700;color:'+C.text+'">'+docName+'</div><div style="font-size:10px;color:'+C.muted+'">Physician</div></div>'+
   '</div>'+
   sec('Today')+
-  nav('Dashboard',      '🏠','dashboard',    '',              '')+
-  nav('Appointments',   '📅','doc_appointments','',              '')+
-  nav('Clinical Tasks', '✅','doc_tasks',     pendingT||'',    C.amber)+
+  nav('Dashboard','🏠','dashboard','','')+
+  nav('Appointments','📅','doc_appointments','','')+
+  nav('Clinical Tasks','✅','doc_tasks',pendingT||'',C.amber)+
   sec('Patients')+
-  nav('Patient 360°',   '👥','patients',      '',              '')+
-  nav('Medical Notes',  '📝','medical_notes', '',              '')+
+  nav('Patient 360°','👥','patients','','')+
+  nav('Medical Notes','📝','medical_notes','','')+
   sec('Orders & Results')+
-  nav('Prescriptions',  '💊','prescriptions', '',              '')+
-  nav('Lab Orders',     '🧪','lab',           '',              '')+
-  nav('Lab Results',    '📊','lab_results',   '',              '')+
-  nav('Radiology',      '🩻','radiology',     '',              '')+
-  nav('Referrals',      '🔄','referrals',     '',              '')+
+  nav('Prescriptions','💊','prescriptions','','')+
+  nav('Lab Orders','🧪','lab','','')+
+  nav('Lab Results','📊','lab_results','','')+
+  nav('Radiology','🩻','radiology','','')+
+  nav('Referrals','🔄','referrals','','')+
   sec('Communication')+
-  nav('Telemedicine',   '📹','telemedicine',  '',              '')+
-  nav('Messages',       '💬','messages',      unreadM||'',     C.teal)+
+  nav('Telemedicine','📹','telemedicine','','')+
+  nav('Messages','💬','messages',unreadM||'',C.teal)+
   sec('Documents')+
-  nav('Cert Registry',   '📄','doc_all_certs', '',              '');
+  nav('Cert Registry','📄','doc_all_certs','','');
+  _dSidebarCache.html = _sb;
+  return _sb;
 }
 
 /* ─── Page header ──────────────────────────────────────────────────── */
@@ -363,7 +397,7 @@ function _dDashboard(){
     }).join('')+
   '</div>';
 
-  /* ── Async refresh: fetch real appointment + lab counts and update tiles in-place ── */
+  /* ── Async refresh: deferred 400 ms so paint happens before network ── */
   setTimeout(async function(){
     try {
       var u   = window.API && window.API.getStoredUser ? window.API.getStoredUser() : null;
@@ -391,7 +425,7 @@ function _dDashboard(){
       var labEl    = document.getElementById('kpi-lab');
       if(labEl) labEl.textContent = labItems.length;
     } catch(e){ /* silently ignore — tiles keep their initial values */ }
-  }, 0);
+  }, 400);
 
   /* Waiting patients from nurse queue */
   var queueHtml = waiting.length
@@ -471,7 +505,7 @@ function _dDashboard(){
     var el = document.getElementById('doc-greet-clock');
     if(!el){ clearInterval(window._docClockTimer); return; }
     el.textContent = new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  }, 1000);
+  }, 30000);
 
   var greetHtml = '<div style="background:linear-gradient(135deg,'+C.bannerL+','+C.bannerR+');border-radius:14px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 8px rgba(15,110,86,.25)">'+
     '<div>'+
@@ -751,8 +785,20 @@ function _dAppointments(){
   var tab = window._aptTab || 'day';
   window._dAptTab = function(t){ window._aptTab=t; if(typeof _dRender==='function') _dRender(); };
 
-  /* ── Fetch live appointments on every page visit ── */
+  /* ── Fetch live appointments — skip if already loaded in last 60 s ── */
+  var _aptNow = Date.now();
+  if (window._dAptDataTs && (_aptNow - window._dAptDataTs < 60000) && window._dAptRows) {
+    /* Data is fresh — re-render with cached data immediately */
+    setTimeout(function(){
+      var calArea = document.getElementById('doc-apt-cal');
+      if (calArea && window._dAptRows) {
+        /* trigger re-render with cached rows already in _dAptData */
+        _dRenderBust('doc_appointments');
+      }
+    }, 0);
+  }
   setTimeout(async function(){
+    if (window._dAptDataTs && (Date.now() - window._dAptDataTs < 60000) && window._dAptRows) return;
     var calArea   = document.getElementById('doc-apt-cal');
     var tableArea = document.getElementById('doc-apt-table');
     if (!calArea) return;
@@ -822,7 +868,9 @@ function _dAppointments(){
       /* Also update _D.todaySchedule so other parts of the page stay consistent */
       _D.todaySchedule = rows.map(function(a){ return {time:a.time, patient:a.patient, type:a.type, status:a.status}; });
 
-      window._dAptData = rows;
+      window._dAptData   = rows;
+      window._dAptRows   = rows;
+      window._dAptDataTs = Date.now();
       var cur = window._aptTab || 'day';
       calArea.innerHTML   = cur==='day'?_aptBuildDay(rows):cur==='week'?_aptBuildWeek(rows):cur==='month'?_aptBuildMonth(rows):_aptBuildYear(rows);
       if(tableArea) tableArea.innerHTML = _aptTodayTable(rows);
@@ -2282,6 +2330,21 @@ function _dLabResults(){
    RADIOLOGY
 ══════════════════════════════════════════════════════════════════ */
 function _dRadiology(){
+  /* ── Sample radiology orders (illustrative only) ── */
+  var RAD_ORDERS = [
+    {id:'RAD-2026-0071',test:'Chest X-Ray',          patient:'Thabo Mokoena', patId:'PT-00231',dob:'1985-03-12',date:'11 Oct 2026',modality:'X-Ray (Radiography)',region:'Chest',  priority:'Routine',status:'completed',  indication:'Persistent cough, rule out TB / pneumonia',          doctor:'Dr Molefe',facility:'Johannesburg CHC',reportId:'RPT-071'},
+    {id:'RAD-2026-0072',test:'CT Head',               patient:'Nomsa Dlamini', patId:'PT-00187',dob:'1972-07-28',date:'11 Oct 2026',modality:'CT Scan',             region:'Head / Brain',priority:'Urgent', status:'in_progress',indication:'Acute onset severe headache, rule out bleed',        doctor:'Dr Molefe',facility:'Johannesburg CHC',reportId:''},
+    {id:'RAD-2026-0073',test:'Abdominal Ultrasound',  patient:'Peter Nkosi',   patId:'PT-00304',dob:'1990-11-05',date:'11 Oct 2026',modality:'Ultrasound',           region:'Abdomen', priority:'Routine',status:'pending',     indication:'RUQ pain, cholecystitis query',                     doctor:'Dr Molefe',facility:'Johannesburg CHC',reportId:''},
+    {id:'RAD-2026-0074',test:'Lumbar Spine MRI',      patient:'Lerato Molefe', patId:'PT-00412',dob:'1998-02-19',date:'10 Oct 2026',modality:'MRI',                  region:'Lumbar Spine',priority:'Routine',status:'completed',  indication:'Chronic low back pain with radiculopathy',          doctor:'Dr Molefe',facility:'Johannesburg CHC',reportId:'RPT-074'},
+    {id:'RAD-2026-0075',test:'Pelvis X-Ray',          patient:'Kagiso Sithole',patId:'PT-00089',dob:'1994-09-30',date:'10 Oct 2026',modality:'X-Ray (Radiography)',  region:'Pelvis',  priority:'Routine',status:'pending',     indication:'Hip pain after fall',                               doctor:'Dr Molefe',facility:'Johannesburg CHC',reportId:''},
+    {id:'RAD-2026-0076',test:'Liver Ultrasound',      patient:'Amina Hassan',  patId:'PT-00556',dob:'1968-05-14',date:'09 Oct 2026',modality:'Ultrasound',           region:'Upper Abdomen',priority:'Urgent',status:'completed',  indication:'Jaundice workup, hepatomegaly on examination',      doctor:'Dr Molefe',facility:'Johannesburg CHC',reportId:'RPT-076'},
+    {id:'RAD-2026-0077',test:'Chest X-Ray',           patient:'Sipho Ndlovu',  patId:'PT-00073',dob:'1979-12-22',date:'09 Oct 2026',modality:'X-Ray (Radiography)',  region:'Chest',   priority:'Urgent', status:'in_progress',indication:'Post-TB treatment, surveillance imaging',            doctor:'Dr Molefe',facility:'Johannesburg CHC',reportId:''},
+    {id:'RAD-2026-0078',test:'Echocardiogram',        patient:'Grace Mahlangu',patId:'PT-00341',dob:'1983-08-07',date:'08 Oct 2026',modality:'Echocardiogram (Echo)',region:'Heart — transthoracic',priority:'Routine',status:'in_progress',indication:'Dyspnoea, suspected cardiomyopathy',       doctor:'Dr Molefe',facility:'Johannesburg CHC',reportId:''},
+  ];
+
+  window._radOrdersTab  = window._radOrdersTab  || 'all';
+  window._radOrdersView = window._radOrdersView !== undefined ? window._radOrdersView : null;
+
   /* ── Patient resolution ── */
   var radPat     = _D.consultPat || _D.pat360Data || _D.selectedPat || null;
   var radPatName = radPat ? ((radPat.firstName||radPat.name||'')+' '+(radPat.lastName||'')).trim()||'—' : '—';
@@ -2294,6 +2357,243 @@ function _dRadiology(){
   var docName    = u.firstName?('Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim()):(u.name||'—');
   var docFacility= (typeof u.facility==='string'?u.facility:'')|| (u.facility&&u.facility.name)||u.facilityName||'Current healthcare facility';
   var docHpcsa   = u.hpcsaNumber||u.hpcsa||u.registrationNumber||'';
+
+  var stCfg={pending:{l:'Pending',bg:'#FFF7ED',c:'#92400E',bd:'#FDE68A'},in_progress:{l:'In Progress',bg:'#EFF6FF',c:'#1D4ED8',bd:'#BFDBFE'},completed:{l:'Completed',bg:'#ECFDF5',c:'#065f46',bd:'#A7F3D0'}};
+  var prCfg={Routine:{bg:'#F0FDF4',c:'#166534'},Urgent:{bg:'#FEF3C7',c:'#92400E'},Emergency:{bg:'#FEE2E2',c:'#991B1B'}};
+
+  /* ══════════════════════════════════════════════════════════
+     NEW RADIOLOGY ORDER FORM  (entered via _D.radNewOrder=true)
+  ══════════════════════════════════════════════════════════ */
+  if(!_D.radNewOrder && window._radOrdersView === null && window._radOrdersTab !== undefined){
+    /* fall through to list or detail below */
+  }
+
+  /* ── Detail view ── */
+  if(!_D.radNewOrder && window._radOrdersView){
+    var ro  = RAD_ORDERS.find(function(x){return x.id===window._radOrdersView;})||RAD_ORDERS[0];
+    var rst = stCfg[ro.status]||stCfg.pending;
+    var rpr = prCfg[ro.priority]||prCfg.Routine;
+
+    var dobFmtR = ro.dob
+      ? (function(){ try{ return new Date(ro.dob).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'}); }catch(_){ return ro.dob; } })()
+      : '—';
+
+    function _rov(label,value){
+      return '<div>'+
+        '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C.muted+';margin-bottom:4px">'+label+'</div>'+
+        '<div style="font-size:14px;font-weight:700;color:'+C.text+'">'+value+'</div>'+
+      '</div>';
+    }
+    function _rovCard(title,content){
+      return '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:20px 24px;margin-bottom:16px">'+
+        '<div style="font-size:15px;font-weight:800;color:'+C.text+';margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid '+C.border+'">'+title+'</div>'+
+        content+
+      '</div>';
+    }
+
+    var radDetailSidebar =
+      '<div style="width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:12px">'+
+        '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:16px">'+
+          '<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:'+C.muted+';margin-bottom:12px">Order Summary</div>'+
+          '<div style="display:flex;flex-direction:column;gap:10px">'+
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">Order No.</div>'+
+              '<div style="font-size:12px;font-weight:700;color:'+C.text+';font-family:monospace">'+ro.id+'</div></div>'+
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">Status</div>'+
+              '<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:'+rst.bg+';color:'+rst.c+';border:1px solid '+rst.bd+'">'+rst.l+'</span></div>'+
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">Priority</div>'+
+              '<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:'+rpr.bg+';color:'+rpr.c+'">'+ro.priority+'</span></div>'+
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:3px">Date Ordered</div>'+
+              '<div style="font-size:12px;font-weight:700;color:'+C.text+'">'+ro.date+'</div></div>'+
+          '</div>'+
+        '</div>'+
+        '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:16px">'+
+          '<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:'+C.muted+';margin-bottom:12px">Clinical Workflow</div>'+
+          '<div style="display:flex;flex-direction:column;gap:6px">'+
+            ['Consultation','Diagnosis','Lab Orders','Radiology','Prescription','Referral','Follow-Up'].map(function(step){
+              var active = step==='Radiology';
+              var done   = ['Consultation','Diagnosis','Lab Orders'].indexOf(step)>-1;
+              var icon   = done?'✓':(active?'→':'○');
+              var col    = active?C.teal:(done?C.green:C.muted);
+              var wt     = active?'800':(done?'600':'500');
+              return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:'+(active?C.blueLt:'transparent')+';border:1.5px solid '+(active?C.teal:'transparent')+'">'+
+                '<span style="color:'+col+';font-size:12px;font-weight:700;width:14px;text-align:center">'+icon+'</span>'+
+                '<span style="font-size:12px;font-weight:'+wt+';color:'+col+'">'+step+'</span>'+
+              '</div>';
+            }).join('')+
+          '</div>'+
+        '</div>'+
+      '</div>';
+
+    var radResultPanel = ro.status==='completed'
+      ? '<div style="background:'+C.greenLt+';border:1.5px solid '+C.greenBd+';border-radius:10px;padding:16px">'+
+          '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'+
+            '<span style="font-size:20px">✅</span>'+
+            '<div style="font-size:14px;font-weight:800;color:'+C.green+'">Imaging completed</div>'+
+          '</div>'+
+          '<div style="font-size:13px;color:#065f46;line-height:1.6;margin-bottom:16px">'+
+            'The radiology order is marked as completed. View the report for the radiologist\'s findings and interpretation.'+
+          '</div>'+
+          (ro.reportId
+            ? '<button onclick="if(window.UI&&UI.showToast)UI.showToast(\'Opening report '+ro.reportId+'…\',\'ok\')" '+
+                'style="display:inline-flex;align-items:center;gap:8px;padding:11px 22px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">'+
+                '🩻 View Report'+
+              '</button>'
+            : '<div style="font-size:13px;color:'+C.muted+'">Report not yet linked.</div>')+
+        '</div>'
+      : ro.status==='in_progress'
+        ? '<div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px">'+
+            '<span style="font-size:24px">🩻</span>'+
+            '<div>'+
+              '<div style="font-size:14px;font-weight:700;color:#1d4ed8;margin-bottom:4px">Being processed by radiology</div>'+
+              '<div style="font-size:13px;color:#1d4ed8">The request has been received by the radiology department. A report will be available once imaging is complete.</div>'+
+            '</div>'+
+          '</div>'
+        : '<div style="background:#fff7ed;border:1.5px solid #fde68a;border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px">'+
+            '<span style="font-size:24px">🕐</span>'+
+            '<div>'+
+              '<div style="font-size:14px;font-weight:700;color:#92400e;margin-bottom:4px">Awaiting imaging</div>'+
+              '<div style="font-size:13px;color:#92400e">The order has been submitted. The radiology report will appear here once imaging is performed and interpreted.</div>'+
+            '</div>'+
+          '</div>';
+
+    return _dHeader('Radiology Order Detail','Imaging requests and tracking',
+        '<button onclick="window._radOrdersView=null;if(typeof _dRender===\'function\')_dRender()" style="padding:7px 16px;border:1.5px solid '+C.border+';border-radius:8px;background:#fff;font-size:13px;font-weight:600;color:'+C.muted+';cursor:pointer;font-family:inherit">← Back to Orders</button>')+
+      '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px;align-items:flex-start">'+
+        '<div style="flex:1;min-width:0">'+
+
+          /* Title + status */
+          '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:20px 24px;margin-bottom:16px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'+
+            '<div>'+
+              '<div style="font-size:18px;font-weight:800;color:'+C.text+'">'+ro.test+'</div>'+
+              '<div style="font-size:12px;font-family:monospace;color:'+C.muted+';margin-top:4px">Order No: '+ro.id+'</div>'+
+            '</div>'+
+            '<span style="padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;background:'+rst.bg+';color:'+rst.c+';border:1px solid '+rst.bd+';flex-shrink:0">'+rst.l+'</span>'+
+          '</div>'+
+
+          /* Patient Information */
+          _rovCard('Patient Information',
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
+              _rov('Patient Name',ro.patient)+
+              _rov('Patient ID',ro.patId)+
+              _rov('Date of Birth',dobFmtR)+
+              _rov('Date Ordered',ro.date)+
+            '</div>'
+          )+
+
+          /* Order Details */
+          _rovCard('Order Details',
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">'+
+              _rov('Modality',ro.modality)+
+              _rov('Region / Body Part',ro.region)+
+              _rov('Priority','<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:'+rpr.bg+';color:'+rpr.c+'">'+ro.priority+'</span>')+
+            '</div>'+
+            _rov('Clinical Indication',ro.indication)
+          )+
+
+          /* Ordering Information */
+          _rovCard('Ordering Information',
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
+              _rov('Ordering Doctor',ro.doctor)+
+              _rov('Facility',ro.facility)+
+            '</div>'
+          )+
+
+          /* Radiology Report */
+          _rovCard('Radiology Report', radResultPanel)+
+
+          /* Actions */
+          '<div style="display:flex;gap:10px;padding-bottom:24px">'+
+            '<button onclick="window._radOrdersView=null;if(typeof _dRender===\'function\')_dRender()" style="padding:11px 22px;border:1.5px solid '+C.border+';border-radius:10px;background:#fff;font-size:13px;font-weight:600;color:'+C.muted+';cursor:pointer;font-family:inherit">← Back to Orders</button>'+
+            (ro.reportId&&ro.status==='completed'
+              ? '<button onclick="if(window.UI&&UI.showToast)UI.showToast(\'Opening report '+ro.reportId+'…\',\'ok\')" style="padding:11px 22px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🩻 View Report</button>'
+              : '')+
+          '</div>'+
+        '</div>'+
+        radDetailSidebar+
+      '</div>';
+  }
+
+  /* ── List view ── */
+  if(!_D.radNewOrder){
+    var rTotal  = RAD_ORDERS.length;
+    var rPend   = RAD_ORDERS.filter(function(o){return o.status==='pending';}).length;
+    var rInprog = RAD_ORDERS.filter(function(o){return o.status==='in_progress';}).length;
+    var rCompl  = RAD_ORDERS.filter(function(o){return o.status==='completed';}).length;
+    var rTab    = window._radOrdersTab || 'all';
+    var rVis    = rTab==='all'?RAD_ORDERS:RAD_ORDERS.filter(function(o){return o.status===rTab;});
+
+    function _radTabBtn(id,label){
+      var active = rTab===id;
+      return '<button onclick="window._radOrdersTab=\''+id+'\';if(typeof _dRender===\'function\')_dRender()" '+
+        'style="padding:7px 16px;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;'+
+        'background:'+(active?C.blue:'transparent')+';color:'+(active?'#fff':C.muted)+'">'+label+'</button>';
+    }
+
+    var radKpi =
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">'+
+        _card('<div style="display:flex;align-items:center;gap:10px"><div style="font-size:22px">🩻</div><div>'+
+          '<div style="font-size:26px;font-weight:800;color:'+C.text+';line-height:1">'+rTotal+'</div>'+
+          '<div style="font-size:12px;color:'+C.muted+'">Total Orders</div></div></div>')+
+        _card('<div style="display:flex;align-items:center;gap:10px"><div style="font-size:22px">⏳</div><div>'+
+          '<div style="font-size:26px;font-weight:800;color:#92400E;line-height:1">'+rPend+'</div>'+
+          '<div style="font-size:12px;color:'+C.muted+'">Pending</div></div></div>')+
+        _card('<div style="display:flex;align-items:center;gap:10px"><div style="font-size:22px">📡</div><div>'+
+          '<div style="font-size:26px;font-weight:800;color:'+C.blue+';line-height:1">'+rInprog+'</div>'+
+          '<div style="font-size:12px;color:'+C.muted+'">In Progress</div></div></div>')+
+        _card('<div style="display:flex;align-items:center;gap:10px"><div style="font-size:22px">✅</div><div>'+
+          '<div style="font-size:26px;font-weight:800;color:#065f46;line-height:1">'+rCompl+'</div>'+
+          '<div style="font-size:12px;color:'+C.muted+'">Completed</div></div></div>')+
+      '</div>';
+
+    var radRows = rVis.map(function(o,i){
+      var st = stCfg[o.status]||stCfg.pending;
+      var pr = prCfg[o.priority]||prCfg.Routine;
+      return (
+        '<div style="padding:14px 16px;border-bottom:1px solid '+C.border+';background:'+(i%2===0?'#fff':'#f8fafc')+';display:flex;align-items:flex-start;gap:12px">'+
+          '<div style="width:38px;height:38px;border-radius:10px;background:#EFF6FF;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;margin-top:1px">🩻</div>'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="font-size:14px;font-weight:700;color:'+C.text+'">'+o.test+'</div>'+
+            '<div style="font-size:12px;color:'+C.muted+';margin-top:2px">'+o.patient+'&nbsp;·&nbsp;<span style="font-family:monospace">'+o.id+'</span>&nbsp;·&nbsp;'+o.date+'</div>'+
+            '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">'+
+              '<span style="padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:'+st.bg+';color:'+st.c+';border:1px solid '+st.bd+'">'+st.l+'</span>'+
+              '<span style="padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:'+pr.bg+';color:'+pr.c+'">Priority: '+o.priority+'</span>'+
+              '<span style="padding:2px 9px;border-radius:12px;font-size:11px;font-weight:500;background:#f1f5f9;color:'+C.muted+'">'+o.modality+'</span>'+
+            '</div>'+
+          '</div>'+
+          '<button onclick="window._radOrdersView=\''+o.id+'\';if(typeof _dRender===\'function\')_dRender()" '+
+            'style="flex-shrink:0;padding:7px 16px;border:1px solid '+C.border+';border-radius:8px;background:#fff;font-size:12px;font-weight:600;color:'+C.text+';cursor:pointer;font-family:inherit">'+
+            'View order →</button>'+
+        '</div>'
+      );
+    }).join('');
+
+    return _dHeader('Radiology Orders','Imaging requests and tracking')+
+      '<div style="flex:1;overflow:auto;padding:16px 20px">'+
+        radKpi+
+        '<div style="background:#fff;border-radius:12px;border:1px solid '+C.border+';overflow:hidden;margin-bottom:16px">'+
+          '<div style="padding:12px 16px;border-bottom:1px solid '+C.border+';display:flex;align-items:center;justify-content:space-between">'+
+            '<div style="font-size:14px;font-weight:700;color:'+C.text+'">Recent Radiology Orders</div>'+
+            '<div style="display:flex;align-items:center;gap:8px">'+
+              '<div style="display:flex;gap:4px;background:'+C.bg+';border-radius:8px;padding:4px">'+
+                _radTabBtn('all','All')+_radTabBtn('pending','Pending')+_radTabBtn('in_progress','In progress')+_radTabBtn('completed','Completed')+
+              '</div>'+
+              '<button onclick="_D.radNewOrder=true;if(typeof _dRender===\'function\')_dRender()" '+
+                'style="padding:8px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'+
+                '＋ New Order'+
+              '</button>'+
+            '</div>'+
+          '</div>'+
+          (radRows||'<div style="padding:40px;text-align:center;color:'+C.muted+'">No orders in this category</div>')+
+          '<div style="padding:8px 16px;font-size:11px;color:'+C.muted+';border-top:1px solid '+C.border+'">'+
+            '<em>Illustrative data only. These are sample records, not actual patient orders.</em>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+  }
+
+  /* ══════════════════════════════════════════════════════════
+     NEW ORDER FORM  (entered via _D.radNewOrder = true)
+  ══════════════════════════════════════════════════════════ */
 
   /* ── Modality → regions map ── */
   var MODALITY_REGIONS = {
@@ -2499,14 +2799,15 @@ function _dRadiology(){
     };
     try{ await API._fetchDirect('/radiology-orders',{method:'POST',body:JSON.stringify(payload)}); }catch(_){}
     if(window.UI)UI.showToast('Radiology request submitted','ok');
-    _D.view='radiology'; _dRender();
+    _D.radNewOrder=false; _D.view='radiology'; _dRender();
   };
 
   /* Reset inv counter each form open */
   _D._radInvCount = 1;
 
   /* ── HTML ── */
-  return _dHeader('Radiology / Imaging Request', '')+
+  return _dHeader('New Radiology / Imaging Request', 'Imaging requests and tracking',
+      '<button onclick="_D.radNewOrder=false;_D.view=\'radiology\';_dRender()" style="padding:7px 16px;border:1.5px solid '+C.border+';border-radius:8px;background:#fff;font-size:13px;font-weight:600;color:'+C.muted+';cursor:pointer;font-family:inherit">← Back to Orders</button>')+
     '<div style="flex:1;overflow:auto;display:flex;gap:16px;padding:16px 20px 24px;box-sizing:border-box;align-items:flex-start">'+
 
       '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:14px">'+
@@ -2558,7 +2859,7 @@ function _dRadiology(){
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'+
             'Submit Request'+
           '</button>'+
-          '<button onclick="_D.view=\'dashboard\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Cancel</button>'+
+          '<button onclick="_D.radNewOrder=false;_D.view=\'radiology\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Cancel</button>'+
         '</div>'+
 
       '</div>'+
@@ -4693,7 +4994,7 @@ function _dBindEvents(){
     var now = new Date();
     tEl.textContent = now.toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     if (dEl) dEl.innerHTML = now.toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+'  ·  Johannesburg CHC';
-  }, 1000);
+  }, 30000);
 }
 
 /* ── Backwards compat for old Pages['queue'] etc ─────────────────── */

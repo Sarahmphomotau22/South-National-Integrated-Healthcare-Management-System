@@ -1,10 +1,40 @@
+/* ── NIHMS design-system CSS — injected once, mirrors login.html ── */
+(function _nihmsInjectDS() {
+  if (document.getElementById('nihms-ds-css')) return;
+  var s = document.createElement('style');
+  s.id = 'nihms-ds-css';
+  s.textContent = [
+    /* Reset */
+    '*, *::before, *::after { box-sizing: border-box; }',
+    '::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}',
+    /* Background — subtle green/navy mesh matching login header */
+    'body, #app, .page-root { background-color:#f4f5f0 !important; background-image: repeating-linear-gradient(135deg, rgba(15,110,86,.03) 0px, rgba(15,110,86,.03) 1px, transparent 1px, transparent 40px), repeating-linear-gradient(45deg, rgba(26,74,155,.02) 0px, rgba(26,74,155,.02) 1px, transparent 1px, transparent 40px) !important; background-attachment:fixed !important; }',
+    /* Override any inline bg that was set to f8fafc/f1f5f9 */
+    /* Alert colours — exact login.html values */
+    '.nihms-alert-err { background:#FCEBEB !important; color:#A32D2D !important; border-left:3px solid #E24B4A !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    '.nihms-alert-ok  { background:#E1F5EE !important; color:#0F6E56 !important; border-left:3px solid #1D9E75 !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    '.nihms-alert-warn{ background:#FAEEDA !important; color:#854F0B !important; border-left:3px solid #EF9F27 !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    '.nihms-alert-info{ background:#E6F1FB !important; color:#185FA5 !important; border-left:3px solid #378ADD !important; border-radius:10px; padding:10px 14px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }',
+    /* Primary button — pill, login-page gradient */
+    'button[style*="background:#0F6E56"], button[style*="background: #0F6E56"] { border-radius:50px !important; }',
+    /* Input focus ring — login-page green */
+    'input:focus, select:focus, textarea:focus { border-color:#0F6E56 !important; box-shadow:0 0 0 3px rgba(15,110,86,.12) !important; outline:none !important; }',
+    /* Card borders */
+    '.nihms-card { background:#fff; border-radius:14px; border:1px solid #e0e0e0; box-shadow:0 1px 3px rgba(0,0,0,.06); }',
+    /* Table header bg */
+    'th[style*="background:#eef2f7"], th[style*="background: #eef2f7"] { background:#f4f5f0 !important; color:#777 !important; }',
+  ].join('\n');
+  document.head.appendChild(s);
+})();
+
 /**
  * js/pages/nurse.js — NIHMS Nurse / Triage Station
  *
  * 6 views: requests · queue · vitals · emergency · messaging · analytics
  *
- * Design: #f4f5f0 surface · teal #0F6E56 primary · navy #1A4A9B accent
- *   gradient header · #e0e0e0 borders · pill buttons · charcoal #20242b text
+ * Design: white content area · pale blue-gray #f4f5f0 sidebar
+ *   enterprise blue #0F6E56 · charcoal #111111 · zebra-striped tables
+ *   6px radii · 1px borders · filter chips above tables
  *
  * Receptionist bridge:
  *   window._NURSE_REQUESTS — array receptionist pushes to
@@ -103,7 +133,7 @@ function _flagVitals(v) {
 function _priorityDot(p)  { return p==='Emergency'?'#dc2626':p==='High'?'#d97706':'#16a34a'; }
 function _priorityBg(p)   { return p==='Emergency'?'background:#fef2f2;color:#dc2626;border:1px solid #fca5a5':p==='High'?'background:#fffbeb;color:#d97706;border:1px solid #fcd34d':'background:#f0fdf4;color:#16a34a;border:1px solid #86efac'; }
 function _statusBg(s) {
-  var m = { 'Awaiting Vitals':'background:#e8f5f1;color:#0F4C3A;border:1px solid #a8d8cc',
+  var m = { 'Awaiting Vitals':'background:#eff6ff;color:#0B5443;border:1px solid #bfdbfe',
     'In Vitals':'background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd',
     'Ready for Consultation':'background:#f0fdfa;color:#0f766e;border:1px solid #99f6e4',
     'With Doctor':           'background:#f0fdfa;color:#0d7490;border:1px solid #67e8f9',
@@ -129,10 +159,10 @@ function _btn(label, onclick, primary) {
 }
 
 function _th(h) { return '<th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;white-space:nowrap;background:#f4f5f0;border-bottom:1px solid #e0e0e0">'+h+'</th>'; }
-function _td(c,s) { return '<td style="padding:8px 14px;font-size:13px;color:#20242b;'+(s||'')+'">'+c+'</td>'; }
+function _td(c,s) { return '<td style="padding:8px 14px;font-size:13px;color:#111111;'+(s||'')+'">'+c+'</td>'; }
 function _trBg(i, priority) {
   if (priority==='Emergency') return 'background:#fff5f5';
-  return i%2===0?'background:#ffffff':'background:#f4f5f0';
+  return i%2===0?'background:#ffffff':'background:#f5f8fc';
 }
 
 /* ─── Main page shell ────────────────────────────────────────────────── */
@@ -141,20 +171,44 @@ Pages['nurse_dashboard'] = function() {
   _N.alertDismissed = false;
   _N.loadingData    = true;
 
-  /* Merge any requests already pushed by receptionist */
+  /* Merge any requests already pushed by receptionist (same-tab) */
   (window._NURSE_REQUESTS || []).forEach(function(r) {
-    if (r.autoAccept) {
-      /* Auto-accepted: goes straight to Vitals Queue, not Triage */
-      if (!_N.patients.find(function(p){ return p.id === (r.patientId||r.id); })) {
-        var now0 = (typeof _nowTime==='function') ? _nowTime() : new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'});
-        var sn0  = (_N._stationSeq = ((_N._stationSeq||0) % 4) + 1);
-        _N.patients.push({ id:r.patientId||r.id, name:r.patientName||'', age:r.age||'—', sex:r.sex||'—', complaint:r.complaint||'Walk-in', priority:r.priority||'Normal', status:'Awaiting Vitals', vitalStatus:'Pending', arrivalTime:r.requestedAt||now0, triageTime:null, waitMins:0, room:null, emergencyClass:null, vitals:null, flags:[], aiRisk:null, acceptedAt:now0, stationNum:sn0 });
-      }
-    } else {
-      if (!_N.requests.find(function(x){ return x.id === r.id; }))
-        _N.requests.push(r);
-    }
+    if (!_N.requests.find(function(x){ return x.id === r.id; }))
+      _N.requests.push(r);
   });
+
+  /* Drain cross-tab localStorage queue (check-ins from a different tab) */
+  try {
+    var _lsQueue = JSON.parse(localStorage.getItem('_NIHMS_NURSE_QUEUE') || '[]');
+    _lsQueue.forEach(function(r) {
+      var dept  = (r.department || r.dept || r.type || '').toLowerCase();
+      var isImm = dept.includes('immunis') || dept.includes('immuniz') || dept.includes('vaccin')
+                  || r.isImmunisation === true;
+      if (isImm) {
+        if (!_N.immQueue.find(function(p){ return p.id===r.id || p.token===r.token; })) {
+          _N.immQueue.unshift({
+            id:          r.id          || ('IMM-' + Date.now()),
+            token:       r.token       || '',
+            patientName: r.patientName || r.name || '',
+            patientId:   r.patientId   || r._id  || '',
+            _id:         r._id         || r.patientId || '',
+            age:         r.age         || '—',
+            sex:         r.sex         || r.gender || '',
+            dept:        r.department  || r.dept  || 'Immunisation',
+            status:      'Awaiting Immunisation',
+            priority:    r.priority    || 'Normal',
+            checkedInAt: r.checkedInAt || new Date().toISOString(),
+            complaint:   r.complaint   || 'Scheduled Immunisation',
+            seen:        false,
+            type:        'immunisation',
+          });
+        }
+      } else {
+        if (!_N.requests.find(function(x){ return x.id === r.id; }))
+          _N.requests.push(r);
+      }
+    });
+  } catch(_) {}
 
   setTimeout(_nurseRender, 80);
 
@@ -229,16 +283,8 @@ Pages['nurse_dashboard'] = function() {
 
       /* 3. Load any existing vitals requests from window._NURSE_REQUESTS (receptionist live push) */
       (window._NURSE_REQUESTS || []).forEach(function(r) {
-        if (r.autoAccept) {
-          if (!_N.patients.find(function(p){ return p.id === (r.patientId||r.id); })) {
-            var now3 = (typeof _nowTime==='function') ? _nowTime() : new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'});
-            var sn3  = (_N._stationSeq = ((_N._stationSeq||0) % 4) + 1);
-            _N.patients.push({ id:r.patientId||r.id, name:r.patientName||'', age:r.age||'—', sex:r.sex||'—', complaint:r.complaint||'Walk-in', priority:r.priority||'Normal', status:'Awaiting Vitals', vitalStatus:'Pending', arrivalTime:r.requestedAt||now3, triageTime:null, waitMins:0, room:null, emergencyClass:null, vitals:null, flags:[], aiRisk:null, acceptedAt:now3, stationNum:sn3 });
-          }
-        } else {
-          if (!_N.requests.find(function(x){ return x.id === r.id; }))
-            _N.requests.push(r);
-        }
+        if (!_N.requests.find(function(x){ return x.id === r.id; }))
+          _N.requests.push(r);
       });
 
       /* 4. Load messages from backend */
@@ -265,8 +311,7 @@ Pages['nurse_dashboard'] = function() {
   }, 120);
 
   return '<div style="display:flex;height:calc(100vh - 120px);overflow:hidden">' +
-    '<aside id="nurse-sidebar" style="width:208px;flex-shrink:0;background:#f4f5f0;border-right:1px solid #e0e0e0;display:flex;flex-direction:column;overflow-y:auto"></aside>' +
-    '<main id="nurse-main" style="flex:1;min-width:0;overflow:hidden;display:flex;flex-direction:column;background:#f4f5f0"></main>' +
+    '<main id="nurse-main" style="flex:1;min-width:0;overflow:hidden;display:flex;flex-direction:column;background:#fff"></main>' +
   '</div>';
 };
 
@@ -274,27 +319,17 @@ Pages['nurse_dashboard'] = function() {
 function _nurseRender() {
   /* Always sync any new requests pushed by receptionist */
   (window._NURSE_REQUESTS||[]).forEach(function(r){
-    if (r.autoAccept) {
-      if (!_N.patients.find(function(p){ return p.id === (r.patientId||r.id); })) {
-        var nowR = (typeof _nowTime==='function') ? _nowTime() : new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'});
-        var snR  = (_N._stationSeq = ((_N._stationSeq||0) % 4) + 1);
-        _N.patients.push({ id:r.patientId||r.id, name:r.patientName||'', age:r.age||'—', sex:r.sex||'—', complaint:r.complaint||'Walk-in', priority:r.priority||'Normal', status:'Awaiting Vitals', vitalStatus:'Pending', arrivalTime:r.requestedAt||nowR, triageTime:null, waitMins:0, room:null, emergencyClass:null, vitals:null, flags:[], aiRisk:null, acceptedAt:nowR, stationNum:snR });
-      }
-    } else {
-      if (!_N.requests.find(function(x){ return x.id === r.id; }))
-        _N.requests.push(r);
-    }
+    if (!_N.requests.find(function(x){ return x.id === r.id; }))
+      _N.requests.push(r);
   });
 
-  var sidebar = document.getElementById('nurse-sidebar');
-  var main    = document.getElementById('nurse-main');
-  if (!sidebar || !main) return;
+  var main = document.getElementById('nurse-main');
+  if (!main) return;
 
   var styleEl=document.getElementById('nihms-style');
   if(!styleEl){styleEl=document.createElement('style');styleEl.id='nihms-style';
-  styleEl.textContent='*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#d0d0d0;border-radius:99px}body{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif}input:focus,select:focus,textarea:focus{border-color:#0F6E56 !important;box-shadow:0 0 0 3px rgba(15,110,86,.12) !important;outline:none !important}button[style*="background:#0F6E56"]{border-radius:50px !important}';
+  styleEl.textContent='*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}body{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif}';
   document.head.appendChild(styleEl);}
-  sidebar.innerHTML = _nSidebar();
 
   var views = { overview:_nOverview, requests:_nRequests, queue:_nQueue, vitals:_nVitals,
                 'imm-queue':_nImmQueue, emergency:_nEmergency, messaging:_nMessaging,
@@ -313,10 +348,10 @@ function _nSidebar() {
 
   function navItem(label, icon, view, badge, badgeRed) {
     var active = _N.view === view;
-    return '<button onclick="_setView(\''+view+'\')" style="display:flex;align-items:center;gap:9px;width:100%;padding:8px 16px;border:none;background:'+(active?'#fff':'transparent')+';color:'+(active?'#0F6E56':'#20242b')+';font-size:13px;font-weight:'+(active?'700':'500')+';cursor:pointer;text-align:left;font-family:inherit;border-right:'+(active?'2px solid #0F6E56':'2px solid transparent')+';transition:all .1s">' +
+    return '<button onclick="_setView(\''+view+'\')" style="display:flex;align-items:center;gap:9px;width:100%;padding:8px 16px;border:none;background:'+(active?'#fff':'transparent')+';color:'+(active?'#0F6E56':'#111111')+';font-size:13px;font-weight:'+(active?'700':'500')+';cursor:pointer;text-align:left;font-family:inherit;border-right:'+(active?'2px solid #0F6E56':'2px solid transparent')+';transition:all .1s">' +
       '<span style="font-size:15px;width:18px;text-align:center">'+icon+'</span>' +
       '<span style="flex:1">'+label+'</span>' +
-      (badge ? '<span style="min-width:18px;height:18px;border-radius:9px;background:'+(badgeRed?'#dc2626':'#0F6E56')+';color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px">'+badge+'</span>' : '') +
+      (badge ? '<span style="min-width:18px;height:18px;border-radius:50px;background:'+(badgeRed?'#dc2626':'#0F6E56')+';color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px">'+badge+'</span>' : '') +
     '</button>';
   }
 
@@ -339,6 +374,8 @@ function _nSidebar() {
     navItem('Immunisation Queue','💉', 'imm-queue',
       immCount > 0 ? immCount : '', unseenImm > 0) +
     sectionLabel('WORK') +
+    navItem('Triage Requests',   '📋', 'requests',
+      unseenReq > 0 ? unseenReq : '', true) +
     navItem('Record Vitals',     '❤️', 'vitals',     '',     false) +
     navItem('Immunisation',      '💉', 'immunisation','',    false) +
     sectionLabel('OTHER') +
@@ -350,8 +387,8 @@ function _nSidebar() {
 
 /* ─── Page header ────────────────────────────────────────────────────── */
 function _nHeader(title, sub) {
-  return '<div style="padding:12px 20px;border-bottom:1px solid #e0e0e0;background:#f4f5f0;flex-shrink:0">' +
-    '<div style="font-size:15px;font-weight:700;color:#20242b">'+title+'</div>' +
+  return '<div style="padding:12px 20px;border-bottom:1px solid #e0e0e0;background:#fff;flex-shrink:0">' +
+    '<div style="font-size:15px;font-weight:700;color:#111111">'+title+'</div>' +
     (sub?'<div style="font-size:12px;color:#6b7280;margin-top:1px">'+sub+'</div>':'') +
   '</div>';
 }
@@ -374,7 +411,7 @@ function _nOverview() {
 
   /* ── Top header bar ── */
   var topBar = '<div style="display:flex;align-items:center;justify-content:space-between;' +
-    'background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);border-radius:12px;padding:14px 20px;margin-bottom:16px;box-shadow:0 2px 10px rgba(15,110,86,.2)">' +
+    'background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);border-radius:12px;padding:14px 20px;margin-bottom:16px;box-shadow:0 2px 10px rgba(37,99,235,.2)">' +
     '<div>' +
       '<div style="font-size:17px;font-weight:800;color:#fff;margin-bottom:2px">'+dateStr+'</div>' +
       '<div style="font-size:12px;color:rgba(255,255,255,.7);display:flex;align-items:center;gap:5px">' +
@@ -411,11 +448,11 @@ function _nOverview() {
   /* ── Notification bar — messages from reception ── */
   var receptionMsgs = _N.messages.filter(function(m){ return m.role==='Receptionist'; }).slice(0,3);
   var notifBar = receptionMsgs.length ? (
-    '<div style="background:#e8f5f1;border:1px solid #a8d8cc;border-left:4px solid #0F6E56;border-radius:10px;padding:12px 16px;margin-bottom:16px">' +
+    '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-left:4px solid #0F6E56;border-radius:10px;padding:12px 16px;margin-bottom:16px">' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
         '<span style="font-size:14px">✉</span>' +
-        '<div style="font-size:12px;font-weight:700;color:#0F4C3A">Messages from Reception</div>' +
-        (unreadMsg ? '<span style="min-width:18px;height:18px;border-radius:9px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 4px">'+unreadMsg+'</span>' : '') +
+        '<div style="font-size:12px;font-weight:700;color:#0B5443">Messages from Reception</div>' +
+        (unreadMsg ? '<span style="min-width:18px;height:18px;border-radius:50px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 4px">'+unreadMsg+'</span>' : '') +
         '<button onclick="_setView(\'messaging\')" style="margin-left:auto;font-size:11px;color:#0F6E56;border:none;background:transparent;cursor:pointer;font-family:inherit">View all →</button>' +
       '</div>' +
       '<div style="display:flex;flex-direction:column;gap:6px">' +
@@ -426,7 +463,7 @@ function _nOverview() {
               '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">' +
                 '<span style="font-size:12px;font-weight:700;color:#0f172a">'+m.from+'</span>' +
                 '<span style="font-size:10px;color:#94a3b8">'+m.time+'</span>' +
-                (m.unread?'<span style="padding:1px 6px;background:#d1ece5;color:#0F4C3A;border-radius:20px;font-size:9px;font-weight:700">New</span>':'') +
+                (m.unread?'<span style="padding:1px 6px;background:#dbeafe;color:#0B5443;border-radius:20px;font-size:9px;font-weight:700">New</span>':'') +
               '</div>' +
               '<div style="font-size:12px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+m.text+'</div>' +
             '</div>' +
@@ -441,7 +478,7 @@ function _nOverview() {
   /* Col 1: Patient Queue summary */
   var queueCol = '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">' +
     '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">' +
-      '<div style="font-size:13px;font-weight:700;color:#20242b">Patient Queue</div>' +
+      '<div style="font-size:13px;font-weight:700;color:#111111">Patient Queue</div>' +
       '<button onclick="_setView(\'queue\')" style="font-size:11px;color:#0F6E56;border:none;background:transparent;cursor:pointer;font-family:inherit">View all →</button>' +
     '</div>' +
     (_N.patients.length ? _N.patients.slice(0,5).map(function(p,i){
@@ -449,7 +486,7 @@ function _nOverview() {
       return '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:'+bg+';border-bottom:1px solid #f8fafc">' +
         '<div style="width:30px;height:30px;border-radius:50%;background:'+(p.priority==='Emergency'?'#dc2626':p.priority==='High'?'#d97706':'#0F6E56')+';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0">'+(p.name.split(' ').map(function(n){return n[0];}).join('').slice(0,2))+'</div>' +
         '<div style="flex:1;min-width:0">' +
-          '<div style="font-size:12px;font-weight:600;color:#20242b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.name+'</div>' +
+          '<div style="font-size:12px;font-weight:600;color:#111111;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.name+'</div>' +
           '<div style="font-size:10px;color:#6b7280">'+p.status+'</div>' +
         '</div>' +
         _badge(p.priority, _priorityBg(p.priority)) +
@@ -461,14 +498,14 @@ function _nOverview() {
   var pendingVitals = _N.patients.filter(function(p){ return p.vitalStatus==='Pending'&&p.status!=='Discharged'; });
   var vitalsCol = '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">' +
     '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">' +
-      '<div style="font-size:13px;font-weight:700;color:#20242b">Vitals Collection</div>' +
+      '<div style="font-size:13px;font-weight:700;color:#111111">Vitals Collection</div>' +
       '<button onclick="_setView(\'vitals\')" style="font-size:11px;color:#0F6E56;border:none;background:transparent;cursor:pointer;font-family:inherit">Record →</button>' +
     '</div>' +
     (pendingVitals.length ? pendingVitals.slice(0,4).map(function(p,i){
       return '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid #f8fafc">' +
         '<div style="width:30px;height:30px;border-radius:50%;background:#fffbeb;border:2px solid #fcd34d;color:#d97706;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(p.name.split(' ').map(function(n){return n[0];}).join('').slice(0,2))+'</div>' +
         '<div style="flex:1;min-width:0">' +
-          '<div style="font-size:12px;font-weight:600;color:#20242b">'+p.name+'</div>' +
+          '<div style="font-size:12px;font-weight:600;color:#111111">'+p.name+'</div>' +
           '<div style="font-size:10px;color:#d97706;font-weight:600">Pending vitals</div>' +
         '</div>' +
         '<button onclick="_nurseVitalsEdit(\''+p.id+'\')" style="padding:4px 10px;border-radius:5px;border:none;background:#0F6E56;color:#fff;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">Record</button>' +
@@ -480,8 +517,8 @@ function _nOverview() {
   var reqsCol = '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">' +
     '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">' +
       '<div style="display:flex;align-items:center;gap:6px">' +
-        '<div style="font-size:13px;font-weight:700;color:#20242b">Requests</div>' +
-        (unreadReq ? '<span style="min-width:18px;height:18px;border-radius:9px;background:#0F6E56;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 3px">'+unreadReq+'</span>' : '') +
+        '<div style="font-size:13px;font-weight:700;color:#111111">Requests</div>' +
+        (unreadReq ? '<span style="min-width:18px;height:18px;border-radius:50px;background:#0F6E56;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 3px">'+unreadReq+'</span>' : '') +
       '</div>' +
       '<button onclick="_setView(\'requests\')" style="font-size:11px;color:#0F6E56;border:none;background:transparent;cursor:pointer;font-family:inherit">View all →</button>' +
     '</div>' +
@@ -490,7 +527,7 @@ function _nOverview() {
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">' +
           '<div style="display:flex;align-items:center;gap:6px">' +
             (!r.seen?'<span style="width:6px;height:6px;border-radius:50%;background:#0F6E56;flex-shrink:0"></span>':'') +
-            '<span style="font-size:12px;font-weight:700;color:#20242b">'+r.patientName+'</span>' +
+            '<span style="font-size:12px;font-weight:700;color:#111111">'+r.patientName+'</span>' +
           '</div>' +
           _badge(r.priority, _priorityBg(r.priority)) +
         '</div>' +
@@ -533,7 +570,7 @@ function _nOverview() {
   '</div>';
 
   return ''+  /* no page header on overview — topBar already has date/time */
-    '<div style="flex:1;overflow:auto;padding:16px 20px;background:#f4f5f0">' +
+    '<div style="flex:1;overflow:auto;padding:16px 20px">' +
       topBar +
       emAlert +
       notifBar +
@@ -574,15 +611,15 @@ function _nRequests() {
       toolbar +
       '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;color:#6b7280;gap:6px;padding:40px">' +
         '<div style="font-size:36px">📋</div>' +
-        '<div style="font-size:14px;font-weight:600;color:#20242b">No pending requests</div>' +
+        '<div style="font-size:14px;font-weight:600;color:#111111">No pending requests</div>' +
         '<div style="font-size:12px">Reception will send vitals requests here as patients arrive.</div>' +
       '</div>';
   }
 
   var rows = displayed.map(function(req, i){
     var bg = req.priority==='Emergency' ? 'background:#fff5f5'
-           : !req.seen ? 'background:#e8f5f1'
-           : i%2===0 ? 'background:#fff' : 'background:#f4f5f0';
+           : !req.seen ? 'background:#eff6ff'
+           : i%2===0 ? 'background:#fff' : 'background:#f5f8fc';
     var expanded  = _N.reqExpanded  === req.id;
     var declining = _N.decliningId  === req.id;
 
@@ -615,7 +652,7 @@ function _nRequests() {
       '<div style="display:flex;gap:20px">' +
         '<div style="flex:1">' +
           '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;margin-bottom:5px">Reception Notes</div>' +
-          '<div style="font-size:13px;color:#20242b;background:#f4f5f0;border:1px solid #e0e0e0;border-radius:6px;padding:8px 12px">'+req.notes+'</div>' +
+          '<div style="font-size:13px;color:#111111;background:#f4f5f0;border:1px solid #e0e0e0;border-radius:6px;padding:8px 12px">'+req.notes+'</div>' +
         '</div>' +
         (declining ? '<div style="flex:1">' +
           '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#dc2626;margin-bottom:5px">Decline Reason</div>' +
@@ -636,7 +673,7 @@ function _nRequests() {
     : !_N.requests.length
       ? '<tr><td colspan="9" style="padding:40px;text-align:center">' +
           '<div style="font-size:32px;margin-bottom:12px">📋</div>' +
-          '<div style="font-size:15px;font-weight:700;color:#20242b;margin-bottom:6px">No pending requests</div>' +
+          '<div style="font-size:15px;font-weight:700;color:#111111;margin-bottom:6px">No pending requests</div>' +
           '<div style="font-size:13px;color:#6b7280;max-width:340px;margin:0 auto;line-height:1.6">' +
             'Requests appear here in real time when the receptionist checks patients in.<br>' +
             'You can also receive emergency alerts from the receptionist.' +
@@ -681,9 +718,9 @@ function _nQueue() {
     '</div>' +
     '<div style="display:flex;align-items:center;gap:12px">' +
       '<div style="font-size:12px;color:#6b7280">' +
-        '<strong style="color:#20242b">'+awaiting+'</strong> awaiting · <strong style="color:#20242b">'+inVitals+'</strong> in vitals · <strong style="color:#20242b">'+ready+'</strong> ready' +
+        '<strong style="color:#111111">'+awaiting+'</strong> awaiting · <strong style="color:#111111">'+inVitals+'</strong> in vitals · <strong style="color:#111111">'+ready+'</strong> ready' +
       '</div>' +
-      '<button onclick="_nurseCallNext()" style="padding:6px 14px;border-radius:6px;border:none;background:'+(awaiting?'#0F6E56':'#d1d9e6')+';color:#fff;font-size:12px;font-weight:600;cursor:'+(awaiting?'pointer':'not-allowed')+';font-family:inherit">Call Next Patient</button>' +
+      '<button onclick="_nurseCallNext()" style="padding:6px 14px;border-radius:6px;border:none;background:'+(awaiting?'#0F6E56':'#e0e0e0')+';color:#fff;font-size:12px;font-weight:600;cursor:'+(awaiting?'pointer':'not-allowed')+';font-family:inherit">Call Next Patient</button>' +
     '</div>' +
   '</div>';
 
@@ -691,7 +728,7 @@ function _nQueue() {
 
   var rows = filtered.map(function(p, i){
     var isSel = _N.queueSel===p.id;
-    var bg = isSel ? 'background:#e8f5f1' : _trBg(i, p.priority);
+    var bg = isSel ? 'background:#eff6ff' : _trBg(i, p.priority);
     return '<tr style="'+bg+';border-bottom:1px solid #e8edf4;cursor:pointer" onclick="_N.queueSel=\''+p.id+'\';_nurseRender()">' +
       _td('<span style="font-family:monospace;font-size:12px;color:#6b7280">'+p.id+'</span>') +
       '<td style="padding:8px 14px">' +
@@ -715,7 +752,6 @@ function _nQueue() {
           (p.status==='Awaiting Vitals' ? '<button onclick="_nurseQueuePriority(\''+p.id+'\',\'Emergency\')" style="padding:3px 8px;border-radius:4px;border:1px solid #fca5a5;color:#dc2626;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">↑ Emg</button><button onclick="_nurseQueuePriority(\''+p.id+'\',\'High\')" style="padding:3px 8px;border-radius:4px;border:1px solid #fcd34d;color:#d97706;font-size:11px;cursor:pointer;font-family:inherit;background:#fff">↑ High</button>' : '') +
           (p.status==='Awaiting Vitals' ? '<button onclick="_N.editId=\''+p.id+'\';_N.vitalForm={bp:\'\',temp:\'\',hr:\'\',spo2:\'\',weight:\'\',rr:\'\'};_N.view=\'vitals\';_nurseRender()" style="padding:3px 8px;border-radius:4px;border:none;background:#0F6E56;color:#fff;font-size:11px;cursor:pointer;font-family:inherit">Start vitals</button>' : '') +
           (p.status==='In Vitals' ? '<button onclick="_nurseSaveVitals(\''+p.id+'\')" style="padding:3px 8px;border-radius:4px;border:none;background:#16a34a;color:#fff;font-size:11px;cursor:pointer;font-family:inherit">Complete & send →</button>' : '') +
-          (p.status==='Ready for Consultation' ? '<button onclick="_nurseSendToDoctor(\''+p.id+'\')" style="padding:3px 8px;border-radius:4px;border:none;background:#0f766e;color:#fff;font-size:11px;cursor:pointer;font-family:inherit">Send to Doctor ▶</button>' : '') +
           (p.status==='With Doctor' ? '<span style="font-size:11px;color:#0f766e;font-weight:600">✓ With doctor</span>' : '') +
         '</div>' +
       '</td>' +
@@ -732,13 +768,13 @@ function _nQueue() {
   var detailPanel = selected ? (
     '<div style="width:288px;flex-shrink:0;border-left:1px solid #e0e0e0;background:#f4f5f0;display:flex;flex-direction:column;overflow-y:auto">' +
       '<div style="padding:12px 16px;border-bottom:1px solid #e0e0e0;background:#fff;display:flex;align-items:center;justify-content:space-between">' +
-        '<div><div style="font-weight:700;font-size:14px;color:#20242b">'+selected.name+'</div><div style="font-size:11px;color:#6b7280">'+selected.id+' · '+selected.age+selected.sex+'</div></div>' +
+        '<div><div style="font-weight:700;font-size:14px;color:#111111">'+selected.name+'</div><div style="font-size:11px;color:#6b7280">'+selected.id+' · '+selected.age+selected.sex+'</div></div>' +
         '<button onclick="_N.queueSel=null;_nurseRender()" style="background:none;border:none;font-size:16px;color:#6b7280;cursor:pointer">✕</button>' +
       '</div>' +
 
       '<div style="margin:10px;background:#fff;border:1px solid #e0e0e0;border-radius:6px;padding:12px">' +
         '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;margin-bottom:5px">Chief Complaint</div>' +
-        '<div style="font-size:13px;color:#20242b">'+selected.complaint+'</div>' +
+        '<div style="font-size:13px;color:#111111">'+selected.complaint+'</div>' +
       '</div>' +
 
       (selected.vitals ? '<div style="margin:0 10px 10px;background:#fff;border:1px solid #e0e0e0;border-radius:6px;padding:12px">' +
@@ -746,7 +782,7 @@ function _nQueue() {
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
           [['BP',selected.vitals.bp,'mmHg'],['Temp',selected.vitals.temp,'°C'],['HR',selected.vitals.hr,'bpm'],['SpO₂',selected.vitals.spo2,'%'],['Weight',selected.vitals.weight,'kg'],['RR',selected.vitals.rr,'/min']].map(function(r){
             var flagged = selected.flags&&selected.flags.some(function(fl){ return fl.field.toLowerCase().includes(r[0].toLowerCase()); });
-            return '<div><div style="font-size:10px;color:#6b7280">'+r[0]+'</div><div style="font-size:13px;font-weight:700;color:'+(flagged?'#dc2626':'#20242b')+'">'+r[1]+' <span style="font-size:11px;font-weight:400;color:#6b7280">'+r[2]+'</span>'+(flagged?' <span style="color:#dc2626;font-size:10px">⚑</span>':'')+'</div></div>';
+            return '<div><div style="font-size:10px;color:#6b7280">'+r[0]+'</div><div style="font-size:13px;font-weight:700;color:'+(flagged?'#dc2626':'#111111')+'">'+r[1]+' <span style="font-size:11px;font-weight:400;color:#6b7280">'+r[2]+'</span>'+(flagged?' <span style="color:#dc2626;font-size:10px">⚑</span>':'')+'</div></div>';
           }).join('') +
         '</div>' +
       '</div>' : '') +
@@ -756,9 +792,9 @@ function _nQueue() {
         selected.flags.map(function(fl){ return '<div style="margin-bottom:6px"><div style="font-size:12px;font-weight:600;color:#dc2626">'+fl.field+': '+fl.value+'</div><div style="font-size:11px;color:#dc2626">'+fl.reason+'</div></div>'; }).join('') +
       '</div>' : '') +
 
-      (selected.aiRisk ? '<div style="margin:0 10px 10px;background:#e8f5f1;border:1px solid #a8d8cc;border-radius:6px;padding:12px">' +
+      (selected.aiRisk ? '<div style="margin:0 10px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:12px">' +
         '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#0F6E56;margin-bottom:5px">AI Risk Assessment</div>' +
-        '<div style="font-size:12px;color:#20242b">'+selected.aiRisk+'</div>' +
+        '<div style="font-size:12px;color:#111111">'+selected.aiRisk+'</div>' +
       '</div>' : '') +
 
       '<div style="margin-top:auto;padding:12px;border-top:1px solid #e0e0e0;background:#fff">' +
@@ -769,23 +805,7 @@ function _nQueue() {
     '</div>'
   ) : '';
 
-  var pageHeader =
-    '<div style="display:flex;align-items:center;justify-content:space-between;' +
-      'background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);' +
-      'padding:18px 24px;flex-shrink:0;box-shadow:0 2px 10px rgba(15,110,86,.18)">' +
-      '<div>' +
-        '<div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:-.01em;margin-bottom:2px">Vitals Queue</div>' +
-        '<div style="font-size:13px;color:rgba(255,255,255,.78);display:flex;align-items:center;gap:6px">' +
-          '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>' +
-          '<strong style="color:#fff">'+awaiting+'</strong>&nbsp;awaiting · <strong style="color:#fff">'+inVitals+'</strong>&nbsp;in vitals · <strong style="color:#fff">'+ready+'</strong>&nbsp;ready' +
-        '</div>' +
-      '</div>' +
-      '<div style="display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:14px;background:rgba(255,255,255,.18);border:1.5px solid rgba(255,255,255,.28)">' +
-        '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>' +
-      '</div>' +
-    '</div>';
-
-  return pageHeader +
+  return ''+  /* no duplicate header — sidebar nav shows title */
     toolbar +
     '<div style="flex:1;display:flex;min-height:0;overflow:hidden">' + tableArea + detailPanel + '</div>';
 }
@@ -816,7 +836,7 @@ function _nVitals() {
       toolbar +
       '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#6b7280;gap:6px;padding:40px">' +
         '<div style="font-size:36px">♥</div>' +
-        '<div style="font-size:14px;font-weight:600;color:#20242b">No patients in vitals queue</div>' +
+        '<div style="font-size:14px;font-weight:600;color:#111111">No patients in vitals queue</div>' +
         '<div style="font-size:12px">Accept requests from reception to add patients here.</div>' +
       '</div>';
   }
@@ -834,7 +854,7 @@ function _nVitals() {
           return ['bp','temp','hr','spo2','weight','rr'].map(function(k){
             var val = p.vitals ? p.vitals[k] : '—';
             var flagged = p.flags && p.flags.some(function(fl){ return fl.field===vf[k]; });
-            return '<td style="padding:8px 14px;font-size:13px;font-weight:'+(flagged?'700':'400')+';color:'+(flagged?'#dc2626':p.vitals?'#20242b':'#d1d9e6')+'">'+val+(flagged?' <span style="font-size:10px">⚑</span>':'')+'</td>';
+            return '<td style="padding:8px 14px;font-size:13px;font-weight:'+(flagged?'700':'400')+';color:'+(flagged?'#dc2626':p.vitals?'#111111':'#e0e0e0')+'">'+val+(flagged?' <span style="font-size:10px">⚑</span>':'')+'</td>';
           }).join('');
         })();
 
@@ -844,11 +864,11 @@ function _nVitals() {
 
     var flagCell = isEdit
       ? '<td style="padding:8px 14px">—</td>'
-      : '<td style="padding:8px 14px;font-size:12px">'+(p.flags&&p.flags.length?'<span style="color:#dc2626;font-weight:600">'+p.flags.length+' flag'+(p.flags.length>1?'s':'')+'</span>':p.vitals?'<span style="color:#16a34a">Clear</span>':'<span style="color:#d1d9e6">—</span>')+'</td>';
+      : '<td style="padding:8px 14px;font-size:12px">'+(p.flags&&p.flags.length?'<span style="color:#dc2626;font-weight:600">'+p.flags.length+' flag'+(p.flags.length>1?'s':'')+'</span>':p.vitals?'<span style="color:#16a34a">Clear</span>':'<span style="color:#e0e0e0">—</span>')+'</td>';
 
     return '<tr style="'+bg+';border-bottom:1px solid #e8edf4">' +
       '<td style="padding:8px 14px"><div style="font-weight:600;font-size:13px">'+p.name+'</div><div style="font-size:11px;color:#6b7280">'+p.id+'</div></td>' +
-      '<td style="padding:8px 14px"><div style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:'+_priorityDot(p.priority)+';flex-shrink:0"></span><span style="font-size:12px;color:#20242b">'+p.priority+'</span></div></td>' +
+      '<td style="padding:8px 14px"><div style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:'+_priorityDot(p.priority)+';flex-shrink:0"></span><span style="font-size:12px;color:#111111">'+p.priority+'</span></div></td>' +
       '<td style="padding:8px 14px">'+_badge(p.status, _statusBg(p.status))+'</td>' +
       vitalCells + flagCell + actCell +
     '</tr>';
@@ -907,9 +927,9 @@ function _nEmergency() {
   return _nHeader('Emergency Handling', emergencies.length+' active emergency patient'+(emergencies.length!==1?'s':'')) +
     alert +
     '<div style="padding:6px 20px;font-size:13px;color:#6b7280;flex-shrink:0">' +
-      '<strong style="color:#20242b">'+emergencies.length+'</strong> active emergency patient'+(emergencies.length!==1?'s':'') +
+      '<strong style="color:#111111">'+emergencies.length+'</strong> active emergency patient'+(emergencies.length!==1?'s':'') +
     '</div>' +
-    '<div style="flex:1;overflow:auto;padding:0 20px 20px;background:#f4f5f0">' +
+    '<div style="flex:1;overflow:auto;padding:0 20px 20px">' +
       '<table style="width:100%;border-collapse:collapse;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden">' +
       '<thead><tr>'+['Patient','Complaint','Arrival','Room','Classification','Vitals','AI Risk','Actions'].map(_th).join('')+'</tr></thead>' +
       '<tbody>'+(rows||'<tr><td colspan="8" style="padding:28px;text-align:center;color:#6b7280;font-size:13px">No active emergency cases.</td></tr>')+'</tbody>' +
@@ -932,19 +952,19 @@ function _nMessaging() {
     var active = to===th.role;
     return '<button onclick="_N.msgTo=\''+th.role+'\';_nurseRender()" style="display:flex;align-items:center;gap:10px;width:100%;padding:10px 16px;border:none;border-bottom:1px solid #e0e0e0;background:'+(active?th.bg:'#fff')+';cursor:pointer;text-align:left;font-family:inherit">' +
       '<span style="font-size:18px">'+th.icon+'</span>' +
-      '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:#20242b">'+th.name+'</div><div style="font-size:11px;color:#6b7280">'+th.role+'</div></div>' +
-      (unread?'<span style="min-width:18px;height:18px;border-radius:9px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 3px">'+unread+'</span>':'') +
+      '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:#111111">'+th.name+'</div><div style="font-size:11px;color:#6b7280">'+th.role+'</div></div>' +
+      (unread?'<span style="min-width:18px;height:18px;border-radius:50px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 3px">'+unread+'</span>':'') +
     '</button>';
   }).join('');
 
-  var roleColors = { Receptionist:'background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe', Doctor:'background:#e8f5f1;color:#0F4C3A;border:1px solid #a8d8cc', Nurse:'background:#f0fdf4;color:#166534;border:1px solid #86efac' };
+  var roleColors = { Receptionist:'background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe', Doctor:'background:#eff6ff;color:#0B5443;border:1px solid #bfdbfe', Nurse:'background:#f0fdf4;color:#166534;border:1px solid #86efac' };
   var msgs = _N.messages.filter(function(m){ return m.role===to||m.role==='Nurse'; });
   var msgList = msgs.length
     ? msgs.map(function(m){
         var isNurse = m.role==='Nurse';
         return '<div style="margin-bottom:12px;display:flex;flex-direction:column;align-items:'+(isNurse?'flex-end':'flex-start')+'">' +
           '<div style="font-size:10px;color:#6b7280;margin-bottom:3px">'+(isNurse?'You':m.from)+' · '+m.time+'</div>' +
-          '<div style="max-width:72%;padding:9px 13px;border-radius:10px;font-size:13px;line-height:1.55;background:'+(isNurse?'#0F6E56':'#f1f5f9')+';color:'+(isNurse?'#fff':'#20242b')+'">'+m.text+'</div>' +
+          '<div style="max-width:72%;padding:9px 13px;border-radius:10px;font-size:13px;line-height:1.55;background:'+(isNurse?'#0F6E56':'#f1f5f9')+';color:'+(isNurse?'#fff':'#111111')+'">'+m.text+'</div>' +
           (m.unread&&!isNurse?'<span style="font-size:10px;color:#0F6E56;margin-top:2px">Unread</span>':'') +
         '</div>';
       }).join('')
@@ -1048,11 +1068,11 @@ function _nAnalytics() {
     '<input id="an-search" type="text" placeholder="Search patient…" value="'+(f.search||'')+'" oninput="_N.analyticsFilter.search=this.value;_nurseRender()" style="padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;outline:none;width:180px">' +
     '<div style="display:flex;gap:4px;align-items:center">' +
       '<span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase">Risk:</span>' +
-      RISK_OPTS.map(function(o){ return '<button onclick="_N.analyticsFilter.risk=\"'+o+'\";_nurseRender()" style="padding:5px 10px;border-radius:5px;border:1px solid '+(f.risk===o?'#0F6E56':'#e0e0e0')+';background:'+(f.risk===o?'#0F6E56':'#fff')+';color:'+(f.risk===o?'#fff':'#6b7280')+';font-size:12px;cursor:pointer;font-family:inherit">'+o+'</button>'; }).join('') +
+      RISK_OPTS.map(function(o){ return '<button onclick="_N.analyticsFilter.risk=\"'+o+'\";_nurseRender()" style="padding:5px 10px;border-radius:5px;border:1px solid '+(f.risk===o?'#0F6E56':'#e5e7eb')+';background:'+(f.risk===o?'#0F6E56':'#fff')+';color:'+(f.risk===o?'#fff':'#6b7280')+';font-size:12px;cursor:pointer;font-family:inherit">'+o+'</button>'; }).join('') +
     '</div>' +
     '<div style="display:flex;gap:4px;align-items:center">' +
       '<span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase">Vital:</span>' +
-      VITAL_OPTS.map(function(o){ return '<button onclick="_N.analyticsFilter.vital=\"'+o+'\";_nurseRender()" style="padding:5px 10px;border-radius:5px;border:1px solid '+(f.vital===o?'#0F6E56':'#e0e0e0')+';background:'+(f.vital===o?'#0F6E56':'#fff')+';color:'+(f.vital===o?'#fff':'#6b7280')+';font-size:12px;cursor:pointer;font-family:inherit">'+o+'</button>'; }).join('') +
+      VITAL_OPTS.map(function(o){ return '<button onclick="_N.analyticsFilter.vital=\"'+o+'\";_nurseRender()" style="padding:5px 10px;border-radius:5px;border:1px solid '+(f.vital===o?'#0F6E56':'#e5e7eb')+';background:'+(f.vital===o?'#0F6E56':'#fff')+';color:'+(f.vital===o?'#fff':'#6b7280')+';font-size:12px;cursor:pointer;font-family:inherit">'+o+'</button>'; }).join('') +
     '</div>' +
     '<button onclick="_N.analyticsFilter={risk:\'All\',vital:\'All\',search:\'\'};_nurseRender()" style="padding:5px 10px;border-radius:5px;border:1px solid #e5e7eb;background:#f9fafb;color:#6b7280;font-size:12px;cursor:pointer;font-family:inherit">✕ Clear</button>' +
   '</div>';
@@ -1077,7 +1097,7 @@ function _nAnalytics() {
         var bg = i%2===0?'#fff':'#f8fafc';
         return '<tr style="background:'+bg+';border-bottom:1px solid #e8edf4">' +
           '<td style="padding:10px 14px">' +
-            '<div style="font-weight:700;font-size:13px;color:#20242b">'+p.name+'</div>' +
+            '<div style="font-weight:700;font-size:13px;color:#111111">'+p.name+'</div>' +
             '<div style="font-size:11px;color:#6b7280">'+p.id+(p.age?' · '+p.age+'y':'')+(p.sex?' · '+p.sex:'')+'</div>' +
           '</td>' +
           _td(fl.field) +
@@ -1095,7 +1115,7 @@ function _nAnalytics() {
   var flagTable = '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">' +
     '<div style="padding:12px 16px;border-bottom:1px solid #e5e7eb;background:#f4f5f0;display:flex;align-items:center;justify-content:space-between">' +
       '<div>' +
-        '<div style="font-size:14px;font-weight:700;color:#20242b">AI-Flagged Abnormal Vitals</div>' +
+        '<div style="font-size:14px;font-weight:700;color:#111111">AI-Flagged Abnormal Vitals</div>' +
         '<div style="font-size:11px;color:#6b7280;margin-top:2px">Potentially abnormal vital signs requiring clinical review</div>' +
       '</div>' +
       '<div style="font-size:12px;color:#6b7280">'+filtered.length+' alert'+(filtered.length!==1?'s':'')+' · ML model: triage-v1.0</div>' +
@@ -1122,7 +1142,7 @@ function _nAnalytics() {
         var max = Math.max.apply(null,vals.map(parseFloat))||1;
         var pts2 = vals.map(function(v,i){ return (i/(vals.length-1)*280)+','+(40-Math.round(parseFloat(v)/max*35)); });
         return '<div style="margin-bottom:8px">' +
-          '<div style="font-size:11px;font-weight:600;color:#20242b;margin-bottom:3px">'+label+': '+vals.join(' → ')+'</div>' +
+          '<div style="font-size:11px;font-weight:600;color:#111111;margin-bottom:3px">'+label+': '+vals.join(' → ')+'</div>' +
           '<svg viewBox="0 0 280 44" style="width:100%;height:36px"><polyline points="'+pts2.join(' ')+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linejoin="round"/>' +
           vals.map(function(v,i){ return '<circle cx="'+(i/(vals.length-1)*280)+'" cy="'+(40-Math.round(parseFloat(v)/max*35))+'" r="3" fill="'+color+'"/>'; }).join('')+
           '</svg>' +
@@ -1133,7 +1153,7 @@ function _nAnalytics() {
         '<div style="background:#fff;border-radius:14px;width:100%;max-width:720px;box-shadow:0 20px 60px rgba(0,0,0,.3);margin:auto">' +
 
           /* Header */
-          '<div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);padding:18px 22px;border-radius:14px 14px 0 0;display:flex;align-items:center;justify-content:space-between">' +
+          '<div style="background:linear-gradient(135deg,#0F6E56,#0F6E56);padding:18px 22px;border-radius:14px 14px 0 0;display:flex;align-items:center;justify-content:space-between">' +
             '<div>' +
               '<div style="font-size:16px;font-weight:800;color:#fff">Patient Review</div>' +
               '<div style="font-size:12px;color:rgba(255,255,255,.75)">AI-Flagged Abnormal Vitals — Clinical Decision Support</div>' +
@@ -1144,7 +1164,7 @@ function _nAnalytics() {
           '<div style="padding:20px;display:flex;flex-direction:column;gap:14px">' +
 
             /* Patient info */
-            '<div style="display:flex;align-items:center;gap:12px;padding:14px;background:#e8f5f1;border-radius:10px;border:1px solid #a8d8cc">' +
+            '<div style="display:flex;align-items:center;gap:12px;padding:14px;background:#eff6ff;border-radius:10px;border:1px solid #bfdbfe">' +
               '<div style="width:44px;height:44px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;flex-shrink:0">'+(rp.name.split(' ').map(function(n){return n[0];}).join('').slice(0,2))+'</div>' +
               '<div>' +
                 '<div style="font-size:16px;font-weight:800;color:#0f172a">'+rp.name+'</div>' +
@@ -1156,13 +1176,13 @@ function _nAnalytics() {
 
             /* Current vitals */
             '<div style="background:#f8fafc;border-radius:10px;padding:14px;border:1px solid #e5e7eb">' +
-              '<div style="font-size:12px;font-weight:700;color:#20242b;margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em">Current Vitals</div>' +
+              '<div style="font-size:12px;font-weight:700;color:#111111;margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em">Current Vitals</div>' +
               '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">' +
                 [['Blood Pressure',vf.bp,'mmHg'],['Heart Rate',vf.hr,'bpm'],['SpO₂',vf.spo2,'%'],['Respiratory Rate',vf.rr,'/min'],['Temperature',vf.temp,'°C'],['Weight',vf.weight,'kg']].map(function(row){
                   var isFlag = rpFlags.some(function(fl){ return fl.field.toLowerCase().includes(row[0].toLowerCase().split(' ')[0]); });
                   return '<div style="padding:8px 10px;background:'+(isFlag?'#fef2f2':'#fff')+';border-radius:6px;border:1px solid '+(isFlag?'#fca5a5':'#e5e7eb')+'">' +
                     '<div style="font-size:10px;color:#6b7280;margin-bottom:2px">'+row[0]+'</div>' +
-                    '<div style="font-size:15px;font-weight:700;color:'+(isFlag?'#dc2626':'#20242b')+'">'+(row[1]||'—')+' <span style="font-size:11px;font-weight:400;color:#6b7280">'+row[2]+'</span></div>' +
+                    '<div style="font-size:15px;font-weight:700;color:'+(isFlag?'#dc2626':'#111111')+'">'+(row[1]||'—')+' <span style="font-size:11px;font-weight:400;color:#6b7280">'+row[2]+'</span></div>' +
                   '</div>';
                 }).join('') +
               '</div>' +
@@ -1178,15 +1198,15 @@ function _nAnalytics() {
             '</div>' : '') +
 
             /* AI decision note with model metadata */
-            '<div style="background:#e8f5f1;border:1px solid #a8d8cc;border-left:4px solid #0F6E56;border-radius:8px;padding:12px 14px">' +
+            '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-left:4px solid #0F6E56;border-radius:8px;padding:12px 14px">' +
               '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
-                '<div style="font-size:12px;font-weight:700;color:#0F4C3A">AI Decision-Support Note</div>' +
+                '<div style="font-size:12px;font-weight:700;color:#0B5443">AI Decision-Support Note</div>' +
                 '<div style="display:flex;gap:6px;align-items:center">' +
                   (rp.mlRiskLevel
                     ? '<span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;background:'+(rp.mlRiskLevel==='HIGH'?'#dc2626':rp.mlRiskLevel==='MEDIUM'?'#d97706':'#16a34a')+';color:#fff">'+rp.mlRiskLevel+' RISK</span>'
                     : '') +
                   (rp.mlConfidence !== null && rp.mlConfidence !== undefined
-                    ? '<span style="font-size:11px;color:#0F4C3A;font-weight:600">'+Math.round(rp.mlConfidence*100)+'% confidence</span>'
+                    ? '<span style="font-size:11px;color:#0B5443;font-weight:600">'+Math.round(rp.mlConfidence*100)+'% confidence</span>'
                     : '') +
                 '</div>' +
               '</div>' +
@@ -1200,11 +1220,11 @@ function _nAnalytics() {
 
             /* Vital trends */
             '<div style="background:#f8fafc;border-radius:10px;padding:14px;border:1px solid #e5e7eb">' +
-              '<div style="font-size:12px;font-weight:700;color:#20242b;margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em">Vital Trends</div>' +
+              '<div style="font-size:12px;font-weight:700;color:#111111;margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em">Vital Trends</div>' +
               (vitalHistory.length
                 ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
-                    trendLine('Heart Rate', vitalHistory.map(function(h){return h.hr;}), vf.hr, '#1A4A9B') +
-                    trendLine('SpO₂',       vitalHistory.map(function(h){return h.spo2;}),vf.spo2,'#0d9488') +
+                    trendLine('Heart Rate', vitalHistory.map(function(h){return h.hr;}), vf.hr, '#0F6E56') +
+                    trendLine('SpO₂',       vitalHistory.map(function(h){return h.spo2;}),vf.spo2,'#0F6E56') +
                     trendLine('RR',         vitalHistory.map(function(h){return h.rr;}),  vf.rr,  '#d97706') +
                   '</div>'
                 : '<div style="font-size:12px;color:#6b7280;font-style:italic">Insufficient historical data to display a trend.</div>') +
@@ -1231,7 +1251,7 @@ function _nAnalytics() {
 
   /* ── Bar chart ── */
   var barChart = '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:14px">' +
-    '<div style="font-size:12px;font-weight:700;color:#20242b;margin-bottom:12px">Patients Triaged per Hour (Today)</div>' +
+    '<div style="font-size:12px;font-weight:700;color:#111111;margin-bottom:12px">Patients Triaged per Hour (Today)</div>' +
     '<div style="display:flex;align-items:flex-end;gap:4px;height:80px">' +
       hourly.map(function(r){
         var pct = Math.round(r.n/maxH*100);
@@ -1246,20 +1266,20 @@ function _nAnalytics() {
 
   /* ── Priority breakdown ── */
   var priBreakdown = '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:14px">' +
-    '<div style="font-size:12px;font-weight:700;color:#20242b;margin-bottom:10px">Patients by Priority</div>' +
+    '<div style="font-size:12px;font-weight:700;color:#111111;margin-bottom:10px">Patients by Priority</div>' +
     ['Emergency','High','Normal'].map(function(pr){
       var count = pts.filter(function(p){ return p.priority===pr; }).length;
       var pct   = pts.length ? Math.round(count/pts.length*100) : 0;
       var color = {Emergency:'#dc2626',High:'#d97706',Normal:'#16a34a'}[pr];
       return '<div style="margin-bottom:8px">' +
-        '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="color:#20242b">'+pr+'</span><span style="font-weight:700;color:'+color+'">'+count+'</span></div>' +
+        '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="color:#111111">'+pr+'</span><span style="font-weight:700;color:'+color+'">'+count+'</span></div>' +
         '<div style="height:6px;background:#f1f5f9;border-radius:3px"><div style="height:6px;background:'+color+';border-radius:3px;width:'+pct+'%"></div></div>' +
       '</div>';
     }).join('') +
   '</div>';
 
   return _nHeader('Analytics & AI Alerts', 'AI-flagged abnormal vitals requiring clinical review') +
-    '<div style="flex:1;overflow:auto;padding:14px 18px;background:#f4f5f0">' +
+    '<div style="flex:1;overflow:auto;padding:14px 18px">' +
       disclaimer +
       kpiHtml +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">' +
@@ -1459,7 +1479,7 @@ window._nurseReqAccept = async function(id) {
       '<div style="background:#fff;border-radius:10px;border:2px solid #bfdbfe;padding:20px;text-align:center;margin-bottom:16px">' +
         '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#94a3b8;margin-bottom:6px">Your token</div>' +
         '<div style="font-size:48px;font-weight:900;font-family:monospace;color:#0F6E56;line-height:1">' + token + '</div>' +
-        '<div style="margin-top:12px;font-size:15px;font-weight:700;color:#20242b">is now being called to</div>' +
+        '<div style="margin-top:12px;font-size:15px;font-weight:700;color:#111111">is now being called to</div>' +
         '<div style="font-size:24px;font-weight:800;color:#0F6E56;margin-top:4px">Nurse Station ' + stationNum + '</div>' +
       '</div>' +
       '<p style="font-size:13px;color:#475569">Please proceed to <strong>Nurse Station ' + stationNum + '</strong> immediately for your vitals check.</p>' +
@@ -1530,46 +1550,6 @@ window._nurseQueueMarkReady = function(id) {
   if (p) p.status = 'Ready for Consultation';
   _nurseRender();
   UI.showToast(p ? p.name+' is ready for consultation' : 'Patient ready','ok');
-};
-
-window._nurseSendToDoctor = function(id) {
-  var p = _N.patients.find(function(x){ return x.id===id; });
-  if (!p) return;
-  p.status = 'With Doctor';
-  /* Build vitalsRecord snapshot if not already stored */
-  var vr = p.vitalsRecord || (p.vitals ? {
-    vitals:       p.vitals,
-    flags:        p.flags || [],
-    recordedAt:   new Date().toISOString(),
-    recordedDate: new Date().toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'}),
-    recordedTime: _nowTime(),
-    recordedBy:   'Nurse Station',
-    facility:     'Johannesburg Community Health Centre',
-    ward:         'Triage / Outpatient',
-    vitalStatus:  'Completed',
-  } : null);
-  var docEntry = {
-    id:           p.id,
-    pid:          p.pid || p.id,
-    name:         p.name,
-    age:          p.age,
-    sex:          p.sex,
-    complaint:    p.complaint,
-    priority:     p.priority,
-    vitals:       p.vitals || null,
-    vitalsRecord: vr,
-    vitalHistory: p.vitalHistory || (vr ? [vr] : []),
-    flags:        p.flags || [],
-    aiRisk:       p.aiRisk || null,
-    mlRiskLevel:  p.mlRiskLevel || null,
-    arrivedAt:    _nowTime(),
-    department:   p.department || 'General Consultation',
-    fromNurse:    true,
-    vitalStatus:  p.vitalStatus || 'Completed',
-  };
-  _sendToDoctorTab(docEntry);
-  _nurseRender();
-  UI.showToast(p.name+' sent to doctor\'s queue','ok');
 };
 
 window._nurseQueueRoute = function(id, dest) {
@@ -1664,27 +1644,25 @@ window._nurseSaveVitals = async function(id) {
     }).catch(function(){});
   } catch(_){}
 
-  /* Push patient to doctor queue (same-tab + cross-tab) */
+  /* Push patient to doctor queue immediately */
   var docEntry = {
-    id:           p.id,
-    pid:          p.pid || p.id,
-    name:         p.name,
-    age:          p.age,
-    sex:          p.sex,
-    complaint:    p.complaint,
-    priority:     p.priority,
-    vitals:       p.vitals,
-    vitalsRecord: vitalsRecord,
-    vitalHistory: p.vitalHistory || [vitalsRecord],
-    flags:        p.flags,
-    aiRisk:       p.aiRisk || null,
-    mlRiskLevel:  p.mlRiskLevel || null,
-    arrivedAt:    _nowTime(),
-    department:   p.department || 'General Consultation',
-    fromNurse:    true,
-    vitalStatus:  'Completed',
+    id:         p.id,
+    pid:        p.pid || p.id,
+    name:       p.name,
+    age:        p.age,
+    sex:        p.sex,
+    complaint:  p.complaint,
+    priority:   p.priority,
+    vitals:     p.vitals,
+    flags:      p.flags,
+    aiRisk:     p.aiRisk || null,
+    arrivedAt:  _nowTime(),
+    department: p.department || 'General Consultation',
+    fromNurse:  true,
   };
-  _sendToDoctorTab(docEntry);
+  if (!window._DOCTOR_QUEUE) window._DOCTOR_QUEUE = [];
+  window._DOCTOR_QUEUE.push(docEntry);
+  if (window._dcAddPatient) window._dcAddPatient(docEntry);
 
   _nurseRender();
 
@@ -1716,6 +1694,23 @@ window._nurseSaveVitals = async function(id) {
         }).catch(function(){});
     }
   } catch(_){}
+
+  /* ── Push to doctor queue ── */
+  var _docPt = {
+    id: p.id, pid: p.pid||p.id, name: p.name, age: p.age, sex: p.sex,
+    complaint: p.complaint, priority: p.priority,
+    vitals: Object.assign({}, p.vitals||{}),
+    flags: p.flags||[], aiRisk: p.aiRisk||null,
+    status: escalate ? 'Emergency' : 'waiting',
+    vitalStatus: 'Completed', recordedAt: new Date().toISOString()
+  };
+  if (window._dcAddPatient) {
+    window._dcAddPatient(_docPt);
+  } else {
+    window._DOCTOR_QUEUE = window._DOCTOR_QUEUE || [];
+    if (!window._DOCTOR_QUEUE.find(function(x){return x.id===_docPt.id;}))
+      window._DOCTOR_QUEUE.push(_docPt);
+  }
 
   _nurseRender();
   if (flags.length) {
@@ -1778,88 +1773,6 @@ function _nurseBindEvents() {
   });
 }
 
-/* ─── Cross-tab bridge: send patients to doctor page ────────────────── */
-var _doctorBroadcastCh = null;
-try { _doctorBroadcastCh = new BroadcastChannel('nihms_doctor_queue'); } catch(_) {}
-
-function _sendToDoctorTab(doc) {
-  /* 1. Same-tab direct call */
-  if (typeof window._dcAddPatient === 'function') {
-    window._dcAddPatient(doc);
-  } else {
-    if (!window._DOCTOR_QUEUE) window._DOCTOR_QUEUE = [];
-    if (!window._DOCTOR_QUEUE.find(function(x){ return x.id === doc.id; }))
-      window._DOCTOR_QUEUE.push(doc);
-  }
-  /* 2. Persist to localStorage so doctor page picks it up on load */
-  try {
-    var stored = JSON.parse(localStorage.getItem('_NIHMS_DOCTOR_QUEUE') || '[]');
-    if (!stored.find(function(x){ return x.id === doc.id; })) {
-      stored.push(doc);
-      localStorage.setItem('_NIHMS_DOCTOR_QUEUE', JSON.stringify(stored));
-    }
-  } catch(_) {}
-  /* 3. Live cross-tab: BroadcastChannel */
-  if (_doctorBroadcastCh) {
-    try { _doctorBroadcastCh.postMessage({ type: 'DOCTOR_PT', doc: doc }); } catch(_) {}
-  }
-  /* 4. Live cross-tab fallback: storage event */
-  try {
-    localStorage.setItem('_NIHMS_DOCTOR_REQ', JSON.stringify(doc));
-    setTimeout(function(){ try { localStorage.removeItem('_NIHMS_DOCTOR_REQ'); } catch(_){} }, 200);
-  } catch(_) {}
-}
-
-/* ─── Cross-tab bridge: receive patients pushed by receptionist ──────── */
-(function() {
-  function _handleCrossTabReq(req) {
-    if (!req || !req.id) return;
-    if (typeof window._nurseAddRequest === 'function') {
-      window._nurseAddRequest(req);
-    }
-  }
-
-  /* ── Drain persistent queue written by receptionist (sequential-tab flow) ──
-     Receptionist checks in → writes to _NIHMS_NURSE_QUEUE → nurse logs in
-     later → we read & drain here so patients aren't lost between sessions. */
-  function _drainStoredQueue() {
-    try {
-      var stored = JSON.parse(localStorage.getItem('_NIHMS_NURSE_QUEUE') || '[]');
-      if (!stored.length) return;
-      stored.forEach(function(req) { _handleCrossTabReq(req); });
-      /* Clear so we don't re-add on next render */
-      localStorage.removeItem('_NIHMS_NURSE_QUEUE');
-    } catch(_) {}
-  }
-
-  /* Run immediately (covers page load after receptionist already checked in) */
-  _drainStoredQueue();
-
-  /* Also run once _nurseAddRequest is defined, in case this fires before it */
-  setTimeout(_drainStoredQueue, 500);
-
-  /* Live event: localStorage storage event fires in OTHER tabs */
-  window.addEventListener('storage', function(e) {
-    if (e.key === '_NIHMS_NURSE_REQ' && e.newValue) {
-      try { _handleCrossTabReq(JSON.parse(e.newValue)); } catch(_) {}
-    }
-    /* Also re-drain the queue if receptionist wrote to it while we were open */
-    if (e.key === '_NIHMS_NURSE_QUEUE' && e.newValue) {
-      _drainStoredQueue();
-    }
-  });
-
-  /* Live event: BroadcastChannel (fires when both tabs open simultaneously) */
-  try {
-    var _nurseCh = new BroadcastChannel('nihms_nurse_queue');
-    _nurseCh.onmessage = function(e) {
-      if (e.data && e.data.type === 'NURSE_REQ') {
-        _handleCrossTabReq(e.data.req);
-      }
-    };
-  } catch(_) {}
-})();
-
 /* ─── Public bridge ──────────────────────────────────────────────────── */
 window._nurseAddRequest = function(req) {
   if (!window._NURSE_REQUESTS) window._NURSE_REQUESTS = [];
@@ -1888,49 +1801,15 @@ window._nurseAddRequest = function(req) {
       type:        'immunisation',
     };
     _N.immQueue.unshift(immEntry);
-    if (document.getElementById('nurse-sidebar')) {
+    if (document.getElementById('nurse-main')) {
       _nurseRender();
       UI && UI.showToast && UI.showToast('💉 Immunisation queue: ' + immEntry.patientName, 'ok');
-    }
-  } else if (req.autoAccept) {
-    /* ── Auto-accept: receptionist redirected patient directly → Vitals Queue ── */
-    if (!window._NURSE_REQUESTS.find(function(r){ return r.id === req.id; }))
-      window._NURSE_REQUESTS.push(req);
-    var alreadyInQueue = _N.patients.find(function(p){ return p.id === req.patientId || p.id === req.id; });
-    if (!alreadyInQueue) {
-      var now2 = (typeof _nowTime === 'function') ? _nowTime()
-               : new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'});
-      var stationNum2 = (_N._stationSeq = ((_N._stationSeq||0) % 4) + 1);
-      _N.patients.push({
-        id:            req.patientId || req.id,
-        name:          req.patientName || '',
-        age:           req.age         || '—',
-        sex:           req.sex         || '—',
-        complaint:     req.complaint   || 'Walk-in',
-        priority:      req.priority    || 'Normal',
-        status:        'Awaiting Vitals',
-        vitalStatus:   'Pending',
-        arrivalTime:   req.requestedAt || now2,
-        triageTime:    null,
-        waitMins:      0,
-        room:          null,
-        emergencyClass:null,
-        vitals:        null,
-        flags:         [],
-        aiRisk:        null,
-        acceptedAt:    now2,
-        stationNum:    stationNum2,
-      });
-    }
-    if (document.getElementById('nurse-sidebar')) {
-      _nurseRender();
-      UI && UI.showToast && UI.showToast('🩺 Patient in Vitals Queue: ' + (req.patientName||''), 'ok');
     }
   } else {
     /* Deduplicate */
     if (!window._NURSE_REQUESTS.find(function(r){ return r.id === req.id; }))
       window._NURSE_REQUESTS.push(req);
-    if (document.getElementById('nurse-sidebar')) {
+    if (document.getElementById('nurse-main')) {
       if (!_N.requests.find(function(r){ return r.id === req.id; }))
         _N.requests.push(req);
       _nurseRender();
@@ -1951,6 +1830,58 @@ window._LAB_QUEUE    = window._LAB_QUEUE    || [];
 
 /* Allow nurse page to re-render externally */
 window._nurseRender = _nurseRender;
+
+/* ─── Cross-tab immunisation queue sync ──────────────────────────────
+   Receptionist uses BroadcastChannel('nihms_nurse_queue') to push
+   check-ins when the nurse page is open in a different tab.
+   Also drains localStorage._NIHMS_NURSE_QUEUE on every page open so
+   patients checked in before the nurse tab was opened are not missed.
+──────────────────────────────────────────────────────────────────── */
+(function _nurseSetupCrossTab() {
+  /* 1. Drain localStorage queue (catches check-ins made before nurse tab opened) */
+  function _drainLocalStorage() {
+    try {
+      var stored = JSON.parse(localStorage.getItem('_NIHMS_NURSE_QUEUE') || '[]');
+      stored.forEach(function(req) {
+        if (typeof window._nurseAddRequest === 'function') {
+          window._nurseAddRequest(req);
+        }
+      });
+    } catch(_) {}
+  }
+
+  /* 2. BroadcastChannel listener — fires when receptionist pushes in real time */
+  var _nBroadcastCh = null;
+  try { _nBroadcastCh = new BroadcastChannel('nihms_nurse_queue'); } catch(_) {}
+  if (_nBroadcastCh) {
+    _nBroadcastCh.onmessage = function(ev) {
+      if (ev && ev.data && ev.data.type === 'NURSE_REQ' && ev.data.req) {
+        if (typeof window._nurseAddRequest === 'function') {
+          window._nurseAddRequest(ev.data.req);
+        }
+      }
+    };
+  }
+
+  /* 3. localStorage storage event — fallback for browsers that block BroadcastChannel */
+  window.addEventListener('storage', function(ev) {
+    if (ev.key === '_NIHMS_NURSE_REQ' && ev.newValue) {
+      try {
+        var req = JSON.parse(ev.newValue);
+        if (req && typeof window._nurseAddRequest === 'function') {
+          window._nurseAddRequest(req);
+        }
+      } catch(_) {}
+    }
+    /* Also re-drain full queue when it changes */
+    if (ev.key === '_NIHMS_NURSE_QUEUE') {
+      _drainLocalStorage();
+    }
+  });
+
+  /* 4. Drain on load (deferred so _nurseAddRequest is defined first) */
+  setTimeout(_drainLocalStorage, 200);
+})();
 
 /* ════════════════════════════════════════════════════════════════
    PATIENT FILE — search · vitals record · consultation notes
@@ -1979,7 +1910,7 @@ function _nPatientFile() {
               var flagged = (p.flags||[]).some(function(fl){ return fl.field.toLowerCase().includes(r[0].toLowerCase().split(' ')[0]); });
               return '<div style="padding:8px 10px;background:'+(flagged?'#fef2f2':'#fff')+';border:1px solid '+(flagged?'#fca5a5':'#e5e7eb')+';border-radius:6px">' +
                 '<div style="font-size:10px;color:#6b7280;margin-bottom:2px">'+r[0]+'</div>' +
-                '<div style="font-size:15px;font-weight:700;color:'+(flagged?'#dc2626':'#20242b')+'">'+(r[1]||'—')+' <span style="font-size:11px;font-weight:400;color:#6b7280">'+r[2]+'</span>'+(flagged?' ⚑':'')+'</div>' +
+                '<div style="font-size:15px;font-weight:700;color:'+(flagged?'#dc2626':'#111111')+'">'+(r[1]||'—')+' <span style="font-size:11px;font-weight:400;color:#6b7280">'+r[2]+'</span>'+(flagged?' ⚑':'')+'</div>' +
               '</div>';
             }).join('') +
           '</div>' +
@@ -1990,10 +1921,10 @@ function _nPatientFile() {
     /* Vitals history timeline */
     var historyHtml = vh.length > 1
       ? '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:14px">' +
-          '<div style="font-size:12px;font-weight:700;color:#20242b;margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Vitals History</div>' +
+          '<div style="font-size:12px;font-weight:700;color:#111111;margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Vitals History</div>' +
           vh.map(function(h, i){
             return '<div style="padding:8px 0;border-bottom:1px solid #f1f5f9;font-size:12px;color:#475569">' +
-              '<strong style="color:#20242b">'+(h.recordedDate||h.recordedAt||'—')+'</strong>' +
+              '<strong style="color:#111111">'+(h.recordedDate||h.recordedAt||'—')+'</strong>' +
               ' · BP: '+h.vitals.bp+' · HR: '+h.vitals.hr+' · SpO₂: '+h.vitals.spo2+'% · Temp: '+h.vitals.temp+'°C' +
             '</div>';
           }).join('') +
@@ -2004,7 +1935,7 @@ function _nPatientFile() {
     var notes = p.consultationNotes || [];
     var notesHtml = '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:14px">' +
       '<div style="padding:10px 14px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">' +
-        '<div style="font-size:12px;font-weight:700;color:#20242b">Consultation Notes</div>' +
+        '<div style="font-size:12px;font-weight:700;color:#111111">Consultation Notes</div>' +
         '<button onclick="_nAddNote(\''+p.id+'\')" style="padding:5px 10px;border-radius:5px;border:none;background:#0F6E56;color:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">+ Add Note</button>' +
       '</div>' +
       (pf.editingNote
@@ -2027,10 +1958,10 @@ function _nPatientFile() {
     '</div>';
 
     return _nHeader('Patient File', p.firstName ? p.firstName+' '+p.lastName : p.name) +
-      '<div style="flex:1;overflow:auto;padding:16px 20px;background:#f4f5f0">' + back +
+      '<div style="flex:1;overflow:auto;padding:16px 20px">' + back +
         '<div style="display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start">' +
           '<div>' +
-            '<div style="display:flex;align-items:center;gap:12px;padding:14px;background:#e8f5f1;border-radius:12px;border:1px solid #a8d8cc;margin-bottom:14px">' +
+            '<div style="display:flex;align-items:center;gap:12px;padding:14px;background:#eff6ff;border-radius:12px;border:1px solid #bfdbfe;margin-bottom:14px">' +
               '<div style="width:44px;height:44px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;flex-shrink:0">'+ini+'</div>' +
               '<div style="flex:1">' +
                 '<div style="font-size:18px;font-weight:800;color:#0f172a">'+(p.firstName ? p.firstName+' '+p.lastName : p.name)+'</div>' +
@@ -2041,7 +1972,7 @@ function _nPatientFile() {
             vitalsHtml + historyHtml + notesHtml +
           '</div>' +
           '<div style="display:flex;flex-direction:column;gap:12px">' +
-            (p.complaint ? '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px"><div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:5px">Chief Complaint</div><div style="font-size:13px;color:#20242b">'+p.complaint+'</div></div>' : '') +
+            (p.complaint ? '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px"><div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:5px">Chief Complaint</div><div style="font-size:13px;color:#111111">'+p.complaint+'</div></div>' : '') +
             '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px">' +
               '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:8px">Quick Actions</div>' +
               '<div style="display:flex;flex-direction:column;gap:6px">' +
@@ -2057,7 +1988,7 @@ function _nPatientFile() {
 
   /* ── SEARCH ── */
   return _nHeader('Patient File', 'Search by ID or passport number') +
-    '<div style="flex:1;overflow:auto;padding:20px;background:#f4f5f0">' + back +
+    '<div style="flex:1;overflow:auto;padding:20px">' + back +
       '<div style="max-width:600px">' +
         '<div style="margin-bottom:20px">' +
           '<div style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:4px">Find Patient Record</div>' +
@@ -2077,11 +2008,11 @@ function _nPatientFile() {
             : '') +
         '</div>' +
         '<div style="margin-top:16px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">' +
-          '<div style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:12px;font-weight:700;color:#20242b">Patients in queue today</div>' +
+          '<div style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:12px;font-weight:700;color:#111111">Patients in queue today</div>' +
           _N.patients.map(function(p, i){
             return '<div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid #f8fafc;background:'+(i%2===0?'#fff':'#f8fafc')+'">' +
               '<div style="width:28px;height:28px;border-radius:50%;background:#0F6E56;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">'+(p.name.split(' ').map(function(n){return n[0];}).join('').slice(0,2))+'</div>' +
-              '<div style="flex:1"><div style="font-size:12px;font-weight:600;color:#20242b">'+p.name+'</div><div style="font-size:10px;color:#6b7280">'+p.id+'</div></div>' +
+              '<div style="flex:1"><div style="font-size:12px;font-weight:600;color:#111111">'+p.name+'</div><div style="font-size:10px;color:#6b7280">'+p.id+'</div></div>' +
               '<button onclick="_nPfOpen(\''+p.id+'\')" style="padding:4px 10px;border-radius:5px;border:1px solid #e5e7eb;background:#fff;font-size:11px;color:#0F6E56;cursor:pointer;font-family:inherit;font-weight:600">Open</button>' +
             '</div>';
           }).join('') +
@@ -2191,7 +2122,7 @@ function _nImmQueue() {
       toolbar +
       '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;color:#6b7280;gap:6px;padding:48px">' +
         '<div style="font-size:48px;opacity:.35">💉</div>' +
-        '<div style="font-size:14px;font-weight:600;color:#20242b">No immunisation patients ' + (f==='All'?'today':'in this filter') + '</div>' +
+        '<div style="font-size:14px;font-weight:600;color:#111111">No immunisation patients ' + (f==='All'?'today':'in this filter') + '</div>' +
         '<div style="font-size:12px;text-align:center;max-width:280px">Patients booked under the Immunisation department will appear here after the receptionist checks them in.</div>' +
       '</div>';
   }
@@ -2199,11 +2130,11 @@ function _nImmQueue() {
   /* ── Patient rows ── */
   var rows = filtered.map(function(p, i) {
     var isSel = _N.immSel === p.id;
-    var bg    = isSel ? 'background:#e8f5f1'
-              : i%2===0 ? 'background:#fff' : 'background:#f4f5f0';
+    var bg    = isSel ? 'background:#eff6ff'
+              : i%2===0 ? 'background:#fff' : 'background:#f5f8fc';
 
     var statusBadge = p.status === 'Awaiting Immunisation'    ? '<span style="padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;background:#fffbeb;color:#d97706;border:1px solid #fcd34d">Waiting</span>'
-                    : p.status === 'Immunisation In Progress' ? '<span style="padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;background:#e8f5f1;color:#0F6E56;border:1px solid #a8d8cc">In Progress</span>'
+                    : p.status === 'Immunisation In Progress' ? '<span style="padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;background:#eff6ff;color:#0F6E56;border:1px solid #bfdbfe">In Progress</span>'
                     : '<span style="padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;background:#f0fdf4;color:#16a34a;border:1px solid #86efac">Complete</span>';
 
     return '<tr style="'+bg+';border-bottom:1px solid #e8edf4;cursor:pointer" onclick="_N.immSel=\''+p.id+'\';_nurseRender()">' +
@@ -2231,7 +2162,7 @@ function _nImmQueue() {
     '<div style="flex:1;overflow:auto">' +
       '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
         '<thead>' +
-          '<tr style="background:#f4f5f0">' +
+          '<tr style="background:#f5f8fc">' +
             '<th style="width:12px;padding:6px 14px"></th>' +
             _th('Token') + _th('Patient') + _th('Age/Sex') +
             _th('Reason') + _th('Status') + _th('Arrived') + _th('Action') +
@@ -2250,7 +2181,7 @@ function _nImmQueue() {
       detail =
         '<div style="width:320px;flex-shrink:0;border-left:1px solid #e0e0e0;background:#fff;overflow-y:auto;display:flex;flex-direction:column">' +
           '<div style="padding:14px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between">' +
-            '<div style="font-size:13px;font-weight:700;color:#20242b">Patient Details</div>' +
+            '<div style="font-size:13px;font-weight:700;color:#111111">Patient Details</div>' +
             '<button onclick="_N.immSel=null;_nurseRender()" style="border:none;background:transparent;font-size:18px;cursor:pointer;color:#6b7280;line-height:1">×</button>' +
           '</div>' +
 
@@ -2259,7 +2190,7 @@ function _nImmQueue() {
             '<div style="width:44px;height:44px;border-radius:50%;background:#f59e0b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;margin-bottom:10px">' +
               '💉' +
             '</div>' +
-            '<div style="font-size:15px;font-weight:700;color:#20242b;margin-bottom:2px">'+(sel.patientName||sel.name||'—')+'</div>' +
+            '<div style="font-size:15px;font-weight:700;color:#111111;margin-bottom:2px">'+(sel.patientName||sel.name||'—')+'</div>' +
             '<div style="font-size:12px;color:#6b7280">ID: '+(sel.patientId||'—')+' · Age: '+(sel.age||'—')+' · '+(sel.sex||'—')+'</div>' +
             '<div style="margin-top:8px">' +
               '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:4px">Token</div>' +
@@ -2270,7 +2201,7 @@ function _nImmQueue() {
           /* Status */
           '<div style="padding:12px 16px;border-bottom:1px solid #f1f5f9">' +
             '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:6px">Status</div>' +
-            '<div style="font-size:13px;font-weight:600;color:#20242b">'+(sel.status||'—')+'</div>' +
+            '<div style="font-size:13px;font-weight:600;color:#111111">'+(sel.status||'—')+'</div>' +
             '<div style="font-size:11px;color:#6b7280;margin-top:2px">Arrived: '+(sel.arrivalTime||'—')+' · Waited: '+(sel.waitMins||0)+' min</div>' +
           '</div>' +
 
@@ -2391,7 +2322,7 @@ function _nImmunisation() {
       '<div style="background:'+(ccOk?'#f0fdf4':'#fef2f2')+';border:1px solid '+(ccOk?'#86efac':'#fca5a5')+';border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">' +
         '<div>' +
           '<div style="font-size:12px;font-weight:700;color:'+(ccOk?'#166534':'#dc2626')+'">🌡 Cold Chain / Storage</div>' +
-          '<div style="font-size:13px;color:#20242b;margin-top:2px">Current temperature: <strong>'+cc.currentTemp+'°C</strong> · Safe range: '+cc.minAlarm+'–'+cc.maxAlarm+'°C</div>' +
+          '<div style="font-size:13px;color:#111111;margin-top:2px">Current temperature: <strong>'+cc.currentTemp+'°C</strong> · Safe range: '+cc.minAlarm+'–'+cc.maxAlarm+'°C</div>' +
           '<div style="font-size:11px;color:#6b7280;margin-top:2px">Last reading: '+new Date(cc.lastReading).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'})+'</div>' +
         '</div>' +
         '<span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;background:'+(ccOk?'#16a34a':'#dc2626')+';color:#fff">'+(ccOk?'✓ OK':'⚠ ALERT')+'</span>' +
@@ -2399,7 +2330,7 @@ function _nImmunisation() {
 
       (todayVax.length
         ? '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">' +
-            '<div style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:12px;font-weight:700;color:#20242b">Vaccinations Recorded Today</div>' +
+            '<div style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:12px;font-weight:700;color:#111111">Vaccinations Recorded Today</div>' +
             '<table style="width:100%;border-collapse:collapse"><thead><tr>'+['Patient','Vaccine','Dose','Batch','Time','Vaccinator'].map(_th).join('')+'</tr></thead><tbody>' +
             todayVax.map(function(v,i){
               return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9">' +
@@ -2446,7 +2377,7 @@ function _nImmunisation() {
                   var isOverdue = ageWeeks > s.weeks+2 && !done;
                   return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0">' +
                     '<span style="width:8px;height:8px;border-radius:50%;background:'+(isOverdue?'#dc2626':isDue?'#d97706':done?'#16a34a':'#e5e7eb')+';flex-shrink:0"></span>' +
-                    '<span style="font-size:12px;color:#20242b;min-width:80px">'+s.label+'</span>' +
+                    '<span style="font-size:12px;color:#111111;min-width:80px">'+s.label+'</span>' +
                     '<span style="font-size:12px;color:#6b7280;flex:1">'+s.vaccines.join(', ')+'</span>' +
                     '<span style="font-size:11px;font-weight:600;color:'+(isOverdue?'#dc2626':isDue?'#d97706':done?'#16a34a':'#94a3b8')+'">'+(isOverdue?'OVERDUE':isDue?'DUE NOW':done?'✓ Done':'Upcoming')+'</span>' +
                   '</div>';
@@ -2466,7 +2397,7 @@ function _nImmunisation() {
     content = '<div style="padding:14px 16px;max-width:640px">' +
       '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px">' +
         '<div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:16px">Record Vaccination</div>' +
-        (selPt ? '<div style="padding:10px 12px;background:#e8f5f1;border:1px solid #a8d8cc;border-radius:8px;margin-bottom:14px;font-size:13px;color:#0F4C3A"><strong>Patient:</strong> '+selPt.name+' · Age: '+(selPt.age||'?')+'y</div>' : '') +
+        (selPt ? '<div style="padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:14px;font-size:13px;color:#0B5443"><strong>Patient:</strong> '+selPt.name+' · Age: '+(selPt.age||'?')+'y</div>' : '') +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">' +
           '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Patient *</label>' +
             '<select id="vax-pt" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;outline:none">' +
@@ -2520,7 +2451,7 @@ function _nImmunisation() {
           var bg  = i%2===0?'#fff':'#f8fafc';
           return '<tr style="background:'+(low?'#fffbeb':bg)+';border-bottom:1px solid #f1f5f9">' +
             _td('<strong>'+s.name+'</strong>') +
-            '<td style="padding:8px 14px;font-size:14px;font-weight:700;color:'+(low?'#d97706':'#20242b')+'">'+s.quantity+' '+s.unit+'</td>' +
+            '<td style="padding:8px 14px;font-size:14px;font-weight:700;color:'+(low?'#d97706':'#111111')+'">'+s.quantity+' '+s.unit+'</td>' +
             _td('Min: '+s.minQty+' '+s.unit,'font-size:12px;color:#6b7280') +
             _td(s.tempMin+'°C to '+s.tempMax+'°C','font-size:12px;color:#6b7280') +
             '<td style="padding:8px 14px"><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;background:'+(low?'#fffbeb':'#f0fdf4')+';color:'+(low?'#d97706':'#16a34a')+';border:1px solid '+(low?'#fcd34d':'#86efac')+'">'+( low?'LOW STOCK':'OK')+'</span></td>' +
@@ -2534,7 +2465,7 @@ function _nImmunisation() {
         '<div style="font-size:13px;font-weight:700;color:'+(ccOk?'#166534':'#dc2626')+';margin-bottom:8px">🌡 Cold Chain Monitoring</div>' +
         '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">' +
           '<div><div style="font-size:10px;color:#6b7280">Current Temp</div><div style="font-size:22px;font-weight:800;color:'+(ccOk?'#16a34a':'#dc2626')+'">'+cc.currentTemp+'°C</div></div>' +
-          '<div><div style="font-size:10px;color:#6b7280">Safe Range</div><div style="font-size:14px;font-weight:600;color:#20242b">'+cc.minAlarm+'–'+cc.maxAlarm+'°C</div></div>' +
+          '<div><div style="font-size:10px;color:#6b7280">Safe Range</div><div style="font-size:14px;font-weight:600;color:#111111">'+cc.minAlarm+'–'+cc.maxAlarm+'°C</div></div>' +
           '<div><div style="font-size:10px;color:#6b7280">Status</div><div style="font-size:14px;font-weight:700;color:'+(ccOk?'#16a34a':'#dc2626')+'">'+(ccOk?'✓ Normal':'⚠ ALERT')+'</div></div>' +
         '</div>' +
         '<div style="margin-top:10px;display:flex;gap:8px">' +
@@ -2585,7 +2516,7 @@ function _nImmunisation() {
         im.vaccines.slice(0,6).map(function(v){
           var cnt = im.todayVaccinations.filter(function(r){return r.vaccineId===v.id;}).length;
           var pct = eligible ? Math.round(cnt/Math.max(eligible,1)*100) : 0;
-          return '<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="color:#20242b">'+v.name+'</span><span style="font-weight:700;color:#0F6E56">'+cnt+' given</span></div><div style="height:5px;background:#f1f5f9;border-radius:3px"><div style="height:5px;background:#0F6E56;border-radius:3px;width:'+Math.min(pct,100)+'%"></div></div></div>';
+          return '<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="color:#111111">'+v.name+'</span><span style="font-weight:700;color:#0F6E56">'+cnt+' given</span></div><div style="height:5px;background:#f1f5f9;border-radius:3px"><div style="height:5px;background:#0F6E56;border-radius:3px;width:'+Math.min(pct,100)+'%"></div></div></div>';
         }).join('') +
       '</div>' +
     '</div>';
@@ -2690,6 +2621,38 @@ window._nurseAddMessage = function(msg) {
   if (typeof renderFn === 'function') renderFn();
   /* Toast */
   if (window.UI && window.UI.showToast) {
-    UI.showToast('New message from ' + (msg.from || 'Reception'), 'ok');
+    UI.showToast('📩 New message from ' + (msg.from || 'Reception'), 'ok');
   }
 };
+/* ═══════════════════════════════════════════════════════════════════════════
+   OUTER SIDEBAR ROUTER REGISTRATIONS
+   The router calls Pages[id]() when a nav item is clicked.
+   Each entry maps to the exact view name used by _nurseRender().
+   _nGoTo() handles two cases:
+     • Shell already in DOM  → switch view + re-render in place, return outerHTML
+     • Shell not in DOM yet  → set view then mount via Pages['nurse_dashboard']
+═══════════════════════════════════════════════════════════════════════════ */
+function _nGoTo(view) {
+  var main = document.getElementById('nurse-main');
+  if (main) {
+    _N.view = view;
+    _nurseRender();
+    /* Return the existing shell outerHTML so UI.renderContent re-mounts it intact */
+    var shell = main.closest('[style*="display:flex"]') || main.parentElement;
+    return shell ? shell.outerHTML : main.outerHTML;
+  }
+  /* Shell not yet mounted — set view then let the entry point mount everything */
+  _N.view = view;
+  return Pages['nurse_dashboard']();
+}
+
+/* Each router nav item maps to one of these */
+Pages['nurse_overview']     = function(){ return _nGoTo('overview');      };
+Pages['nurse_queue']        = function(){ return _nGoTo('queue');         };
+Pages['nurse_imm_queue']    = function(){ return _nGoTo('imm-queue');     };
+Pages['nurse_requests']     = function(){ return _nGoTo('requests');      };
+Pages['nurse_vitals']       = function(){ return _nGoTo('vitals');        };
+Pages['nurse_immunisation'] = function(){ return _nGoTo('immunisation');  };
+Pages['nurse_patient_file'] = function(){ return _nGoTo('patient-file'); };
+Pages['nurse_messaging']    = function(){ return _nGoTo('messaging');     };
+Pages['nurse_analytics']    = function(){ return _nGoTo('analytics');     };

@@ -80,11 +80,22 @@ window.Router = (() => {
       ]
     },
 
-    nurse: {
+
+
+   nurse: {
       label: 'Nurse', icon: 'ti-heart-rate-monitor',
       default: 'nurse_dashboard',
       nav: [
-        { id: 'nurse_dashboard', icon: 'ti-layout-dashboard', label: 'Nurse Station' },
+        { id: 'nurse_dashboard',    icon: 'ti-layout-dashboard', label: 'Dashboard'               },
+        { section: 'Queues' },
+        { id: 'nurse_queue',        icon: 'ti-heartbeat',        label: 'Vitals Collection Queue' },
+        { id: 'nurse_imm_queue',    icon: 'ti-vaccine',          label: 'Immunisation Queue'      },
+        { section: 'Work' },
+        { id: 'nurse_vitals',       icon: 'ti-heart-rate',       label: 'Record Vitals'           },
+        { id: 'nurse_immunisation', icon: 'ti-vaccine',          label: 'Immunisation'            },
+        { id: 'nurse_patient_file', icon: 'ti-folder-open',      label: 'Patient File'            },
+        { id: 'nurse_messaging',    icon: 'ti-message',          label: 'Messages'                },
+        { id: 'nurse_analytics',    icon: 'ti-chart-bar',        label: 'Analytics & AI'          },
       ]
     },
 
@@ -98,10 +109,10 @@ window.Router = (() => {
 
     lab_worker: {
       label: 'Lab', icon: 'ti-flask',
-      default: 'lab_dashboard',
+      default: 'lab_worker',
       nav: [
         { section: 'Laboratory' },
-        { id: 'lab_dashboard',   icon: 'ti-layout-dashboard', label: 'Lab dashboard' },
+        { id: 'lab_worker',   icon: 'ti-layout-dashboard', label: 'Lab dashboard' },
       ]
     },
 
@@ -140,8 +151,7 @@ window.Router = (() => {
         { id: 'myhealth',    icon: 'ti-heart-rate',        label: 'Overview' },
         { id: 'myrecords',   icon: 'ti-clipboard-list',    label: 'Medical records' },
         { id: 'appointments',icon: 'ti-calendar-event',    label: 'My appointments' },
-        { id: 'billing',       icon: 'ti-credit-card',   label: 'Billing & medical aid' },
-        { id: 'my_med_certs',  icon: 'ti-certificate',   label: 'Medical Certificates'  },
+        { id: 'billing',     icon: 'ti-credit-card',       label: 'Billing & medical aid' },
       ]
     }
   };
@@ -163,21 +173,8 @@ window.Router = (() => {
 
   function setPage(id) {
     current.page = id;
-    /* Doctor shell manages its own internal sidebar via _dRender().
-       Skip the outer UI.renderSidebar call when the shell is active
-       to prevent a duplicate sidebar appearing inside the page area. */
-    if (!document.getElementById('doc-main')) {
-      UI.renderSidebar(current.role, id);
-    }
-    /* For doctor pages: if the shell (#doc-main) is already in the DOM,
-       _dPage() already re-rendered in place and returned ''.
-       Calling UI.renderContent again would inject a duplicate shell.
-       We let UI.renderContent run only on first mount (no #doc-main yet). */
-    if (document.getElementById('doc-main') && Pages[id]) {
-      Pages[id](); // switch view in place — no DOM injection
-    } else {
-      UI.renderContent(id);
-    }
+    UI.renderSidebar(current.role, id);
+    UI.renderContent(id);
   }
 
   return { roleConfig, current, setRole, setPage };
