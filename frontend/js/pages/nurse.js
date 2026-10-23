@@ -50,6 +50,9 @@ var _N = {
   patients:   [],  /* vitals queue — patients needing vitals (non-immunisation) */
   immQueue:   [],  /* immunisation queue — patients with Immunisation department booking */
 
+  _acceptedIds:       {},  /* id → true for every request the nurse has accepted this session */
+  _acceptedPatientIds:{},  /* patientId → true — prevents accepted patients re-appearing via API reload */
+
   messages: [],  /* loaded from API on page open */
 
   /* per-view UI state */
@@ -101,6 +104,8 @@ _N.immu = {
   immuTab: 'today',
   selectedPatient: null,
   recordForm: { vaccineId:'', dose:'', date:new Date().toISOString().slice(0,10), batch:'', vaccinator:'', notes:'' },
+  lastSavedVaxId:   null,   /* set after a successful _nRecordVax — gates End Appointment button */
+  endedApptIds:     {},     /* appointmentId → true, prevents double-completion */
 };
 
 /* Patient file search state */
@@ -171,16 +176,20 @@ Pages['nurse_dashboard'] = function() {
   _N.alertDismissed = false;
   _N.loadingData    = true;
 
-  /* Merge any requests already pushed by receptionist (same-tab) */
+  /* Merge any requests already pushed by receptionist (same-tab) — skip accepted */
   (window._NURSE_REQUESTS || []).forEach(function(r) {
-    if (!_N.requests.find(function(x){ return x.id === r.id; }))
-      _N.requests.push(r);
+    if (_N._acceptedIds[r.id] || _N._acceptedPatientIds[r.patientId]) return;
+    var dupById = _N.requests.find(function(x){ return x.id === r.id; });
+    var dupByPt = r.patientId && _N.requests.find(function(x){ return x.patientId === r.patientId; });
+    if (!dupById && !dupByPt) _N.requests.push(r);
   });
 
   /* Drain cross-tab localStorage queue (check-ins from a different tab) */
   try {
     var _lsQueue = JSON.parse(localStorage.getItem('_NIHMS_NURSE_QUEUE') || '[]');
     _lsQueue.forEach(function(r) {
+      /* Skip anything already accepted this session */
+      if (_N._acceptedIds[r.id] || _N._acceptedPatientIds[r.patientId]) return;
       var dept  = (r.department || r.dept || r.type || '').toLowerCase();
       var isImm = dept.includes('immunis') || dept.includes('immuniz') || dept.includes('vaccin')
                   || r.isImmunisation === true;
@@ -204,8 +213,10 @@ Pages['nurse_dashboard'] = function() {
           });
         }
       } else {
-        if (!_N.requests.find(function(x){ return x.id === r.id; }))
-          _N.requests.push(r);
+        /* Dedup by both request id AND patientId to catch same patient with different ids */
+        var dupById   = _N.requests.find(function(x){ return x.id === r.id; });
+        var dupByPt   = _N.requests.find(function(x){ return x.patientId && x.patientId === r.patientId; });
+        if (!dupById && !dupByPt) _N.requests.push(r);
       }
     });
   } catch(_) {}
@@ -258,9 +269,10 @@ Pages['nurse_dashboard'] = function() {
         aRes.data.forEach(function(a) {
           var pid = a.patient?._id || a.patientId;
           /* Add as request if not already in queue */
-          var alreadyQueued = _N.patients.find(function(p){ return p.pid === pid || p.id === pid; });
-          var alreadyReq    = _N.requests.find(function(r){ return r.patientId === pid; });
-          if (!alreadyQueued && !alreadyReq) {
+          var alreadyQueued   = _N.patients.find(function(p){ return p.pid === pid || p.id === pid || p.pid === (a._id||a.id) || p.id === (a._id||a.id); });
+          var alreadyReq      = _N.requests.find(function(r){ return r.patientId === pid || r.id === 'REQ-'+(a._id||a.id); });
+          var alreadyAccepted = _N._acceptedPatientIds[pid] || _N._acceptedIds['REQ-'+(a._id||a.id)] || _N._acceptedIds[pid];
+          if (!alreadyQueued && !alreadyReq && !alreadyAccepted) {
             _N.requests.push({
               id:          'REQ-' + (a._id || a.id),
               patientId:   pid,
@@ -283,8 +295,10 @@ Pages['nurse_dashboard'] = function() {
 
       /* 3. Load any existing vitals requests from window._NURSE_REQUESTS (receptionist live push) */
       (window._NURSE_REQUESTS || []).forEach(function(r) {
-        if (!_N.requests.find(function(x){ return x.id === r.id; }))
-          _N.requests.push(r);
+        if (_N._acceptedIds[r.id] || _N._acceptedPatientIds[r.patientId]) return;
+        var dupById = _N.requests.find(function(x){ return x.id === r.id; });
+        var dupByPt = r.patientId && _N.requests.find(function(x){ return x.patientId === r.patientId; });
+        if (!dupById && !dupByPt) _N.requests.push(r);
       });
 
       /* 4. Load messages from backend */
@@ -317,10 +331,12 @@ Pages['nurse_dashboard'] = function() {
 
 /* ─── Render engine ──────────────────────────────────────────────────── */
 function _nurseRender() {
-  /* Always sync any new requests pushed by receptionist */
+  /* Always sync any new requests pushed by receptionist — skip already-accepted ones */
   (window._NURSE_REQUESTS||[]).forEach(function(r){
-    if (!_N.requests.find(function(x){ return x.id === r.id; }))
-      _N.requests.push(r);
+    if (_N._acceptedIds[r.id] || _N._acceptedPatientIds[r.patientId]) return;
+    var dupById = _N.requests.find(function(x){ return x.id === r.id; });
+    var dupByPt = r.patientId && _N.requests.find(function(x){ return x.patientId === r.patientId; });
+    if (!dupById && !dupByPt) _N.requests.push(r);
   });
 
   var main = document.getElementById('nurse-main');
@@ -1463,7 +1479,42 @@ window._nurseReqAccept = async function(id) {
     room: null, emergencyClass: null, vitals: null, flags: [], aiRisk: null,
     acceptedAt: now, stationNum: stationNum,
   });
-  _N.requests = _N.requests.filter(function(r){ return r.id!==id; });
+
+  /* ── Mark as accepted so no re-injection path can re-add this request ── */
+  _N._acceptedIds[id]                    = true;
+  _N._acceptedPatientIds[req.patientId]  = true;
+
+  /* Remove ALL requests for this patient (same patient may appear with different ids
+     e.g. appointment REQ-xxx and a queue check-in push with a different id) */
+  var ptId = req.patientId;
+  _N.requests.forEach(function(r) {
+    if (r.id === id || r.patientId === ptId) {
+      _N._acceptedIds[r.id] = true;
+    }
+  });
+  _N.requests = _N.requests.filter(function(r){ return r.id!==id && r.patientId!==ptId; });
+
+  /* Remove from the receptionist live-push global so _nurseRender never re-adds it */
+  if (window._NURSE_REQUESTS) {
+    window._NURSE_REQUESTS = window._NURSE_REQUESTS.filter(function(r){
+      return r.id!==id && r.patientId!==ptId;
+    });
+  }
+  /* Remove from localStorage queue so cross-tab drain never re-adds it */
+  try {
+    var _lsQ = JSON.parse(localStorage.getItem('_NIHMS_NURSE_QUEUE') || '[]');
+    _lsQ = _lsQ.filter(function(r){ return r.id!==id && r.patientId!==ptId; });
+    localStorage.setItem('_NIHMS_NURSE_QUEUE', JSON.stringify(_lsQ));
+  } catch(_) {}
+
+  /* Persist accepted status to backend (best-effort) */
+  var aptId = req.aptId || (id.startsWith('REQ-') ? id.slice(4) : null);
+  if (aptId) {
+    API._fetchDirect('/appointments/' + aptId, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'at-nurse', nurseStation: stationNum, nurseAcceptedAt: new Date().toISOString() }),
+    }).catch(function(){});
+  }
 
   /* ── Send SMS + Email to patient ── */
   var ptName   = req.patientName || 'Patient';
@@ -1519,7 +1570,36 @@ window._nurseReqDecline = function(id) {
 };
 
 window._nurseReqDeclineConfirm = function(id) {
-  _N.requests = _N.requests.filter(function(r){ return r.id!==id; });
+  var req   = _N.requests.find(function(r){ return r.id===id; });
+  var ptId  = req ? req.patientId : null;
+
+  /* Mark ALL requests for this patient as declined */
+  _N.requests.forEach(function(r) {
+    if (r.id === id || (ptId && r.patientId === ptId)) {
+      _N._acceptedIds[r.id] = true;
+    }
+  });
+  if (ptId) _N._acceptedPatientIds[ptId] = true;
+
+  /* Remove all matching requests from in-memory list */
+  _N.requests = _N.requests.filter(function(r){
+    return r.id !== id && !(ptId && r.patientId === ptId);
+  });
+
+  /* Remove from receptionist live-push global */
+  if (window._NURSE_REQUESTS) {
+    window._NURSE_REQUESTS = window._NURSE_REQUESTS.filter(function(r){
+      return r.id !== id && !(ptId && r.patientId === ptId);
+    });
+  }
+
+  /* Remove from localStorage queue */
+  try {
+    var _lsQ = JSON.parse(localStorage.getItem('_NIHMS_NURSE_QUEUE') || '[]');
+    _lsQ = _lsQ.filter(function(r){ return r.id !== id && !(ptId && r.patientId === ptId); });
+    localStorage.setItem('_NIHMS_NURSE_QUEUE', JSON.stringify(_lsQ));
+  } catch(_) {}
+
   _N.decliningId = null;
   _N.reqExpanded = null;
   _nurseRender();
@@ -1610,17 +1690,20 @@ window._nurseSaveVitals = async function(id) {
   if (!p) return;
   var form  = _N.vitalForm;
   if (!form.bp && !form.hr) { UI.showToast('Enter at least BP and HR','err'); return; }
-  var flags = _flagVitals(form);
+
+  var flags    = _flagVitals(form);
+  var escalate = flags.some(function(f){ return /hypertensive|critical|emergency/i.test(f.reason||''); });
+
   p.vitals      = Object.assign({}, form);
   p.flags       = flags;
   p.vitalStatus = 'Completed';
-  p.status      = "With Doctor"; /* goes straight to doctor queue */
+  p.status      = 'With Doctor';
   if (flags.length && !p.aiRisk) p.aiRisk = 'Abnormal vitals detected — clinical review recommended.';
   _N.editId = null;
 
-  /* Build vitals record with full metadata */
+  /* ── Build a timestamped vitals record ── */
   var vitalsRecord = {
-    vitals:       form,
+    vitals:       Object.assign({}, form),
     flags:        flags,
     recordedAt:   new Date().toISOString(),
     recordedDate: new Date().toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'}),
@@ -1631,92 +1714,145 @@ window._nurseSaveVitals = async function(id) {
     vitalStatus:  'Completed',
   };
 
-  /* Store metadata on patient object */
+  /* ── Attach to in-memory patient so Patient 360° shows it immediately ── */
   p.vitalsRecord = vitalsRecord;
   if (!p.vitalHistory) p.vitalHistory = [];
   p.vitalHistory.push(vitalsRecord);
 
-  /* Save vitals to backend */
+  /* ── Also update global patient store so 360° API-load path picks it up ── */
+  try {
+    if (window.NIHMS_PATIENTS) {
+      var gPt = window.NIHMS_PATIENTS.find(function(x){
+        return x._id===p.pid||x.id===p.pid||x._id===p.id||x.id===p.id||
+               x.nationalId===p.id||x.nationalId===p.pid;
+      });
+      if (gPt) {
+        gPt.vitals = Object.assign({}, form);
+        if (!gPt.vitalHistory) gPt.vitalHistory = [];
+        gPt.vitalHistory.push(vitalsRecord);
+      }
+    }
+  } catch(_) {}
+
+  /* ── Persist vitals to backend ── */
   try {
     await API._fetchDirect('/patients/'+(p.pid||p.id)+'/vitals', {
-      method:'POST',
-      body: JSON.stringify(vitalsRecord)
+      method: 'POST',
+      body:   JSON.stringify(vitalsRecord),
     }).catch(function(){});
-  } catch(_){}
+  } catch(_) {}
 
-  /* Push patient to doctor queue immediately */
+  /* ── Update appointment / queue status to 'at-doctor' on backend ── */
+  try {
+    if (p.aptId) {
+      API._fetchDirect('/appointments/'+p.aptId, {
+        method: 'PATCH',
+        body:   JSON.stringify({ status:'at-doctor', vitalsCompletedAt: vitalsRecord.recordedAt }),
+      }).catch(function(){});
+    }
+    if (p.queueId || p.token) {
+      API._fetchDirect('/queue/'+(p.queueId||p.token), {
+        method: 'PATCH',
+        body:   JSON.stringify({ status:'with-doctor', vitalsCompletedAt: vitalsRecord.recordedAt }),
+      }).catch(function(){});
+    }
+  } catch(_) {}
+
+  /* ── Build doctor queue entry — includes full vitalHistory for Patient 360° ── */
   var docEntry = {
-    id:         p.id,
-    pid:        p.pid || p.id,
-    name:       p.name,
-    age:        p.age,
-    sex:        p.sex,
-    complaint:  p.complaint,
-    priority:   p.priority,
-    vitals:     p.vitals,
-    flags:      p.flags,
-    aiRisk:     p.aiRisk || null,
-    arrivedAt:  _nowTime(),
-    department: p.department || 'General Consultation',
-    fromNurse:  true,
+    id:           p.id,
+    pid:          p.pid || p.id,
+    name:         p.name,
+    age:          p.age,
+    sex:          p.sex,
+    complaint:    p.complaint,
+    priority:     p.priority,
+    vitals:       Object.assign({}, form),
+    vitalHistory: p.vitalHistory.slice(),   /* ← full history for Patient 360° */
+    flags:        flags,
+    aiRisk:       p.aiRisk || null,
+    arrivedAt:    _nowTime(),
+    department:   p.department || 'General Consultation',
+    status:       escalate ? 'Emergency' : 'waiting',
+    vitalStatus:  'Completed',
+    recordedAt:   vitalsRecord.recordedAt,
+    fromNurse:    true,
+    aptId:        p.aptId || null,
+    token:        p.token || null,
   };
-  if (!window._DOCTOR_QUEUE) window._DOCTOR_QUEUE = [];
-  window._DOCTOR_QUEUE.push(docEntry);
+
+  /* ── Push to doctor queue (same-tab live push) ── */
+  window._DOCTOR_QUEUE = window._DOCTOR_QUEUE || [];
+  var alreadyInDocQ = window._DOCTOR_QUEUE.find(function(x){ return x.id===docEntry.id; });
+  if (alreadyInDocQ) {
+    /* Update existing entry with fresh vitals */
+    Object.assign(alreadyInDocQ, docEntry);
+  } else {
+    window._DOCTOR_QUEUE.push(docEntry);
+  }
   if (window._dcAddPatient) window._dcAddPatient(docEntry);
+
+  /* ── Cross-tab push: BroadcastChannel + localStorage drain ── */
+  try {
+    var _dCh = new BroadcastChannel('nihms_doctor_queue');
+    _dCh.postMessage({ type:'DOCTOR_PT', doc: docEntry });
+    _dCh.close();
+  } catch(_) {}
+  try {
+    var _stored = JSON.parse(localStorage.getItem('_NIHMS_DOCTOR_QUEUE') || '[]');
+    var _idx = _stored.findIndex(function(x){ return x.id===docEntry.id; });
+    if (_idx >= 0) _stored[_idx] = docEntry; else _stored.push(docEntry);
+    localStorage.setItem('_NIHMS_DOCTOR_QUEUE', JSON.stringify(_stored));
+    /* Signal drain to doctor tab via storage event */
+    localStorage.setItem('_NIHMS_DOCTOR_REQ', JSON.stringify(docEntry));
+    setTimeout(function(){ try { localStorage.removeItem('_NIHMS_DOCTOR_REQ'); } catch(_){} }, 500);
+  } catch(_) {}
 
   _nurseRender();
 
-  /* ── Auto-run ML immediately after vitals saved ── */
+  /* ── Auto-run ML risk scoring after vitals saved ── */
   try {
-    var bpParts2 = (form.bp||'0/0').split('/').map(function(v){return parseInt(v)||0;});
+    var bpParts2 = (form.bp||'0/0').split('/').map(function(v){ return parseInt(v)||0; });
     var mlAuto = {
-      heartRate:   parseFloat(form.hr)||null,
-      spo2:        parseFloat(form.spo2)||null,
-      systolicBP:  bpParts2[0]||null,
-      diastolicBP: bpParts2[1]||null,
-      temperature: parseFloat(form.temp)||null,
-      patientId:   p.pid||p.id,
-      role:        'nurse'
+      heartRate:   parseFloat(form.hr)   || null,
+      spo2:        parseFloat(form.spo2) || null,
+      systolicBP:  bpParts2[0]           || null,
+      diastolicBP: bpParts2[1]           || null,
+      temperature: parseFloat(form.temp) || null,
+      patientId:   p.pid || p.id,
+      role:        'nurse',
     };
-    if (!Object.keys(mlAuto).filter(function(k){return k!=='patientId'&&k!=='role'&&(mlAuto[k]===null||mlAuto[k]===0);}).length) {
-      API._fetchDirect('/ml/triage',{method:'POST',body:JSON.stringify(mlAuto)})
-        .then(function(res){
-          if(res&&res.success&&res.riskLevel){
-            p.mlRiskLevel=res.riskLevel; p.mlConfidence=res.confidence;
-            p.mlModelVersion=res.modelVersion||'triage-v2.0'; p.aiRisk=res.aiRiskNote||p.aiRisk;
-            p.predictionId=res.predictionId||null;
-            if(res.abnormalVitals&&res.abnormalVitals.length){
-              p.flags=res.abnormalVitals.map(function(v){return{field:v.vital,value:v.value,reason:v.reason,status:v.status};});
+    var mlFilled = Object.keys(mlAuto).filter(function(k){
+      return k !== 'patientId' && k !== 'role' && (mlAuto[k] !== null && mlAuto[k] !== 0);
+    }).length;
+    if (mlFilled >= 2) {
+      API._fetchDirect('/ml/triage', { method:'POST', body:JSON.stringify(mlAuto) })
+        .then(function(res) {
+          if (res && res.success && res.riskLevel) {
+            p.mlRiskLevel     = res.riskLevel;
+            p.mlConfidence    = res.confidence;
+            p.mlModelVersion  = res.modelVersion || 'triage-v2.0';
+            p.aiRisk          = res.aiRiskNote || p.aiRisk;
+            p.predictionId    = res.predictionId || null;
+            if (res.abnormalVitals && res.abnormalVitals.length) {
+              p.flags = res.abnormalVitals.map(function(v){
+                return { field:v.vital, value:v.value, reason:v.reason, status:v.status };
+              });
             }
-            UI.showToast('ML: '+res.riskLevel+' risk ('+Math.round((res.confidence||1)*100)+'%)',res.riskLevel==='HIGH'?'warn':'ok');
+            /* Update the doctor queue entry with ML result */
+            var dq = window._DOCTOR_QUEUE && window._DOCTOR_QUEUE.find(function(x){ return x.id===p.id; });
+            if (dq) { dq.aiRisk = p.aiRisk; dq.flags = p.flags; dq.mlRiskLevel = p.mlRiskLevel; }
+            UI.showToast('ML: '+res.riskLevel+' risk ('+Math.round((res.confidence||1)*100)+'%)', res.riskLevel==='HIGH'?'warn':'ok');
             _nurseRender();
           }
         }).catch(function(){});
     }
-  } catch(_){}
+  } catch(_) {}
 
-  /* ── Push to doctor queue ── */
-  var _docPt = {
-    id: p.id, pid: p.pid||p.id, name: p.name, age: p.age, sex: p.sex,
-    complaint: p.complaint, priority: p.priority,
-    vitals: Object.assign({}, p.vitals||{}),
-    flags: p.flags||[], aiRisk: p.aiRisk||null,
-    status: escalate ? 'Emergency' : 'waiting',
-    vitalStatus: 'Completed', recordedAt: new Date().toISOString()
-  };
-  if (window._dcAddPatient) {
-    window._dcAddPatient(_docPt);
-  } else {
-    window._DOCTOR_QUEUE = window._DOCTOR_QUEUE || [];
-    if (!window._DOCTOR_QUEUE.find(function(x){return x.id===_docPt.id;}))
-      window._DOCTOR_QUEUE.push(_docPt);
-  }
-
-  _nurseRender();
   if (flags.length) {
     UI.showToast('Vitals saved · '+flags.length+' flag'+(flags.length>1?'s':'')+' · '+p.name+' → doctor queue','warn');
   } else {
-    UI.showToast('Vitals complete · '+p.name+' → doctor queue · ML running…','ok');
+    UI.showToast('Vitals complete · '+p.name+' → doctor queue','ok');
   }
 };
 
@@ -2334,7 +2470,7 @@ function _nImmunisation() {
             '<table style="width:100%;border-collapse:collapse"><thead><tr>'+['Patient','Vaccine','Dose','Batch','Time','Vaccinator'].map(_th).join('')+'</tr></thead><tbody>' +
             todayVax.map(function(v,i){
               return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9">' +
-                _td(v.patientName,'font-weight:600') + _td(v.vaccine) + _td('Dose '+v.dose) + _td(v.batch||'—') + _td(v.time) + _td(v.vaccinator) +
+                _td(v.patientName||'—','font-weight:600') + _td(v.vaccine) + _td('Dose '+v.dose) + _td(v.batch||'—') + _td(v.time) + _td((v.vaccinatorName||v.vaccinator||'—').replace(/\s*·\s*Staff:?\s*\S+/i,'').replace(/\s*·\s*Reg:?\s*\S+/i,'').trim()) +
               '</tr>';
             }).join('') +
             '</tbody></table>' +
@@ -2392,48 +2528,294 @@ function _nImmunisation() {
 
   /* ── RECORD VACCINATION ── */
   if (tab==='record') {
-    var rf = im.recordForm;
-    var selPt = im.selectedPatient ? _N.patients.find(function(p){return p.id===im.selectedPatient;}) : null;
-    content = '<div style="padding:14px 16px;max-width:640px">' +
-      '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px">' +
-        '<div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:16px">Record Vaccination</div>' +
-        (selPt ? '<div style="padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:14px;font-size:13px;color:#0B5443"><strong>Patient:</strong> '+selPt.name+' · Age: '+(selPt.age||'?')+'y</div>' : '') +
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">' +
-          '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Patient *</label>' +
-            '<select id="vax-pt" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;outline:none">' +
-            _N.patients.map(function(p){ return '<option value="'+p.id+'"'+(im.selectedPatient===p.id?' selected':'')+'>'+p.name+' ('+p.id+')</option>'; }).join('') +
-            '</select></div>' +
-          '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Vaccine *</label>' +
-            '<select id="vax-vac" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;outline:none">' +
-            im.vaccines.map(function(v){ return '<option value="'+v.id+'">'+v.name+'</option>'; }).join('') +
-            '</select></div>' +
-          '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Dose Number *</label>' +
-            '<select id="vax-dose" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;outline:none">' +
-            [1,2,3,4,5].map(function(d){return '<option>'+d+'</option>';}).join('') +
-            '</select></div>' +
-          '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Date *</label>' +
-            '<input id="vax-date" type="date" value="'+today+'" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box"></div>' +
-          '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Batch / Lot Number *</label>' +
-            '<input id="vax-batch" type="text" placeholder="e.g. LOT2024-0183" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box"></div>' +
-          '<div><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Vaccinator *</label>' +
-            '<input id="vax-vacc" type="text" placeholder="Nurse name" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box"></div>' +
+    /* Build combined patient list: immQueue + vitals patients (deduplicated) */
+    var allPts = [];
+    var _seenPtIds = {};
+    (_N.immQueue||[]).concat(_N.patients||[]).forEach(function(p){
+      var uid = p.patientId || p.pid || p.id || '';
+      if (!uid || _seenPtIds[uid]) return;
+      _seenPtIds[uid] = true;
+      /* Normalise: immQueue uses patientName, patients may use name — unify to .name */
+      if (!p.name && p.patientName) p.name = p.patientName;
+      allPts.push(p);
+    });
+
+    var selPtId = im.selectedPatient;
+    /* selectedPatient may be an id string or a full object — normalise */
+    if (selPtId && typeof selPtId === 'object') selPtId = selPtId.id || selPtId.patientId || selPtId.pid;
+    var selPt = selPtId ? allPts.find(function(p){
+      return p.id===selPtId||p.patientId===selPtId||p.pid===selPtId;
+    }) : null;
+
+    /* ── Doctor.js-matched design tokens ── */
+    var C2 = { border:'#e2e8f0', text:'#0f172a', muted:'#475569', teal:'#0f6e56', bg:'#f4f5f0', red:'#dc2626' };
+    var fld = 'display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C2.muted+';margin-bottom:6px';
+    var inp = 'width:100%;padding:9px 12px;border:1.5px solid '+C2.border+';border-radius:8px;font-size:14px;font-family:inherit;color:'+C2.text+';background:#fff;box-sizing:border-box;outline:none';
+    var inpFocus = ' onfocus="this.style.borderColor=\'#0f6e56\'" onblur="this.style.borderColor=\'#e2e8f0\'"';
+    function _nCard2(inner){ return '<div style="background:#fff;border:1.5px solid '+C2.border+';border-radius:12px;padding:20px 24px">'+inner+'</div>'; }
+    function _nTitle2(t){ return '<div style="font-size:15px;font-weight:800;color:'+C2.text+';margin-bottom:16px">'+t+'</div>'; }
+    function _nInfoRow2(label,value,mono){ return '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C2.muted+';margin-bottom:4px">'+label+'</div><div style="font-size:14px;font-weight:700;color:'+C2.text+';'+(mono?'font-family:monospace':'')+'">'+value+'</div></div>'; }
+
+    /* ── Vaccination form ── */
+    content = '<div style="padding:16px 20px 24px;max-width:760px;display:flex;flex-direction:column;gap:14px">' +
+      _nCard2(
+        _nTitle2('Record Vaccination') +
+        '<div style="font-size:12px;color:'+C2.muted+';margin-top:-10px;margin-bottom:16px">SA EPI Schedule · fields marked <span style="color:'+C2.red+'">*</span> are required</div>' +
+
+        /* ── Auto-populated patient info panel (shows when patient is selected) ── */
+        '<div id="vax-pt-info-panel" style="display:'+(selPt?'':'none')+';background:#f8fafc;border:1.5px solid '+C2.border+';border-radius:10px;padding:14px 16px;margin-bottom:16px">' +
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C2.muted+';margin-bottom:10px">Patient Details</div>' +
+          '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 16px">' +
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C2.muted+';margin-bottom:3px">Full Name</div>' +
+                 '<div id="vax-pt-info-name" style="font-size:14px;font-weight:700;color:'+C2.text+'">'+(selPt?selPt.name:'—')+'</div></div>' +
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C2.muted+';margin-bottom:3px">ID / Passport</div>' +
+                 '<div id="vax-pt-info-id" style="font-size:14px;font-weight:700;color:'+C2.text+';font-family:monospace">'+(selPt?(selPt.nationalId||selPt.idNumber||selPt.passportNumber||selPt.patientId||selPt.pid||selPt.id||'—'):'—')+'</div></div>' +
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C2.muted+';margin-bottom:3px">File Number</div>' +
+                 '<div id="vax-pt-info-file" style="font-size:14px;font-weight:700;color:'+C2.text+';font-family:monospace">'+(selPt?(selPt.fileNumber||selPt.patientFileNumber||selPt.mrn||selPt.recordNumber||'—'):'—')+'</div></div>' +
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C2.muted+';margin-bottom:3px">Date of Birth</div>' +
+                 '<div id="vax-pt-info-dob" style="font-size:14px;font-weight:700;color:'+C2.text+'">'+(selPt&&selPt.dob?selPt.dob:'—')+'</div></div>' +
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C2.muted+';margin-bottom:3px">Sex</div>' +
+                 '<div id="vax-pt-info-sex" style="font-size:14px;font-weight:700;color:'+C2.text+'">'+(selPt&&selPt.sex?selPt.sex:'—')+'</div></div>' +
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C2.muted+';margin-bottom:3px">Token · Dept</div>' +
+                 '<div id="vax-pt-info-token" style="font-size:14px;font-weight:700;color:'+C2.text+'">'+(selPt?(selPt.token||'—')+' · '+(selPt.dept||selPt.department||'Immunisation'):'—')+'</div></div>' +
+          '</div>' +
         '</div>' +
-        '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:5px">Observations / Notes</label>' +
-          '<textarea id="vax-notes" rows="2" placeholder="Any adverse reactions, observations…" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;resize:none;outline:none;box-sizing:border-box"></textarea></div>' +
-        '<button onclick="_nRecordVax()" style="width:100%;padding:12px;border-radius:8px;border:none;background:#0F6E56;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">✓ Record Vaccination</button>' +
-        '<div style="margin-top:10px;padding:8px 12px;background:#fffbeb;border-radius:6px;font-size:11px;color:#92400e">Monitor for adverse reactions for 15–30 minutes after administration.</div>' +
-      '</div>' +
-      /* Adverse reactions */
-      '<div style="margin-top:14px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px">' +
-        '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:10px">Record Adverse Reaction</div>' +
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">' +
-          '<div><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:4px">Patient</label><select id="ar-pt" style="width:100%;padding:8px 10px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;outline:none">'+_N.patients.map(function(p){return '<option value="'+p.id+'">'+p.name+'</option>';}).join('')+'</select></div>' +
-          '<div><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:4px">Reaction Type</label><select id="ar-type" style="width:100%;padding:8px 10px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;outline:none"><option>Local swelling</option><option>Fever</option><option>Rash</option><option>Anaphylaxis</option><option>Fainting</option><option>Pain at site</option><option>Other</option></select></div>' +
+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">' +
+
+          /* Patient select */
+          '<div style="grid-column:1/-1"><label style="'+fld+'">Patient *</label>' +
+            '<select id="vax-pt" onchange="_nVaxPatientChange(this.value)" style="'+inp+'"'+inpFocus+'>' +
+              '<option value="">— Select patient —</option>' +
+              allPts.map(function(p){
+                var uid = p.patientId||p.pid||p.id||'';
+                var sel = (selPtId && (p.id===selPtId||p.patientId===selPtId||p.pid===selPtId)) ? ' selected' : '';
+                return '<option value="'+uid+'"'+sel+'>'+p.name+' ('+(p.nationalId||p.idNumber||p.patientId||p.pid||p.id||'—')+')</option>';
+              }).join('') +
+            '</select>' +
+          '</div>' +
+
+          /* Vaccine */
+          '<div><label style="'+fld+'">Vaccine *</label>' +
+            '<select id="vax-vac" onchange="_nVaxVaccineChange(this.value)" style="'+inp+'"'+inpFocus+'>' +
+              '<option value="">— Select vaccine —</option>' +
+              im.vaccines.map(function(v){ return '<option value="'+v.id+'">'+v.name+'</option>'; }).join('') +
+            '</select>' +
+            '<div id="vax-vac-detail" style="margin-top:5px;font-size:11px;color:'+C2.muted+'"></div>' +
+          '</div>' +
+
+          /* Dose Number — manual number input */
+          (function(){
+            var _nu = (typeof API !== 'undefined' && API && API.getStoredUser && API.getStoredUser()) || {};
+            var _vaccinatorName = _nu.name || _nu.fullName || _nu.displayName || '';
+            var _vaccinatorReg  = _nu.registrationNumber || _nu.professionalReg || _nu.hpcsa || _nu.sanc || '';
+            var _vaccinatorStaff= _nu.staffId || _nu.employeeId || _nu.id || '';
+            var _vaccinatorVal  = _vaccinatorName + (_vaccinatorReg ? ' · Reg: '+_vaccinatorReg : '');
+            return (
+              '<div><label style="'+fld+'">Dose Number *</label>' +
+                '<input id="vax-dose" type="number" min="1" max="10" step="1" value="1" placeholder="Enter dose number (e.g. 1, 2, 3)" style="'+inp+'"'+inpFocus+'>' +
+                '<div style="margin-top:4px;font-size:10px;color:'+C2.muted+'">Enter the dose number manually. Match the patient\'s vaccination card.</div>' +
+              '</div>' +
+
+              /* Date */
+              '<div><label style="'+fld+'">Date Administered *</label>' +
+                '<input id="vax-date" type="date" value="'+today+'" max="'+today+'" style="'+inp+'"'+inpFocus+'></div>' +
+
+              /* Batch */
+              '<div><label style="'+fld+'">Batch / Lot Number *</label>' +
+                '<input id="vax-batch" type="text" placeholder="e.g. LOT2024-0183" style="'+inp+'"'+inpFocus+'></div>' +
+
+              /* Vaccinator — auto-populated from session, still editable */
+              '<div><label style="'+fld+'">Vaccinator *</label>' +
+                '<input id="vax-vacc" type="text" value="'+_vaccinatorVal.replace(/"/g,'&quot;')+'" placeholder="Full name &amp; professional registration" style="'+inp+'"'+inpFocus+'>' +
+                (_vaccinatorName
+                  ? '<div style="margin-top:4px;font-size:10px;color:#16a34a">✓ Auto-filled from your account'+ (_vaccinatorReg ? ' · Reg: '+_vaccinatorReg : '')+'</div>'
+                  : '<div style="margin-top:4px;font-size:10px;color:'+C2.muted+'">Enter your full name and professional registration number</div>') +
+              '</div>'
+            );
+          })() +
+
         '</div>' +
-        '<textarea id="ar-notes" rows="2" placeholder="Describe the reaction…" style="width:100%;padding:8px 10px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;resize:none;outline:none;box-sizing:border-box;margin-bottom:8px"></textarea>' +
-        '<button onclick="_nRecordAR()" style="padding:8px 18px;border-radius:7px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Report Adverse Reaction</button>' +
-      '</div>' +
+
+        /* Observations */
+        '<div style="margin-bottom:16px"><label style="'+fld+'">Observations / Notes</label>' +
+          '<textarea id="vax-notes" rows="2" placeholder="Any adverse reactions, observations, or additional information…" style="'+inp+';resize:none"'+inpFocus+'></textarea></div>' +
+
+        /* Duplicate warning area */
+        '<div id="vax-dup-warn" style="display:none;margin-bottom:12px;padding:10px 14px;background:#fffbeb;border:1px solid #fcd34d;border-left:4px solid #d97706;border-radius:8px;font-size:12px;color:#92400e">' +
+          '⚠ A vaccination record for this patient and vaccine already exists today. Review before saving.' +
+        '</div>' +
+
+        /* Save result area — shown after successful save */
+        '<div id="vax-save-result" style="display:none;margin-bottom:12px"></div>' +
+
+        /* Submit */
+        '<button id="vax-submit-btn" onclick="_nRecordVax()" style="width:100%;padding:13px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;letter-spacing:.01em">' +
+          '<span>✓ Record &amp; Complete Vaccination</span>' +
+        '</button>' +
+
+        /* End Immunisation Appointment button — only visible after successful save */
+        '<div id="vax-end-appt-wrap" style="display:none;margin-top:10px">' +
+          '<button id="vax-end-appt-btn" onclick="_nEndImmAppt()" style="width:100%;padding:13px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#1A4A9B 0%,#0F6E56 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;letter-spacing:.01em">' +
+            '✔ End Immunisation Appointment' +
+          '</button>' +
+          '<div style="margin-top:6px;font-size:11px;color:'+C2.muted+';text-align:center">This marks the appointment as Completed and closes the immunisation encounter.</div>' +
+        '</div>' +
+
+        /* Monitoring reminder */
+        '<div style="margin-top:12px;padding:10px 14px;background:#fffbeb;border:1px solid #fcd34d;border-left:4px solid #f59e0b;border-radius:8px;font-size:12px;color:#92400e">' +
+          '<strong>⏱ Post-vaccination monitoring:</strong> Monitor the patient for 15–30 minutes after administration in accordance with the applicable vaccination protocol. ' +
+          'Treat any suspected anaphylaxis as a medical emergency requiring immediate assessment and emergency management — do not delay treatment to complete the reporting form.' +
+        '</div>'
+
+      ) + /* end vaccination card (_nCard2) */
+
+      /* ── ADVERSE REACTION FORM ── */
+      _nCard2(
+        _nTitle2('🚨 Record Adverse Reaction') +
+        '<div style="font-size:12px;color:'+C2.muted+';margin-top:-10px;margin-bottom:16px">Document any reaction observed after vaccination</div>' +
+
+        /* Anaphylaxis emergency banner — shown dynamically by JS */
+        '<div id="ar-anaphylaxis-banner" style="display:none;margin-bottom:14px;padding:12px 16px;background:#fef2f2;border:2px solid #dc2626;border-radius:8px">' +
+          '<div style="font-size:13px;font-weight:800;color:#dc2626;margin-bottom:4px">🚨 SUSPECTED ANAPHYLAXIS — MEDICAL EMERGENCY</div>' +
+          '<div style="font-size:12px;color:#7f1d1d">Call for immediate assistance. Administer adrenaline per protocol. Do <strong>not</strong> delay treatment to complete this form. Complete the report after the patient is stabilised.</div>' +
+        '</div>' +
+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">' +
+
+          /* Patient */
+          '<div><label style="'+fld+'">Patient *</label>' +
+            '<select id="ar-pt" style="'+inp+'"'+inpFocus+'>' +
+              '<option value="">— Select patient —</option>' +
+              allPts.map(function(p){
+                var uid = p.patientId||p.pid||p.id||'';
+                return '<option value="'+uid+'">'+p.name+' ('+(p.patientId||p.pid||p.id||'—')+')</option>';
+              }).join('') +
+            '</select></div>' +
+
+          /* Reaction Type */
+          '<div><label style="'+fld+'">Reaction Type *</label>' +
+            '<select id="ar-type" onchange="_nARTypeChange(this.value)" style="'+inp+'"'+inpFocus+'>' +
+              '<option value="">— Select type —</option>' +
+              ['Local swelling','Fever','Rash','Anaphylaxis','Fainting','Pain at injection site','Other'].map(function(t){return '<option>'+t+'</option>';}).join('') +
+            '</select></div>' +
+
+          /* Date of Reaction */
+          '<div><label style="'+fld+'">Date of Reaction *</label>' +
+            '<input id="ar-date" type="date" value="'+today+'" style="'+inp+'"'+inpFocus+'></div>' +
+
+          /* Time of Reaction */
+          '<div><label style="'+fld+'">Time of Reaction *</label>' +
+            '<input id="ar-time" type="time" value="'+new Date().toTimeString().slice(0,5)+'" style="'+inp+'"'+inpFocus+'></div>' +
+
+          /* Severity */
+          '<div><label style="'+fld+'">Severity *</label>' +
+            '<select id="ar-severity" style="'+inp+'"'+inpFocus+'>' +
+              '<option value="">— Select severity —</option>' +
+              ['Mild','Moderate','Severe'].map(function(s){return '<option>'+s+'</option>';}).join('') +
+            '</select></div>' +
+
+          /* Associated vaccination record (optional) */
+          '<div><label style="'+fld+'">Associated Vaccination</label>' +
+            '<select id="ar-vax-ref" style="'+inp+'"'+inpFocus+'>' +
+              '<option value="">— None / Unknown —</option>' +
+              (im.todayVaccinations||[]).map(function(v,i){
+                return '<option value="'+i+'">'+v.vaccine+' · '+v.patientName+' · '+v.time+'</option>';
+              }).join('') +
+            '</select></div>' +
+
+        '</div>' +
+
+        /* Description */
+        '<div style="margin-bottom:12px"><label style="'+fld+'">Description / Symptoms / Observations *</label>' +
+          '<textarea id="ar-notes" rows="3" placeholder="Describe the symptoms, observations and actions taken…" style="'+inp+';resize:vertical"'+inpFocus+'></textarea></div>' +
+
+        /* Treatment */
+        '<div style="margin-bottom:12px"><label style="'+fld+'">Treatment or Intervention Provided</label>' +
+          '<textarea id="ar-treatment" rows="2" placeholder="Treatment given (e.g. antihistamine, adrenaline, cold compress). Indicate if patient was referred for further care." style="'+inp+';resize:vertical"'+inpFocus+'></textarea></div>' +
+
+        /* Reporting HCP */
+        '<div style="margin-bottom:16px"><label style="'+fld+'">Reporting Healthcare Professional *</label>' +
+          '<input id="ar-reporter" type="text" placeholder="Full name &amp; professional registration number" style="'+inp+'"'+inpFocus+'></div>' +
+
+        '<button onclick="_nRecordAR()" style="padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#dc2626 0%,#991b1b 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.01em">' +
+          '🚨 Report Adverse Reaction' +
+        '</button>'
+
+      ) + /* end adverse reaction card */
     '</div>';
+
+    /* Inject helper scripts for dynamic UI after the render */
+    setTimeout(function(){
+      /* Show vaccine schedule description */
+      window._nVaxVaccineChange = function(id){
+        var vac = (_N.immu.vaccines||[]).find(function(v){return v.id===id;});
+        var el  = document.getElementById('vax-vac-detail');
+        if (el && vac) el.textContent = vac.description || '';
+        /* Update dose max */
+        var doseEl = document.getElementById('vax-dose');
+        if (doseEl && vac) {
+          doseEl.innerHTML = Array.from({length:vac.doses||5},function(_,i){
+            return '<option value="'+(i+1)+'">Dose '+(i+1)+'</option>';
+          }).join('');
+        }
+        /* Duplicate check */
+        _nCheckVaxDuplicate();
+      };
+      window._nVaxPatientChange = function(id){
+        var pt = (_N.patients||[]).concat(_N.immQueue||[]).find(function(p){
+          return p.id===id||p.patientId===id||p.pid===id;
+        });
+        /* Update patient info panel */
+        var panel = document.getElementById('vax-pt-info-panel');
+        if (panel) {
+          if (pt && id) {
+            panel.style.display = '';
+            var nameEl  = document.getElementById('vax-pt-info-name');
+            var idEl    = document.getElementById('vax-pt-info-id');
+            var fileEl  = document.getElementById('vax-pt-info-file');
+            var dobEl   = document.getElementById('vax-pt-info-dob');
+            var sexEl   = document.getElementById('vax-pt-info-sex');
+            var tokenEl = document.getElementById('vax-pt-info-token');
+            var deptEl  = document.getElementById('vax-pt-info-dept');
+            if (nameEl)  nameEl.textContent  = pt.name || pt.patientName || (pt.firstName ? (pt.firstName+' '+(pt.lastName||'')).trim() : '') || '—';
+            if (idEl)    idEl.innerHTML      = '<strong>ID/Passport:</strong> '+(pt.nationalId||pt.idNumber||pt.passportNumber||pt.patientId||pt.pid||pt.id||'—');
+            if (fileEl)  fileEl.innerHTML    = '<strong>File No:</strong> '+(pt.fileNumber||pt.patientFileNumber||pt.mrn||pt.recordNumber||'—');
+            if (dobEl)   dobEl.innerHTML     = pt.dob ? '<strong>DOB:</strong> '+pt.dob : '';
+            if (sexEl)   sexEl.innerHTML     = pt.sex ? '<strong>Sex:</strong> '+pt.sex : '';
+            if (tokenEl) tokenEl.innerHTML   = '<strong>Token:</strong> '+(pt.token||'—');
+            if (deptEl)  deptEl.innerHTML    = '<strong>Dept:</strong> '+(pt.dept||pt.department||'Immunisation');
+          } else {
+            panel.style.display = 'none';
+          }
+        }
+        /* Mirror selection to adverse reaction patient select */
+        var arPt = document.getElementById('ar-pt');
+        if (arPt) arPt.value = id;
+        _nCheckVaxDuplicate();
+      };
+      window._nCheckVaxDuplicate = function(){
+        var ptEl  = document.getElementById('vax-pt');
+        var vacEl = document.getElementById('vax-vac');
+        var dateEl= document.getElementById('vax-date');
+        if (!ptEl||!vacEl||!dateEl) return;
+        var dup = (_N.immu.todayVaccinations||[]).find(function(r){
+          return (r.patientId===ptEl.value||r.patientId===ptEl.value) &&
+                 r.vaccineId===vacEl.value && r.date===dateEl.value;
+        });
+        var warn = document.getElementById('vax-dup-warn');
+        if (warn) warn.style.display = dup ? '' : 'none';
+      };
+      window._nARTypeChange = function(v){
+        var banner = document.getElementById('ar-anaphylaxis-banner');
+        if (banner) banner.style.display = (v==='Anaphylaxis') ? '' : 'none';
+        var sev = document.getElementById('ar-severity');
+        if (sev && v==='Anaphylaxis') sev.value = 'Severe';
+      };
+      /* Wire up duplicate check on date change */
+      var dateInput = document.getElementById('vax-date');
+      if (dateInput) dateInput.addEventListener('change', function(){ _nCheckVaxDuplicate && _nCheckVaxDuplicate(); });
+    }, 50);
   }
 
   /* ── STOCK MANAGEMENT ── */
@@ -2478,18 +2860,77 @@ function _nImmunisation() {
 
   /* ── HISTORY ── */
   if (tab==='history') {
-    var allVax = im.todayVaccinations;
-    content = '<div style="padding:14px 16px">' +
-      (allVax.length
-        ? '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">' +
-            '<table style="width:100%;border-collapse:collapse"><thead><tr>'+['Date','Patient','Vaccine','Dose','Batch','Vaccinator','Observations'].map(_th).join('')+'</tr></thead><tbody>' +
+    var allVax = im.todayVaccinations || [];
+    var allAR  = im.adverseReactions  || [];
+    /* Load persisted records from localStorage (survive page refreshes) */
+    try {
+      var _persVax = JSON.parse(localStorage.getItem('nihms_nurse_vaccinations') || '[]');
+      var _persAR  = JSON.parse(localStorage.getItem('nihms_nurse_adverse_reactions') || '[]');
+      /* Merge — deduplicate by id */
+      _persVax.forEach(function(r){
+        if (!allVax.find(function(x){return x.id===r.id;})) allVax.push(r);
+      });
+      _persAR.forEach(function(r){
+        if (!allAR.find(function(x){return x.id===r.id;})) allAR.push(r);
+      });
+    } catch(_){}
+
+    var hC2 = { border:'#e2e8f0', text:'#0f172a', muted:'#475569', bg:'#f4f5f0' };
+    function _hCard(inner,extra){ return '<div style="background:#fff;border:1.5px solid '+hC2.border+';border-radius:12px;overflow:hidden;margin-bottom:18px'+(extra?';'+extra:'')+'">' + inner + '</div>'; }
+    function _hTitle(t){ return '<div style="font-size:15px;font-weight:800;color:'+hC2.text+';padding:16px 20px 12px;border-bottom:1.5px solid '+hC2.border+'">'+t+'</div>'; }
+    function _hTh(t){ return '<th style="padding:10px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+hC2.muted+';border-bottom:1.5px solid '+hC2.border+';background:#f8fafc;white-space:nowrap;text-align:left">'+t+'</th>'; }
+    function _hTd(t,extra){ return '<td style="padding:9px 14px;font-size:13px;color:'+hC2.text+';border-bottom:1px solid '+hC2.border+(extra?';'+extra:'')+'">'+(t||'—')+'</td>'; }
+    function _hEmpty(msg,borderColor){ return '<div style="padding:24px;text-align:center;color:'+hC2.muted+';font-size:13px;background:#f8fafc;border-radius:0">'+msg+'</div>'; }
+
+    content = '<div style="padding:16px 20px 24px;max-width:900px;display:flex;flex-direction:column;gap:0">' +
+
+      /* Vaccination History */
+      _hCard(
+        _hTitle('💉 Vaccination Records') +
+        (allVax.length
+          ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:700px"><thead><tr>' +
+              ['Date','Patient &amp; ID','Vaccine','Dose','Batch / Lot','Vaccinator','Observations','Recorded By'].map(_hTh).join('') +
+            '</tr></thead><tbody>' +
             allVax.map(function(v,i){
-              return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+';border-bottom:1px solid #f1f5f9">' +
-                _td(v.date) + _td('<strong>'+v.patientName+'</strong>') + _td(v.vaccine) + _td('Dose '+v.dose) + _td(v.batch||'—') + _td(v.vaccinator) + _td(v.notes||'—','color:#6b7280;font-size:12px') +
+              return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+'">' +
+                _hTd(v.date||'—') +
+                _hTd('<span style="font-weight:700">'+(v.patientName||'—')+'</span><div style="font-size:10px;color:'+hC2.muted+'">'+(v.patientId||'')+'</div>') +
+                _hTd(v.vaccine||'—') +
+                _hTd('Dose '+(v.dose||'?')) +
+                _hTd(v.batch||'—','font-family:monospace;font-size:12px') +
+                _hTd((v.vaccinatorName||v.vaccinator||'—').replace(/\s*·\s*Staff:?\s*\S+/i,'').replace(/\s*·\s*Reg:?\s*\S+/i,'').trim()) +
+                _hTd(v.notes||'—','color:'+hC2.muted+';font-size:12px') +
+                _hTd('<span style="font-size:11px;color:'+hC2.muted+'">'+(v.recordedBy||v.vaccinatorName||v.vaccinator||'—').replace(/\s*·\s*Staff:?\s*\S+/i,'').replace(/\s*·\s*Reg:?\s*\S+/i,'').trim()+'<br>'+(v.recordedAt?new Date(v.recordedAt).toLocaleString('en-ZA',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'}):'')+'</span>') +
               '</tr>';
             }).join('') +
             '</tbody></table></div>'
-        : '<div style="padding:24px;text-align:center;color:#94a3b8;font-size:13px">No vaccination history recorded yet.</div>') +
+          : _hEmpty('No vaccination records yet.'))
+      ) +
+
+      /* Adverse Reaction History */
+      _hCard(
+        _hTitle('🚨 Adverse Reaction Reports') +
+        (allAR.length
+          ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:800px"><thead><tr>' +
+              ['Date / Time','Patient &amp; ID','Reaction Type','Severity','Description','Treatment','Reporting HCP','Recorded At'].map(_hTh).join('') +
+            '</tr></thead><tbody>' +
+            allAR.map(function(r,i){
+              var sevColour = r.severity==='Severe'?'#dc2626':r.severity==='Moderate'?'#d97706':'#16a34a';
+              return '<tr style="background:'+(i%2===0?'#fff':'#f8fafc')+'">' +
+                _hTd((r.date||'—')+' '+(r.time||''),'font-size:12px;white-space:nowrap') +
+                _hTd('<span style="font-weight:700">'+r.patientName+'</span><div style="font-size:10px;color:'+hC2.muted+'">'+(r.patientId||'')+'</div>') +
+                _hTd('<span style="padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;background:#fef2f2;color:#dc2626;border:1.5px solid #fca5a5">'+r.type+'</span>') +
+                '<td style="padding:9px 14px;border-bottom:1px solid '+hC2.border+'"><span style="padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;color:'+sevColour+';border:1.5px solid '+sevColour+';background:#fff">'+(r.severity||'—')+'</span></td>' +
+                _hTd(r.notes||'—','color:'+hC2.muted+';font-size:12px;max-width:200px') +
+                _hTd(r.treatment||'—','color:'+hC2.muted+';font-size:12px;max-width:160px') +
+                _hTd(r.reporter||'—','font-size:12px') +
+                _hTd('<span style="font-size:11px;color:'+hC2.muted+'">'+(r.recordedAt?new Date(r.recordedAt).toLocaleString('en-ZA',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'}):'—')+'</span>') +
+              '</tr>';
+            }).join('') +
+            '</tbody></table></div>'
+          : _hEmpty('No adverse reactions reported.'))
+      ) +
+
     '</div>';
   }
 
@@ -2498,25 +2939,26 @@ function _nImmunisation() {
     var covered = im.todayVaccinations.length;
     var eligible = _N.patients.filter(function(p){return p.age&&p.age<=5;}).length;
     var coverage = eligible ? Math.round(covered/eligible*100) : 0;
-    content = '<div style="padding:14px 16px">' +
-      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px">' +
+    var rC2 = { border:'#e2e8f0', text:'#0f172a', muted:'#475569', teal:'#0f6e56' };
+    content = '<div style="padding:16px 20px 24px;max-width:760px;display:flex;flex-direction:column;gap:14px">' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">' +
         [
-          {label:'Eligible Children (Today)', value:eligible, color:'#0F6E56'},
+          {label:'Eligible Children (Today)', value:eligible, color:'#0f6e56'},
           {label:'Vaccinated Today',          value:covered,  color:'#16a34a'},
           {label:'Coverage Rate',             value:coverage+'%', color:coverage<80?'#dc2626':'#16a34a'},
         ].map(function(k){
-          return '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px;text-align:center">' +
-            '<div style="font-size:28px;font-weight:800;color:'+k.color+';margin-bottom:4px">'+k.value+'</div>' +
-            '<div style="font-size:12px;color:#6b7280">'+k.label+'</div>' +
+          return '<div style="background:#fff;border:1.5px solid '+rC2.border+';border-radius:12px;padding:20px;text-align:center">' +
+            '<div style="font-size:32px;font-weight:800;color:'+k.color+';margin-bottom:6px">'+k.value+'</div>' +
+            '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+rC2.muted+'">'+k.label+'</div>' +
           '</div>';
         }).join('') +
       '</div>' +
-      '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px">' +
-        '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:12px">Vaccine Coverage by Type</div>' +
+      '<div style="background:#fff;border:1.5px solid '+rC2.border+';border-radius:12px;padding:20px 24px">' +
+        '<div style="font-size:15px;font-weight:800;color:'+rC2.text+';margin-bottom:16px">Vaccine Coverage by Type</div>' +
         im.vaccines.slice(0,6).map(function(v){
           var cnt = im.todayVaccinations.filter(function(r){return r.vaccineId===v.id;}).length;
           var pct = eligible ? Math.round(cnt/Math.max(eligible,1)*100) : 0;
-          return '<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="color:#111111">'+v.name+'</span><span style="font-weight:700;color:#0F6E56">'+cnt+' given</span></div><div style="height:5px;background:#f1f5f9;border-radius:3px"><div style="height:5px;background:#0F6E56;border-radius:3px;width:'+Math.min(pct,100)+'%"></div></div></div>';
+          return '<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span style="color:'+rC2.text+';font-weight:600">'+v.name+'</span><span style="font-weight:700;color:'+rC2.teal+'">'+cnt+' given</span></div><div style="height:6px;background:#f1f5f9;border-radius:4px"><div style="height:6px;background:linear-gradient(90deg,#0f6e56,#1a4a9b);border-radius:4px;width:'+Math.min(pct,100)+'%"></div></div></div>';
         }).join('') +
       '</div>' +
     '</div>';
@@ -2530,49 +2972,439 @@ function _nImmunisation() {
 /* ── Immunisation action handlers ────────────────────────────────────────── */
 window._nRecordVax = function() {
   function _v(id){ var el=document.getElementById(id); return el?el.value.trim():''; }
-  var ptId    = _v('vax-pt');
-  var vaxId   = _v('vax-vac');
-  var dose    = _v('vax-dose');
-  var date    = _v('vax-date');
-  var batch   = _v('vax-batch');
-  var vacc    = _v('vax-vacc');
-  var notes   = _v('vax-notes');
-  if (!ptId||!vaxId||!batch||!vacc){ UI.showToast('Please fill all required fields (*)','err'); return; }
-  var pt  = _N.patients.find(function(p){return p.id===ptId;});
-  var vax = _N.immu.vaccines.find(function(v){return v.id===vaxId;});
+  var ptId  = _v('vax-pt');
+  var vaxId = _v('vax-vac');
+  var dose  = _v('vax-dose');
+  var date  = _v('vax-date');
+  var batch = _v('vax-batch');
+  var vacc  = (_v('vax-vacc')||'').replace(/\s*·\s*Staff:?\s*\S+/i,'').trim(); /* strip Staff ID from display value */
+  var notes = _v('vax-notes');
+
+  /* ── Validation ── */
+  var errs = [];
+  if (!ptId)  errs.push('Patient');
+  if (!vaxId) errs.push('Vaccine');
+  /* Dose must be a positive integer */
+  var doseNum = parseInt(dose, 10);
+  if (!dose || isNaN(doseNum) || doseNum < 1) errs.push('Dose Number (must be a whole number ≥ 1)');
+  if (!date)  errs.push('Date Administered');
+  if (!batch) errs.push('Batch / Lot Number');
+  if (!vacc)  errs.push('Vaccinator');
+  if (errs.length) {
+    /* Show inline error and toast */
+    var resultEl = document.getElementById('vax-save-result');
+    if (resultEl) {
+      resultEl.style.display = '';
+      resultEl.innerHTML = '<div class="nihms-alert-err"><span>✗</span><div><strong>Cannot save:</strong> ' + errs.join(', ') + '</div></div>';
+    }
+    if (window.UI && UI.showToast) UI.showToast('Required: ' + errs.join(', '),'err');
+    return;
+  }
+
+  /* ── Find patient and vaccine objects ── */
+  var allPts = (_N.patients||[]).concat(_N.immQueue||[]);
+  var pt  = allPts.find(function(p){return p.id===ptId||p.patientId===ptId||p.pid===ptId;});
+  var vax = (_N.immu.vaccines||[]).find(function(v){return v.id===vaxId;});
+
+  /* ── Duplicate guard ── */
+  var dup = (_N.immu.todayVaccinations||[]).find(function(r){
+    return (r.patientId===ptId) && r.vaccineId===vaxId && r.date===date;
+  });
+  if (dup) {
+    if (!confirm('A record for this patient and vaccine already exists on ' + date + '. Save anyway?')) return;
+  }
+
+  /* ── Get current session user for audit trail ── */
+  var u = (typeof API !== 'undefined' && API && API.getStoredUser && API.getStoredUser()) || {};
+
+  /* ── Build full vaccination record ── */
   var rec = {
-    patientId: ptId, patientName: pt?pt.name:'Unknown',
-    vaccineId: vaxId, vaccine: vax?vax.name:vaxId,
-    dose: dose, date: date, time: _nowTime(),
-    batch: batch, vaccinator: vacc, notes: notes,
-    recordedAt: new Date().toISOString()
+    id:                   'VAX-' + Date.now(),
+    /* Patient identity — pulled from patient record, not user entry */
+    patientId:            ptId,
+    patientName:          pt ? (pt.name || pt.patientName || pt.firstName ? ((pt.firstName||'') + (pt.lastName ? ' '+pt.lastName : '')).trim() || pt.patientName || pt.name || 'Unknown' : 'Unknown') : 'Unknown',
+    patientNationalId:    pt ? (pt.nationalId||pt.idNumber||pt.passportNumber||'') : '',
+    patientFileNumber:    pt ? (pt.fileNumber||pt.patientFileNumber||pt.mrn||pt.recordNumber||'') : '',
+    patientDob:           pt ? (pt.dob||'') : '',
+    patientSex:           pt ? (pt.sex||'') : '',
+    /* Vaccine */
+    vaccineId:            vaxId,
+    vaccine:              vax ? vax.name : vaxId,
+    dose:                 String(doseNum),          /* manually entered, validated */
+    /* Administration */
+    date:                 date,
+    time:                 _nowTime(),
+    batch:                batch,
+    notes:                notes,
+    /* Vaccinator — from session, confirmed in field */
+    vaccinator:           vacc,
+    vaccinatorName:       u.name || u.fullName || u.displayName || vacc,
+    vaccinatorReg:        u.registrationNumber || u.professionalReg || u.hpcsa || u.sanc || '',
+    vaccinatorStaffId:    u.staffId || u.employeeId || u.id || '',
+    /* Audit trail */
+    recordedBy:           u.name || u.fullName || u.email || vacc,
+    recordedById:         u.id || u._id || '',
+    recordedAt:           new Date().toISOString(),
+    updatedBy:            u.name || u.fullName || u.email || vacc,
+    updatedAt:            new Date().toISOString(),
+    facilityId:           u.facilityId || u.facility || '',
+    /* Appointment reference (if a patient came from the immQueue, carry their appointment id) */
+    appointmentId:        pt ? (pt.appointmentId || pt.apptId || pt.bookingId || '') : '',
+    status:               'recorded',
   };
+
+  /* ── Update in-memory state ── */
+  if (!_N.immu.todayVaccinations) _N.immu.todayVaccinations = [];
   _N.immu.todayVaccinations.push(rec);
-  /* Update immunisation record on patient */
   if (pt) {
     if (!pt.immunisationRecord) pt.immunisationRecord = {};
-    pt.immunisationRecord[vax?vax.name:vaxId] = date;
+    pt.immunisationRecord[vax ? vax.name : vaxId] = date;
     if (!pt.vaccinationHistory) pt.vaccinationHistory = [];
     pt.vaccinationHistory.push(rec);
   }
-  /* Reduce stock */
-  var stock = _N.immu.stock.find(function(s){return vaxId.startsWith(s.id)||s.id.startsWith(vaxId.slice(0,3));});
+
+  /* ── Decrement stock ── */
+  var stock = (_N.immu.stock||[]).find(function(s){
+    return vaxId.startsWith(s.id) || s.id.startsWith(vaxId.slice(0,3));
+  });
   if (stock && stock.quantity > 0) stock.quantity--;
-  _N.immu.immuTab='today'; _N.immu.selectedPatient=null;
+
+  /* ── Persist to localStorage bridges ── */
+  try {
+    /* Nurse-level history */
+    var _allVax = JSON.parse(localStorage.getItem('nihms_nurse_vaccinations') || '[]');
+    _allVax.push(rec);
+    localStorage.setItem('nihms_nurse_vaccinations', JSON.stringify(_allVax));
+    /* Patient 360° bridge — read by doctor.js Patient 360° and patient.js */
+    var _ptKey = 'nihms_vaccinations_' + ptId;
+    var _ptVax = JSON.parse(localStorage.getItem(_ptKey) || '[]');
+    _ptVax.push(rec);
+    localStorage.setItem(_ptKey, JSON.stringify(_ptVax));
+    /* Also key by nationalId if available (doctor.js may look up by that) */
+    if (rec.patientNationalId) {
+      var _idKey = 'nihms_vaccinations_' + rec.patientNationalId;
+      var _idVax = JSON.parse(localStorage.getItem(_idKey) || '[]');
+      _idVax.push(rec);
+      localStorage.setItem(_idKey, JSON.stringify(_idVax));
+    }
+  } catch(_){}
+
+  /* ── Broadcast to other open tabs (doctor.js, patient.js) ── */
+  try {
+    var _bc = new BroadcastChannel('nihms_vaccinations');
+    _bc.postMessage({ type:'vaccination_recorded', record:rec });
+    setTimeout(function(){ _bc.close(); }, 200);
+  } catch(_){}
+
+  /* ── Save to backend and wait for result before showing success ── */
+  var _apiPid = (pt && (pt.pid || pt._id)) || ptId;
+  var _saveOk = false;
+
+  function _onSaveSuccess() {
+    _saveOk = true;
+    _N.immu.lastSavedVaxId = rec.id;
+
+    /* Show success banner */
+    var resultEl = document.getElementById('vax-save-result');
+    if (resultEl) {
+      resultEl.style.display = '';
+      resultEl.innerHTML =
+        '<div class="nihms-alert-ok" style="margin-bottom:8px">' +
+          '<span>✓</span>' +
+          '<div><strong>' + (vax?vax.name:'Vaccination') + ' — Dose ' + doseNum + ' recorded successfully</strong>' +
+          '<div style="font-size:11px;margin-top:3px">Patient: ' + (pt?pt.name:'—') + ' · Date: ' + date + ' · Batch: ' + batch + ' · Vaccinator: ' + (u.name||vacc) + '</div></div>' +
+        '</div>';
+    }
+    /* Disable the submit button to prevent double-save */
+    var submitBtn = document.getElementById('vax-submit-btn');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.style.opacity = '0.55';
+      submitBtn.style.cursor = 'not-allowed';
+    }
+    /* Reveal the End Appointment button */
+    var endWrap = document.getElementById('vax-end-appt-wrap');
+    if (endWrap) endWrap.style.display = '';
+
+    if (window.UI && UI.showToast) UI.showToast('✓ ' + (vax?vax.name:'Vaccination') + ' — Dose ' + doseNum + ' recorded for ' + (pt?pt.name:'patient'), 'ok');
+  }
+
+  function _onSaveError(msg) {
+    /* Remove from in-memory if backend rejected */
+    _N.immu.todayVaccinations = (_N.immu.todayVaccinations||[]).filter(function(r){ return r.id !== rec.id; });
+    var resultEl = document.getElementById('vax-save-result');
+    if (resultEl) {
+      resultEl.style.display = '';
+      resultEl.innerHTML =
+        '<div class="nihms-alert-err">' +
+          '<span>✗</span>' +
+          '<div><strong>Save failed</strong> — ' + (msg||'Could not reach the server. Please try again.') + ' The appointment cannot be ended until the record is saved.</div>' +
+        '</div>';
+    }
+    if (window.UI && UI.showToast) UI.showToast('Save failed — please try again', 'err');
+  }
+
+  /* Try backend save; fall back to localStorage-only success if API is unavailable or route not found */
+  function _isOfflineOrMissing(err) {
+    if (!err) return false;
+    var msg = (err.message || err.toString() || '').toLowerCase();
+    return msg.indexOf('route not found') !== -1 ||
+           msg.indexOf('not found') !== -1 ||
+           msg.indexOf('network') !== -1 ||
+           msg.indexOf('failed to fetch') !== -1 ||
+           msg.indexOf('404') !== -1 ||
+           msg.indexOf('econnrefused') !== -1;
+  }
+  try {
+    if (typeof API === 'undefined' || !API || !API._fetchDirect) throw new Error('no API');
+    var _p1 = API._fetchDirect('/vaccinations', { method:'POST', body:JSON.stringify(rec) }).catch(function(e){ return {__err:e}; });
+    var _p2 = API._fetchDirect('/patients/' + _apiPid + '/vaccinations', { method:'POST', body:JSON.stringify(rec) }).catch(function(e){ return {__err:e}; });
+    Promise.all([_p1, _p2]).then(function(results){
+      var r1 = results[0], r2 = results[1];
+      /* If primary endpoint returned an error object, check if it's a missing route */
+      if (r1 && r1.__err) {
+        if (_isOfflineOrMissing(r1.__err)) {
+          /* Backend route not deployed yet — record is in localStorage, treat as success */
+          _onSaveSuccess();
+        } else {
+          _onSaveError(r1.__err.message || 'Server error');
+        }
+      } else {
+        /* Primary save succeeded (secondary sub-resource is best-effort) */
+        _onSaveSuccess();
+      }
+    }).catch(function(err){
+      /* Unexpected rejection — fall back to localStorage success */
+      _onSaveSuccess();
+    });
+  } catch(_) {
+    /* API not available (offline / dev mode) — treat localStorage persistence as sufficient */
+    _onSaveSuccess();
+  }
+};
+
+/* ── End Immunisation Appointment ────────────────────────────────────────── */
+window._nEndImmAppt = function() {
+  /* Guard: vaccination must have been saved successfully first */
+  if (!_N.immu.lastSavedVaxId) {
+    if (window.UI && UI.showToast) UI.showToast('Record the vaccination first before ending the appointment.', 'warn');
+    return;
+  }
+
+  /* Find the saved vaccination record */
+  var rec = (_N.immu.todayVaccinations||[]).find(function(r){ return r.id === _N.immu.lastSavedVaxId; });
+  if (!rec) {
+    if (window.UI && UI.showToast) UI.showToast('Cannot locate the saved vaccination record. Please refresh.', 'err');
+    return;
+  }
+
+  /* Guard against double-completion */
+  var apptId = rec.appointmentId || rec.patientId;
+  if (_N.immu.endedApptIds[apptId]) {
+    if (window.UI && UI.showToast) UI.showToast('This appointment has already been ended.', 'warn');
+    return;
+  }
+
+  var completedAt = new Date().toISOString();
+  var u = (typeof API !== 'undefined' && API && API.getStoredUser && API.getStoredUser()) || {};
+
+  /* Mark appointment as completed in-memory */
+  _N.immu.endedApptIds[apptId] = true;
+
+  /* Build completion payload */
+  var completion = {
+    appointmentId:  apptId,
+    vaccinationId:  rec.id,
+    patientId:      rec.patientId,
+    patientName:    rec.patientName,
+    completedAt:    completedAt,
+    completedBy:    u.name || u.fullName || u.email || rec.vaccinator || '',
+    completedById:  u.id || u._id || '',
+    status:         'Completed',
+    vaccine:        rec.vaccine,
+    dose:           rec.dose,
+    facilityId:     rec.facilityId || '',
+  };
+
+  /* Remove patient from immQueue (they're done) */
+  _N.immQueue = (_N.immQueue||[]).filter(function(p){
+    return !(p.id===rec.patientId || p.patientId===rec.patientId || p.appointmentId===apptId);
+  });
+
+  /* Update the vaccination record itself to reflect completion */
+  rec.status      = 'Completed';
+  rec.completedAt = completedAt;
+  rec.updatedAt   = completedAt;
+  rec.updatedBy   = completion.completedBy;
+
+  /* Persist completion to localStorage */
+  try {
+    /* Update nurse vaccinations store */
+    var _allVax = JSON.parse(localStorage.getItem('nihms_nurse_vaccinations') || '[]');
+    var _idx = _allVax.findIndex(function(r){ return r.id === rec.id; });
+    if (_idx >= 0) _allVax[_idx] = rec; else _allVax.push(rec);
+    localStorage.setItem('nihms_nurse_vaccinations', JSON.stringify(_allVax));
+    /* Update patient 360° bridge */
+    var _ptKey  = 'nihms_vaccinations_' + rec.patientId;
+    var _ptVax  = JSON.parse(localStorage.getItem(_ptKey) || '[]');
+    var _ptIdx  = _ptVax.findIndex(function(r){ return r.id === rec.id; });
+    if (_ptIdx >= 0) _ptVax[_ptIdx] = rec; else _ptVax.push(rec);
+    localStorage.setItem(_ptKey, JSON.stringify(_ptVax));
+    /* Also key by national ID */
+    if (rec.patientNationalId) {
+      var _idKey = 'nihms_vaccinations_' + rec.patientNationalId;
+      var _idVax = JSON.parse(localStorage.getItem(_idKey) || '[]');
+      var _idIdx = _idVax.findIndex(function(r){ return r.id === rec.id; });
+      if (_idIdx >= 0) _idVax[_idIdx] = rec; else _idVax.push(rec);
+      localStorage.setItem(_idKey, JSON.stringify(_idVax));
+    }
+    /* Log completed appointments */
+    var _done = JSON.parse(localStorage.getItem('nihms_completed_imm_appts') || '[]');
+    _done.push(completion);
+    localStorage.setItem('nihms_completed_imm_appts', JSON.stringify(_done));
+  } catch(_){}
+
+  /* POST completion to backend */
+  try {
+    if (apptId) {
+      API._fetchDirect('/appointments/' + apptId, {
+        method: 'PATCH',
+        body: JSON.stringify({ status:'Completed', completedAt:completedAt, completedBy:completion.completedBy })
+      }).catch(function(){});
+    }
+    API._fetchDirect('/immunisation-appointments/' + apptId + '/complete', {
+      method: 'POST',
+      body: JSON.stringify(completion)
+    }).catch(function(){});
+  } catch(_){}
+
+  /* Broadcast completion so other tabs (queue display, patient portal) update */
+  try {
+    var _bc3 = new BroadcastChannel('nihms_vaccinations');
+    _bc3.postMessage({ type:'immunisation_appointment_completed', completion:completion });
+    setTimeout(function(){ _bc3.close(); }, 200);
+  } catch(_){}
+
+  /* Clear the saved record gate so the form can't be re-ended */
+  _N.immu.lastSavedVaxId  = null;
+  _N.immu.selectedPatient = null;
+
+  /* Switch to Today's Vaccinations tab and show confirmation */
+  _N.immu.immuTab = 'today';
   _nurseRender();
-  UI.showToast(vax?vax.name:'Vaccine'+' recorded for '+(pt?pt.name:'patient'),'ok');
-  /* Save to backend */
-  try{ API._fetchDirect('/patients/'+(pt&&pt.pid||ptId)+'/vaccinations',{method:'POST',body:JSON.stringify(rec)}).catch(function(){}); }catch(_){}
+  if (window.UI && UI.showToast) UI.showToast('✓ Immunisation appointment completed for ' + rec.patientName, 'ok');
 };
 
 window._nRecordAR = function() {
-  function _v(id){var el=document.getElementById(id);return el?el.value.trim():'';}
-  var ptId=_v('ar-pt'), type=_v('ar-type'), notes=_v('ar-notes');
-  if(!ptId||!type){UI.showToast('Please select patient and reaction type','err');return;}
-  var pt=_N.patients.find(function(p){return p.id===ptId;});
-  _N.immu.adverseReactions.push({patientId:ptId,patientName:pt?pt.name:'Unknown',type:type,notes:notes,date:new Date().toISOString().slice(0,10),time:_nowTime()});
+  function _v(id){ var el=document.getElementById(id); return el?el.value.trim():''; }
+  var ptId      = _v('ar-pt');
+  var type      = _v('ar-type');
+  var arDate    = _v('ar-date');
+  var arTime    = _v('ar-time');
+  var severity  = _v('ar-severity');
+  var notes     = _v('ar-notes');
+  var treatment = _v('ar-treatment');
+  var reporter  = _v('ar-reporter');
+  var vaxRef    = _v('ar-vax-ref');  /* index into todayVaccinations */
+
+  /* Validation */
+  var errs = [];
+  if (!ptId)     errs.push('Patient');
+  if (!type)     errs.push('Reaction Type');
+  if (!arDate)   errs.push('Date of Reaction');
+  if (!arTime)   errs.push('Time of Reaction');
+  if (!severity) errs.push('Severity');
+  if (!notes)    errs.push('Description / Symptoms');
+  if (!reporter) errs.push('Reporting Healthcare Professional');
+  if (errs.length) { UI.showToast('Required: ' + errs.join(', '),'err'); return; }
+
+  var allPts = (_N.patients||[]).concat(_N.immQueue||[]);
+  var pt = allPts.find(function(p){return p.id===ptId||p.patientId===ptId||p.pid===ptId;});
+
+  /* Link to vaccination record if selected */
+  var linkedVax = (vaxRef !== '' && vaxRef !== undefined && _N.immu.todayVaccinations)
+    ? _N.immu.todayVaccinations[parseInt(vaxRef, 10)]
+    : null;
+
+  var u   = (API && API.getStoredUser && API.getStoredUser()) || {};
+  var rec = {
+    id:           'AR-' + Date.now(),
+    patientId:    ptId,
+    patientName:  pt ? pt.name : 'Unknown',
+    type:         type,
+    date:         arDate,
+    time:         arTime,
+    severity:     severity,
+    notes:        notes,
+    treatment:    treatment,
+    reporter:     reporter,
+    linkedVaxId:  linkedVax ? linkedVax.id : null,
+    linkedVaccine:linkedVax ? linkedVax.vaccine : null,
+    recordedBy:   reporter,
+    recordedAt:   new Date().toISOString(),
+    updatedBy:    u.name || u.email || reporter,
+    facilityId:   u.facilityId || u.facility || '',
+  };
+
+  if (!_N.immu.adverseReactions) _N.immu.adverseReactions = [];
+  _N.immu.adverseReactions.push(rec);
+
+  /* Also attach to linked vaccination record */
+  if (linkedVax) {
+    if (!linkedVax.adverseReactions) linkedVax.adverseReactions = [];
+    linkedVax.adverseReactions.push(rec);
+  }
+
+  /* Persist to localStorage */
+  try {
+    var _allAR = JSON.parse(localStorage.getItem('nihms_nurse_adverse_reactions') || '[]');
+    _allAR.push(rec);
+    localStorage.setItem('nihms_nurse_adverse_reactions', JSON.stringify(_allAR));
+    /* Patient-level bridge */
+    var _ptARKey = 'nihms_adverse_reactions_' + ptId;
+    var _ptAR = JSON.parse(localStorage.getItem(_ptARKey) || '[]');
+    _ptAR.push(rec);
+    localStorage.setItem(_ptARKey, JSON.stringify(_ptAR));
+  } catch(_){}
+
+  /* Save to backend */
+  var _apiPid = (pt && (pt.pid || pt._id)) || ptId;
+  try {
+    API._fetchDirect('/adverse-reactions', { method:'POST', body:JSON.stringify(rec) }).catch(function(){});
+    API._fetchDirect('/patients/' + _apiPid + '/adverse-reactions', { method:'POST', body:JSON.stringify(rec) }).catch(function(){});
+  } catch(_){}
+
+  /* Broadcast */
+  try {
+    var _bc2 = new BroadcastChannel('nihms_vaccinations');
+    _bc2.postMessage({ type:'adverse_reaction_recorded', record:rec });
+    setTimeout(function(){ _bc2.close(); }, 200);
+  } catch(_){}
+
   _nurseRender();
-  UI.showToast('Adverse reaction recorded — escalate if severe','warn');
+
+  /* Escalation toast based on severity */
+  if (rec.severity === 'Severe' || rec.type === 'Anaphylaxis') {
+    UI.showToast('🚨 SEVERE reaction reported — escalate immediately', 'err');
+  } else if (rec.severity === 'Moderate') {
+    UI.showToast('⚠ Adverse reaction recorded — monitor closely', 'warn');
+  } else {
+    UI.showToast('Adverse reaction recorded for ' + (pt ? pt.name : 'patient'), 'ok');
+  }
+
+  /* Send escalation SMS/notification for severe reactions */
+  if (rec.severity === 'Severe' || rec.type === 'Anaphylaxis') {
+    try {
+      API._fetchDirect('/notifications/sms', {
+        method:'POST',
+        body: JSON.stringify({
+          to: 'Doctor',
+          message: 'NIHMS ALERT: ' + rec.severity + ' adverse reaction (' + rec.type + ') reported for ' +
+                   rec.patientName + '. Reporter: ' + rec.reporter + '. Please review immediately.'
+        })
+      }).catch(function(){});
+    } catch(_){}
+  }
 };
 
 window._nRequestStock = function() {

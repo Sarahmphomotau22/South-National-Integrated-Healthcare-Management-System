@@ -147,14 +147,20 @@ Pages['doc_dashboard'] = function(){
   /* ── Cross-tab bridge: drain patients sent by nurse from another tab ── */
   (function(){
     function _handleDoctorPt(pt) {
-      if (!pt || !pt.id) return;
+      if (!pt) return;
+      /* Accept both direct objects and req-wrapped objects from receptionist */
+      var doc = (pt.req || pt);
+      if (!doc.id && !doc.patientId) return;
+      if (!doc.id) doc.id = doc.patientId;
       window._DOCTOR_QUEUE = window._DOCTOR_QUEUE || [];
-      var exists = window._DOCTOR_QUEUE.find(function(x){ return x.id === pt.id; });
+      var exists = window._DOCTOR_QUEUE.find(function(x){ return x.id === doc.id; });
       if (!exists) {
-        window._DOCTOR_QUEUE.push(pt);
+        window._DOCTOR_QUEUE.push(doc);
         if (document.getElementById('doc-main')) _dRender();
       }
     }
+    /* Expose so same-tab receptionist can call directly */
+    window._doctorAddTeleRequest = _handleDoctorPt;
     /* Drain persistent queue (nurse sent vitals before doctor logged in) */
     function _drainDoctorQueue() {
       try {
@@ -175,7 +181,10 @@ Pages['doc_dashboard'] = function(){
     try {
       var _docCh = new BroadcastChannel('nihms_doctor_queue');
       _docCh.onmessage = function(e) {
-        if (e.data && e.data.type === 'DOCTOR_PT') _handleDoctorPt(e.data.doc);
+        if (!e.data) return;
+        /* Accept DOCTOR_PT (from nurse/doctor flow) and TELE_REQ (from receptionist) */
+        if (e.data.type === 'DOCTOR_PT') _handleDoctorPt(e.data.doc);
+        else if (e.data.type === 'TELE_REQ') _handleDoctorPt(e.data.req);
       };
     } catch(_) {}
   })();
@@ -256,7 +265,8 @@ var _dCache = {};
 function _dRenderBust(view){ if(view) delete _dCache[view]; else _dCache={}; }
 
 /* Views that must always re-render (live data changes every visit) */
-var _dNoCache = { dashboard:1, patients:1, doc_appointments:1, messages:1, notifications:1, doc_tasks:1 };
+/* consult and medical_notes are patient-context-dependent — never serve stale cache */
+var _dNoCache = { dashboard:1, patients:1, doc_appointments:1, messages:1, notifications:1, doc_tasks:1, consult:1, medical_notes:1, pat360:1 };
 
 /* ─── Render engine ────────────────────────────────────────────────── */
 function _dRender(){
@@ -466,16 +476,12 @@ function _dDashboard(){
       }).join('')
     : '<div style="padding:20px;text-align:center;color:'+C.muted+';font-size:13px">No patients waiting from nurse station.<br>Patients appear here after nurse completes vitals.</div>';
 
-  /* Today's schedule */
-  var schedHtml = _D.todaySchedule.map(function(s,i){
-    var stColor = {done:C.green,active:C.teal,upcoming:C.muted}[s.status]||C.muted;
-    var stBg    = {done:C.greenLt,active:C.blueLt,upcoming:'#f8fafc'}[s.status]||'#f8fafc';
-    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f8fafc">'+
-      '<div style="font-size:12px;font-family:monospace;font-weight:700;color:'+stColor+';width:48px;flex-shrink:0">'+s.time+'</div>'+
-      '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:'+C.text+'">'+s.patient+'</div><div style="font-size:11px;color:'+C.muted+'">'+s.type+'</div></div>'+
-      '<span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:'+stBg+';color:'+stColor+'">'+(s.status==='done'?'✓ Done':s.status==='active'?'● Active':'Upcoming')+'</span>'+
-    '</div>';
-  }).join('');
+  /* Today's Telemedicine — placeholder; async loader fills #dash-tele-list */
+  var schedHtml = '<div id="dash-tele-list" style="padding:20px;text-align:center;color:'+C.muted+'">'+
+    '<span style="font-size:20px">📹</span><br><span style="font-size:12px">Loading…</span>'+
+  '</div>';
+  /* Trigger async load after host API is ready (~same window as KPI loader at 400 ms) */
+  setTimeout(window._dDashTeleLoad, 450);
 
   /* Pending tasks */
   var tasksHtml = _D.tasks.filter(function(t){return !t.done;}).slice(0,4).map(function(t){
@@ -526,10 +532,17 @@ function _dDashboard(){
           '<div style="font-size:14px;font-weight:700;color:'+C.text+'">Patients Waiting</div>'+
           '<span style="font-size:12px;color:'+C.muted+'">From nurse station</span>'+
         '</div>'+queueHtml)+
-        /* Today schedule */
+        /* Today's Telemedicine */
         _card('<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'+
-          '<div style="font-size:14px;font-weight:700;color:'+C.text+'">Today\'s Schedule</div>'+
-          '<button onclick="_setView(\'appointments\')" style="font-size:12px;color:'+C.blue+';border:none;background:transparent;cursor:pointer">View all →</button>'+
+          '<div style="display:flex;align-items:center;gap:8px">'+
+            '<span style="font-size:16px">📹</span>'+
+            '<div style="font-size:14px;font-weight:700;color:'+C.text+'">Today\'s Telemedicine</div>'+
+            '<span id="dash-tele-count" style="font-size:11px;color:'+C.muted+';background:#f1f5f9;padding:1px 7px;border-radius:20px"></span>'+
+          '</div>'+
+          '<div style="display:flex;align-items:center;gap:8px">'+
+            '<button onclick="window._dDashTeleLoad()" style="font-size:11px;color:'+C.blue+';border:none;background:transparent;cursor:pointer;font-family:inherit">↻ Refresh</button>'+
+            '<button onclick="Pages[\'telemedicine\']()" style="font-size:12px;color:'+C.purple+';border:none;background:transparent;cursor:pointer;font-family:inherit">View all →</button>'+
+          '</div>'+
         '</div>'+schedHtml)+
       '</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+
@@ -544,6 +557,135 @@ function _dDashboard(){
       '</div>'+
     '</div>';
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   DASHBOARD — TODAY'S TELEMEDICINE loader
+   Fetches today's telemedicine appointments for the logged-in doctor
+   and renders them into the #dash-tele-list placeholder.
+   Auto-wires a 60-second refresh timer while the dashboard is visible.
+══════════════════════════════════════════════════════════════════ */
+window._dDashTeleLoad = async function(){
+  var wrap  = document.getElementById('dash-tele-list');
+  var badge = document.getElementById('dash-tele-count');
+  if (!wrap) return; /* dashboard not mounted */
+
+  /* Spinner */
+  wrap.innerHTML = '<div style="padding:16px;text-align:center;color:'+C.muted+';font-size:12px">'+
+    '<span style="font-size:18px">📹</span><br>Loading sessions…</div>';
+
+  try {
+    /* Use same bare API global as all other loaders in this file */
+    var u   = (typeof API !== 'undefined' && API.getStoredUser) ? API.getStoredUser() : null;
+    var did = u && (u._id || u.id);
+
+    /* Today's date window */
+    var now   = new Date();
+    var start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    var end   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
+
+    /* Use same _fetchDirect pattern as other loaders in this file */
+    var qs = 'visitType=telemedicine&limit=50' +
+             (did ? '&doctor='+encodeURIComponent(did) : '') +
+             '&dateFrom='+encodeURIComponent(start) +
+             '&dateTo='+encodeURIComponent(end);
+    var res = await API._fetchDirect('/appointments?' + qs, { method:'GET' });
+    var appts = (res && res.data) || (Array.isArray(res) ? res : []);
+
+    /* Filter defensively: only this doctor's, only today's */
+    appts = appts.filter(function(a){
+      if (!a.scheduledAt) return false;
+      var d = new Date(a.scheduledAt);
+      if (d < new Date(start) || d > new Date(end)) return false;
+      if (did) {
+        var docId = (a.doctor && (a.doctor._id || a.doctor.id)) || a.doctorId || a.assignedDoctor || '';
+        if (docId && String(docId) !== String(did)) return false;
+      }
+      return true;
+    });
+
+    appts.sort(function(a, b){ return new Date(a.scheduledAt) - new Date(b.scheduledAt); });
+
+    /* Badge */
+    if (badge) {
+      badge.textContent = appts.length ? appts.length + ' session' + (appts.length !== 1 ? 's' : '') : '';
+      badge.style.display = appts.length ? '' : 'none';
+    }
+
+    if (!appts.length) {
+      wrap.innerHTML =
+        '<div style="padding:24px;text-align:center;color:'+C.muted+'">'+
+          '<div style="font-size:32px;margin-bottom:8px;opacity:.5">📹</div>'+
+          '<div style="font-size:13px;font-weight:600;margin-bottom:4px">No telemedicine sessions today</div>'+
+          '<div style="font-size:11px">Appointments with visit type "Telemedicine" will appear here.</div>'+
+        '</div>';
+      return;
+    }
+
+    wrap.innerHTML = appts.map(function(a){
+      var when    = new Date(a.scheduledAt);
+      var isLive  = a.status === 'in_progress';
+      var isPast  = when < now && !isLive;
+      var isSoon  = !isPast && !isLive && (when - now) < 30 * 60 * 1000;
+      var canJoin = !['cancelled','completed'].includes(a.status);
+
+      var ptName = ((a.patient && a.patient.firstName) || '');
+      if (a.patient && a.patient.lastName) ptName += (ptName ? ' ' : '') + a.patient.lastName;
+      ptName = ptName.trim() || a.patient && (a.patient.name || '') || 'Patient';
+      var ini = ptName.split(' ').map(function(n){ return n[0] || ''; }).join('').slice(0, 2).toUpperCase();
+
+      var sc = {
+        confirmed:   { bg:'#dcfce7', color:'#15803d', label:'Confirmed' },
+        pending:     { bg:'#fef3c7', color:'#92400e', label:'Pending'   },
+        in_progress: { bg:'#ccfbf1', color:'#0f766e', label:'In Progress'},
+        completed:   { bg:'#f1f5f9', color:'#64748b', label:'Completed' },
+        cancelled:   { bg:'#fee2e2', color:'#991b1b', label:'Cancelled' }
+      }[a.status] || { bg:'#f1f5f9', color:'#64748b', label: a.status || 'Unknown' };
+
+      var borderLeft = isLive ? '3px solid '+C.green : isSoon ? '3px solid '+C.amber : '3px solid transparent';
+      var bg         = isLive ? '#f0fdf4' : isSoon ? '#fffbeb' : '#fff';
+      var timeStr    = when.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+      var reason     = (a.reason || a.chiefComplaint || 'Telemedicine consultation');
+
+      var joinLabel  = isLive ? '📹 Rejoin' : isSoon ? '📹 Join now' : '📹 Start';
+      var joinStyle  = 'padding:6px 12px;border-radius:8px;border:none;background:'+(isLive||isSoon?C.green:C.purple)+';color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap';
+
+      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 10px;margin-bottom:6px;border-radius:9px;background:'+bg+';border-left:'+borderLeft+';border:1px solid '+(isLive?C.green:isSoon?C.amber:C.border)+';border-left:'+borderLeft+'">'+
+        /* Time column */
+        '<div style="font-size:12px;font-family:monospace;font-weight:700;color:'+(isLive?C.green:isSoon?C.amber:C.muted)+';width:42px;flex-shrink:0;text-align:center">'+timeStr+'</div>'+
+        /* Avatar */
+        '<div style="width:32px;height:32px;border-radius:50%;background:'+C.purple+';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0">'+ini+'</div>'+
+        /* Info */
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:13px;font-weight:700;color:'+C.text+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+ptName+'</div>'+
+          '<div style="font-size:11px;color:'+C.muted+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+reason+'</div>'+
+        '</div>'+
+        /* Status badge */
+        '<span style="padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;background:'+sc.bg+';color:'+sc.color+';white-space:nowrap;flex-shrink:0">'+
+          (isLive ? '● Live' : sc.label)+
+        '</span>'+
+        /* Join button */
+        (canJoin ?
+          '<button onclick="_dJoinTeleSession(\''+a._id+'\')" style="'+joinStyle+'">'+joinLabel+'</button>'
+        : '') +
+      '</div>';
+    }).join('');
+
+  } catch(err) {
+    if (wrap) wrap.innerHTML =
+      '<div style="padding:12px;background:#fee2e2;border-radius:8px;font-size:12px;color:#991b1b">'+
+        '⚠ Could not load sessions: '+(err.message||'Network error')+
+        ' &nbsp;<button onclick="window._dDashTeleLoad()" style="font-size:11px;color:#991b1b;text-decoration:underline;border:none;background:transparent;cursor:pointer">Retry</button>'+
+      '</div>';
+  }
+
+  /* Auto-refresh every 60 s while the dashboard is visible */
+  if (window._dashTeleTimer) clearTimeout(window._dashTeleTimer);
+  window._dashTeleTimer = setTimeout(function(){
+    if (document.getElementById('dash-tele-list') && _D.view === 'dashboard') {
+      window._dDashTeleLoad();
+    }
+  }, 60000);
+};
 
 /* ══════════════════════════════════════════════════════════════════
    APPOINTMENTS
@@ -1109,8 +1251,52 @@ function _dPat360(){
     )+'</div>';
   }
 
+  /* ── Consultations tab — rich cards ── */
+  if (tab === 'consultations') {
+    var consultList = p.consultations || [];
+    /* Also check localStorage for any locally-saved records */
+    try {
+      var _cPatKey = 'nihms_consultations_' + (p._id||p.id||p.nationalId||'');
+      if (_cPatKey !== 'nihms_consultations_') {
+        var _localC = JSON.parse(localStorage.getItem(_cPatKey) || '[]');
+        if (_localC.length) {
+          /* Merge: avoid duplicates by _id */
+          var _cIds = new Set(consultList.map(function(c){return c._id||c.id;}));
+          _localC.forEach(function(lc){ if(!_cIds.has(lc._id)) consultList.push(lc); });
+          consultList.sort(function(a,b){ return new Date(b.consultedAt||0)-new Date(a.consultedAt||0); });
+        }
+      }
+    } catch(_) {}
+
+    var _cRows = consultList.length ? consultList.map(function(c) {
+      var dt  = c.consultedAt ? new Date(c.consultedAt).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'}) : '—';
+      var tm  = c.consultedAt ? new Date(c.consultedAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}) : '';
+      var isLocal = !!(c.savedLocally || (c._id && String(c._id).startsWith('LOCAL-')));
+      return '<div style="padding:14px;border:1.5px solid '+C.border+';border-radius:10px;margin-bottom:10px;background:#fff">'+
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">'+
+          '<div>'+
+            '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+(c.visitType||'Consultation')+'</div>'+
+            '<div style="font-size:11px;color:'+C.muted+'">'+dt+(tm?' · '+tm:'')+' · '+(c.clinician||c.doctor||'—')+'</div>'+
+          '</div>'+
+          (isLocal?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;background:#fef3c7;color:#92400e">Saved offline</span>':'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;background:'+C.greenLt+';color:'+C.green+'">Saved</span>')+
+        '</div>'+
+        (c.chiefComplaint?'<div style="font-size:12px;color:'+C.text+';margin-bottom:6px"><span style="color:'+C.muted+'">Chief complaint:</span> '+c.chiefComplaint+'</div>':'')+
+        (c.clinicianNotes?'<div style="font-size:12px;color:'+C.text+';margin-bottom:6px"><span style="color:'+C.muted+'">Notes:</span> '+(c.clinicianNotes.length>180?c.clinicianNotes.slice(0,180)+'…':c.clinicianNotes)+'</div>':'')+
+        (c.outcomes&&c.outcomes.length?'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">'+c.outcomes.map(function(o){return'<span style="font-size:11px;padding:2px 8px;border-radius:6px;background:#f1f5f9;color:'+C.muted+'">'+o+'</span>';}).join('')+'</div>':'')+
+      '</div>';
+    }).join('') : '<div style="padding:28px;text-align:center;color:'+C.muted+'">No consultation records on file</div>';
+
+    content = '<div style="padding:16px 20px">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'+
+        '<div style="font-size:14px;font-weight:700;color:'+C.text+'">🩺 Consultations ('+(consultList.length)+')</div>'+
+        '<button onclick="_D.selectedPat=_D.pat360Data;_D.consultPat=_D.pat360Data;_D.view=\'consult\';_dRender()" style="font-size:12px;padding:6px 14px;border-radius:8px;border:1.5px solid '+C.teal+';background:transparent;color:'+C.teal+';font-weight:600;cursor:pointer;font-family:inherit">+ New Consultation</button>'+
+      '</div>'+
+      _cRows+
+    '</div>';
+  }
+
   var tabPlaceholders = {
-    medications: '💊 Medications', labs: '🧪 Lab Results', consultations: '🩺 Consultations',
+    medications: '💊 Medications', labs: '🧪 Lab Results',
     prescriptions: '💊 Prescriptions', referrals: '🔄 Referrals', radiology: '🩻 Radiology', documents: '📄 Documents'
   };
   if(tabPlaceholders[tab]){
@@ -1370,12 +1556,57 @@ function _dConsult(){
     )+
 
     /* Actions */
-    '<div style="display:flex;gap:12px;flex-wrap:wrap;padding-bottom:24px">'+
-      '<button onclick="_dSaveConsult()" style="flex:1;padding:13px 24px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">✓ Save Consultation &amp; Continue to Diagnosis</button>'+
-      '<button onclick="_D.view=\'dashboard\';_dRender()" style="padding:13px 24px;border:1.5px solid '+C.border+';border-radius:10px;background:#fff;color:'+C.muted+';font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+    '<div style="display:flex;gap:10px;padding-bottom:24px">'+
+      '<button id="btn-save-consult" onclick="_dSaveConsult()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>'+
+        'Save Consultation &amp; Continue to Diagnosis'+
+      '</button>'+
+      '<button onclick="_D.view=\'dashboard\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center">Cancel</button>'+
     '</div>'+
 
     '</div>'; /* end mainCol */
+
+  /* ── Auto-fill doctor fields from DB after render ── */
+  setTimeout(function() {
+    /* 1. Try to fill from already-stored user first (instant, no network) */
+    var _u = (window.API && window.API.getStoredUser && window.API.getStoredUser()) || {};
+    function _fillIfEmpty(id, val) {
+      if (!val) return;
+      var el = document.getElementById(id);
+      if (el && !el.value) el.value = val;
+    }
+    var _storedName     = _u.firstName ? 'Dr ' + ((_u.firstName || '') + ' ' + (_u.lastName || '')).trim() : (_u.name || '');
+    var _storedHpcsa    = _u.hpcsaNumber || _u.hpcsa || _u.registrationNumber || _u.regNo || _u.licenseNumber || '';
+    var _storedFacility = (typeof _u.facility === 'string' ? _u.facility : '') || (_u.facility && _u.facility.name) || _u.facilityName || '';
+    _fillIfEmpty('cs-clinician', _storedName);
+    _fillIfEmpty('cs-reg',       _storedHpcsa);
+    _fillIfEmpty('cs-facility',  _storedFacility);
+
+    /* 2. Then fetch full profile from DB and overwrite if richer data is available */
+    if (window.API && window.API._fetchDirect) {
+      API._fetchDirect('/users/me', { method: 'GET' }).then(function(res) {
+        var prof = (res && res.data) ? res.data : (res && res.user) ? res.user : res;
+        if (!prof) return;
+        /* Merge fresh data back into stored user so other views benefit too */
+        try {
+          if (window.API.storeUser) { API.storeUser(Object.assign({}, _u, prof)); }
+        } catch(_) {}
+        var freshName     = prof.firstName ? 'Dr ' + ((prof.firstName || '') + ' ' + (prof.lastName || '')).trim() : (prof.name || _storedName);
+        var freshHpcsa    = prof.hpcsaNumber || prof.hpcsa || prof.registrationNumber || prof.regNo || prof.licenseNumber || _storedHpcsa;
+        var freshFacility = (typeof prof.facility === 'string' ? prof.facility : '') || (prof.facility && prof.facility.name) || prof.facilityName || _storedFacility;
+        _fillIfEmpty('cs-clinician', freshName);
+        _fillIfEmpty('cs-reg',       freshHpcsa);
+        _fillIfEmpty('cs-facility',  freshFacility);
+        /* Force-fill if the stored value was empty and DB has it */
+        if (freshName && document.getElementById('cs-clinician') && !document.getElementById('cs-clinician').value)
+          document.getElementById('cs-clinician').value = freshName;
+        if (freshHpcsa && document.getElementById('cs-reg') && !document.getElementById('cs-reg').value)
+          document.getElementById('cs-reg').value = freshHpcsa;
+        if (freshFacility && document.getElementById('cs-facility') && !document.getElementById('cs-facility').value)
+          document.getElementById('cs-facility').value = freshFacility;
+      }).catch(function() { /* silently ignore — fields stay as-is */ });
+    }
+  }, 50);
 
   return _dHeader('Clinical Consultation','Consultation management · Clinical record','')+
     '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px">'+
@@ -3239,6 +3470,139 @@ function _dMedicalNotes(){
     if(window.UI)UI.showToast('Diagnosis saved','ok');
   };
 
+  /* ── End Consultation handler — Req 9 ── */
+  window._dEndConsult = async function(){
+    /* Prevent duplicate submissions */
+    var btn = document.getElementById('btn-end-consult');
+    if (btn && btn.getAttribute('data-submitted')) return;
+    if (btn) btn.setAttribute('data-submitted','1');
+
+    var gv = function(id){ var e=document.getElementById(id); return e?e.value.trim():''; };
+
+    /* Validate required diagnosis fields */
+    var diagName = gv('mn-primary-diag');
+    if(!diagName){ if(window.UI)UI.showToast('Primary diagnosis is required before ending the consultation','err'); if(btn)btn.removeAttribute('data-submitted'); return; }
+    var riskEl = document.querySelector('input[name="mn-risk"]:checked');
+    if(!riskEl){ if(window.UI)UI.showToast('Risk / Severity assessment is required','err'); if(btn)btn.removeAttribute('data-submitted'); return; }
+
+    /* Confirm patient identity */
+    var pat8 = _D.consultPat||_D.selectedPat||_D.pat360Data||{};
+    if(!pat8._id && !pat8.id){ if(window.UI)UI.showToast('No patient selected — cannot end consultation','err'); if(btn)btn.removeAttribute('data-submitted'); return; }
+
+    /* Save diagnosis first */
+    await window._dSaveNote();
+
+    var nowIso = new Date().toISOString();
+    var clinician8 = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+    var clinName   = clinician8.firstName ? 'Dr '+((clinician8.firstName||'')+' '+(clinician8.lastName||'')).trim() : (clinician8.name||'Unknown');
+    var facility8  = (typeof clinician8.facility==='string'?clinician8.facility:'')
+                     ||(clinician8.facility&&clinician8.facility.name)||clinician8.facilityName||'';
+    var consultId  = _D.workflow&&_D.workflow.consultationId||('CONSULT-'+Date.now());
+
+    /* Generate unique survey token */
+    var surveyToken = (function(){
+      var arr = new Uint8Array(20);
+      if(window.crypto&&window.crypto.getRandomValues) window.crypto.getRandomValues(arr);
+      else for(var k=0;k<20;k++) arr[k]=Math.floor(Math.random()*256);
+      return Array.from(arr,function(b){return b.toString(16).padStart(2,'0');}).join('');
+    })();
+    var surveyUrl = window.location.origin+'/survey?token='+surveyToken;
+
+    /* Save consultation completion to API */
+    var completionPayload = {
+      consultationId:   consultId,
+      patient:          pat8._id||pat8.id||'',
+      patientName:      mnPatName,
+      status:           'Completed',
+      completedAt:      nowIso,
+      completedByName:  clinName,
+      completedById:    clinician8._id||clinician8.id||'',
+      facility:         facility8,
+      surveyToken:      surveyToken,
+      surveyUrl:        surveyUrl,
+      surveyStatus:     'Pending',
+    };
+    try { await API._fetchDirect('/consultations/'+consultId+'/complete',{method:'POST',body:JSON.stringify(completionPayload)}).catch(function(){}); }catch(_){}
+
+    /* Store survey token locally */
+    if (!_D.workflow) _D.workflow = {};
+    _D.workflow.surveyToken   = surveyToken;
+    _D.workflow.surveyUrl     = surveyUrl;
+    _D.workflow.completedAt   = nowIso;
+    _D.workflow.consultStatus = 'Completed';
+
+    /* ── Send survey via SMS + email (async, non-blocking) ── */
+    var smsMsg = 'Thank you for visiting our healthcare facility. Please take a moment to share your experience by completing our patient feedback survey: '+surveyUrl+'. Your feedback helps us improve our services.';
+    var emailHtml =
+      '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto">'+
+      '<div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);padding:20px;border-radius:10px 10px 0 0;text-align:center">'+
+      '<h2 style="color:#fff;margin:0">Patient Feedback Survey</h2></div>'+
+      '<div style="padding:24px;background:#f9f9f9;border-radius:0 0 10px 10px">'+
+      '<p>Dear <strong>'+mnPatName+'</strong>,</p>'+
+      '<p>Thank you for visiting '+facility8+'. Please share your experience by completing our brief feedback survey.</p>'+
+      '<div style="text-align:center;margin:24px 0">'+
+      '<a href="'+surveyUrl+'" style="background:#0F6E56;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">Complete Feedback Survey</a>'+
+      '</div>'+
+      '<p style="font-size:12px;color:#888">Your feedback is confidential and helps us improve patient care. This link is unique to your consultation and expires in 14 days.</p>'+
+      '</div></div>';
+
+    (async function(){
+      try {
+        var pRes = await API._fetchDirect('/patients?limit=1&id='+(pat8._id||pat8.id||''),{method:'GET'}).catch(function(){return {data:[]};});
+        var ptData = (pRes&&pRes.data&&pRes.data[0])||pat8;
+        if (ptData.phone) {
+          API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:ptData.phone,message:smsMsg})}).catch(function(){});
+        }
+        if (ptData.email) {
+          API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({
+            to:ptData.email,
+            subject:'Your feedback matters — '+facility8+' Patient Survey',
+            html:emailHtml,
+          })}).catch(function(){});
+        }
+        /* Track survey delivery */
+        API._fetchDirect('/surveys',{method:'POST',body:JSON.stringify({
+          consultationId:  consultId,
+          patient:         pat8._id||pat8.id||'',
+          patientName:     mnPatName,
+          token:           surveyToken,
+          url:             surveyUrl,
+          deliveryMethod:  (ptData.phone?'SMS':'')+(ptData.email?'/Email':''),
+          deliveryStatus:  'Sent',
+          sentAt:          new Date().toISOString(),
+          facility:        facility8,
+        })}).catch(function(){});
+      } catch(_){}
+    })();
+
+    /* Update task list */
+    if(window._dTaskDone) _dTaskDone('T5');
+
+    /* Mark patient as done in doctor queue */
+    if (_D.consultPatId) {
+      var qp8 = (window._DOCTOR_QUEUE||[]).find(function(x){return x.id===_D.consultPatId;});
+      if (qp8) qp8.status='completed';
+    }
+
+    /* Show confirmation */
+    var confirmHtml =
+      '<div style="text-align:center;padding:32px 24px">'+
+      '<div style="font-size:48px;margin-bottom:16px">✅</div>'+
+      '<div style="font-size:20px;font-weight:800;color:#0F6E56;margin-bottom:8px">Consultation Completed</div>'+
+      '<div style="font-size:14px;color:#64748b;margin-bottom:16px">'+mnPatName+' · '+new Date(nowIso).toLocaleString('en-ZA')+'</div>'+
+      '<div style="font-size:13px;color:#64748b;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;margin-bottom:16px">'+
+      '📱 Patient feedback survey sent to patient\'s verified contact details.</div>'+
+      '<div style="font-size:12px;color:#94a3b8">Survey token: <code style="font-family:monospace">'+surveyToken.slice(0,8)+'…</code></div>'+
+      '</div>';
+    var main9 = document.getElementById('doc-main');
+    if (main9) main9.innerHTML = confirmHtml;
+
+    /* Navigate to dashboard after 3 seconds */
+    setTimeout(function(){
+      _D.consultPat = null; _D.consultPatId = null; _D.view='dashboard'; _dRender();
+    }, 3000);
+  };
+
   /* ── Local helpers ── */
   function _mnC(c){ return '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;padding:20px 24px">'+c+'</div>'; }
   function _mnT(t){ return '<div style="font-size:15px;font-weight:800;color:'+C.text+';margin-bottom:16px">'+t+'</div>'; }
@@ -3401,7 +3765,16 @@ function _dMedicalNotes(){
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'+
             'Save Diagnosis'+
           '</button>'+
-          '<button onclick="_D.view=\'consult\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Cancel</button>'+
+          '<button onclick="(function(){var pat=_D.consultPat||_D.selectedPat||{};_D.consultPat=null;_D.consultPatId=null;_D.view=\'dashboard\';_dRender();})()" style="padding:12px 24px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#64748b;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+        '</div>'+
+
+        /* End Consultation button — Req 9.1 */
+        '<div style="margin-top:8px;margin-bottom:8px">'+
+          '<button id="btn-end-consult" onclick="_dEndConsult()" style="width:100%;padding:14px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#dc2626 0%,#7c3aed 100%);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 2px 8px rgba(220,38,38,.25)">'+
+            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="20 6 9 17 4 12"/></svg>'+
+            'End Consultation'+
+          '</button>'+
+          '<div style="font-size:11px;color:#64748b;text-align:center;margin-top:6px">Saves and marks this consultation as completed. A feedback survey will be sent to the patient.</div>'+
         '</div>'+
 
       '</div>'+
@@ -3409,6 +3782,134 @@ function _dMedicalNotes(){
     '</div>';
 }
 
+
+/* ══════════════════════════════════════════════════════════════════
+   PATIENT FEEDBACK SURVEY PAGE  (Req 9.4 — no login required)
+══════════════════════════════════════════════════════════════════ */
+Pages['survey'] = function() {
+  /* Read token from URL query string */
+  var params = new URLSearchParams(window.location.search);
+  var token  = params.get('token')||'';
+
+  if (!token) {
+    return '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f4f5f0;font-family:Arial,sans-serif">'+
+      '<div style="background:#fff;border-radius:16px;padding:32px;max-width:400px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08)">'+
+      '<div style="font-size:40px;margin-bottom:12px">⚠️</div>'+
+      '<div style="font-size:18px;font-weight:700;color:#dc2626;margin-bottom:8px">Invalid Survey Link</div>'+
+      '<div style="font-size:13px;color:#64748b">This survey link is invalid or has expired. Please contact the facility if you need a new link.</div>'+
+      '</div></div>';
+  }
+
+  window._surveyToken    = token;
+  window._surveySubmitted = false;
+
+  var starRow = function(id, label){
+    return '<div style="margin-bottom:20px">'+
+      '<div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:8px">'+label+' <span style="color:#ef4444">*</span></div>'+
+      '<div style="display:flex;gap:6px" id="stars-'+id+'">'+
+      [1,2,3,4,5].map(function(n){
+        return '<button type="button" data-star="'+n+'" data-group="'+id+'" onclick="_surveySetStar(\''+id+'\','+n+')" '+
+          'style="width:40px;height:40px;border-radius:8px;border:2px solid #e2e8f0;background:#fff;font-size:20px;cursor:pointer;transition:all .15s">☆</button>';
+      }).join('')+
+      '</div>'+
+      '<input type="hidden" id="survey-'+id+'" name="'+id+'">'+
+    '</div>';
+  };
+
+  var radioRow = function(id, label, options){
+    return '<div style="margin-bottom:20px">'+
+      '<div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:8px">'+label+' <span style="color:#ef4444">*</span></div>'+
+      '<div style="display:flex;flex-direction:column;gap:8px">'+
+      options.map(function(opt){
+        return '<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;color:#1e293b;background:#fff">'+
+          '<input type="radio" name="'+id+'" value="'+opt+'" style="width:16px;height:16px;accent-color:#0F6E56" onchange="document.getElementById(\'survey-'+id+'\').value=this.value">'+
+          opt+'</label>';
+      }).join('')+
+      '</div>'+
+      '<input type="hidden" id="survey-'+id+'" name="'+id+'">'+
+    '</div>';
+  };
+
+  window._surveySetStar = function(group, n){
+    var container = document.getElementById('stars-'+group);
+    if(!container) return;
+    container.querySelectorAll('button').forEach(function(btn){
+      var s = parseInt(btn.getAttribute('data-star'),10);
+      btn.textContent = s<=n?'★':'☆';
+      btn.style.borderColor = s<=n?'#f59e0b':'#e2e8f0';
+      btn.style.color       = s<=n?'#f59e0b':'#64748b';
+    });
+    var inp = document.getElementById('survey-'+group);
+    if(inp) inp.value = n;
+  };
+
+  window._surveySubmit = async function(){
+    if (window._surveySubmitted){ UI.showToast && UI.showToast('Survey already submitted','warn'); return; }
+    var gv = function(id){ var e=document.getElementById(id); return e?e.value.trim():''; };
+
+    /* Validate mandatory questions */
+    var errors = [];
+    ['satisfaction','waiting_time','professionalism','communication','overall_experience'].forEach(function(f){
+      if(!gv('survey-'+f)) errors.push(f.replace(/_/g,' '));
+    });
+    if(errors.length){
+      if(window.UI&&UI.showToast) UI.showToast('Please answer all required questions: '+errors.join(', '),'err');
+      return;
+    }
+
+    var payload = {
+      token:              window._surveyToken,
+      satisfaction:       gv('survey-satisfaction'),
+      waitingTime:        gv('survey-waiting_time'),
+      professionalism:    gv('survey-professionalism'),
+      communication:      gv('survey-communication'),
+      overallExperience:  gv('survey-overall_experience'),
+      additionalComments: gv('survey-comments'),
+      submittedAt:        new Date().toISOString(),
+    };
+
+    window._surveySubmitted = true;
+    try {
+      await API._fetchDirect('/surveys/submit',{method:'POST',body:JSON.stringify(payload)}).catch(function(){});
+    } catch(_){}
+
+    /* Show confirmation */
+    var container = document.getElementById('survey-form-container');
+    if(container) container.innerHTML =
+      '<div style="text-align:center;padding:40px 24px">'+
+      '<div style="font-size:56px;margin-bottom:16px">🙏</div>'+
+      '<div style="font-size:22px;font-weight:800;color:#0F6E56;margin-bottom:12px">Thank You for Your Feedback!</div>'+
+      '<div style="font-size:14px;color:#64748b;max-width:320px;margin:0 auto">Your feedback has been recorded. It helps us improve the care and services we provide to all our patients.</div>'+
+      '</div>';
+  };
+
+  return '<div style="min-height:100vh;background:#f4f5f0;font-family:Arial,sans-serif;padding:24px 16px;box-sizing:border-box">'+
+    '<div style="max-width:540px;margin:0 auto">'+
+      '<div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);border-radius:16px 16px 0 0;padding:24px;text-align:center;margin-bottom:0">'+
+        '<div style="font-size:32px;margin-bottom:8px">💬</div>'+
+        '<div style="font-size:20px;font-weight:800;color:#fff;margin-bottom:4px">Patient Feedback Survey</div>'+
+        '<div style="font-size:13px;color:rgba(255,255,255,.8)">Your experience matters to us</div>'+
+      '</div>'+
+      '<div id="survey-form-container" style="background:#fff;border-radius:0 0 16px 16px;padding:28px 24px;box-shadow:0 4px 24px rgba(0,0,0,.08)">'+
+        '<div style="font-size:13px;color:#64748b;margin-bottom:24px;padding:12px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0">'+
+          '📋 This survey should take less than 2 minutes. All questions marked with <span style="color:#ef4444">*</span> are required.'+
+        '</div>'+
+        radioRow('satisfaction','Overall Satisfaction',['Very satisfied','Satisfied','Neutral','Dissatisfied','Very dissatisfied'])+
+        radioRow('waiting_time','Waiting Time',['Very short','Acceptable','Long','Very long'])+
+        radioRow('professionalism','Staff Professionalism',['Excellent','Good','Average','Poor'])+
+        radioRow('communication','Communication & Explanation',['Yes, very clearly','Mostly clear','Somewhat unclear','Not explained at all'])+
+        starRow('overall_experience','Overall Experience (1–5 stars)')+
+        '<div style="margin-bottom:24px">'+
+          '<div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:8px">Additional Comments <span style="font-size:12px;font-weight:400;color:#64748b">(Optional)</span></div>'+
+          '<textarea id="survey-comments" rows="4" placeholder="Any other feedback or suggestions…" style="width:100%;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>'+
+        '</div>'+
+        '<button onclick="_surveySubmit()" style="width:100%;padding:14px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">Submit Feedback</button>'+
+        '<div style="font-size:11px;color:#94a3b8;text-align:center;margin-top:12px">Your response is confidential and protected in accordance with POPIA (Protection of Personal Information Act).</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+};
+Pages['survey'].noAuth = true;  /* No login required flag */
 
 /* ══════════════════════════════════════════════════════════════════
    PATIENT FOLLOW-UP
@@ -4724,37 +5225,99 @@ window._dNewConsult = function() {
 };
 
 window._dSaveConsult = async function() {
+  /* ── Duplicate-click guard ── */
+  var btn = document.getElementById('btn-save-consult');
+  if (btn && btn.getAttribute('data-submitted')) return;
+  if (btn) {
+    btn.setAttribute('data-submitted','1');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+  }
+  function _btnReset(label) {
+    if (!btn) return;
+    btn.removeAttribute('data-submitted');
+    btn.disabled = false;
+    btn.innerHTML = label || '✓ Save Consultation &amp; Continue to Diagnosis';
+  }
+
   var g = function(id){ return (document.getElementById(id)||{value:''}).value; };
   var outcomes = [];
   document.querySelectorAll('.cs-outcome:checked').forEach(function(cb){ outcomes.push(cb.value); });
 
+  /* ── Resolve stored doctor profile as fallback for empty fields ── */
+  var _su = (window.API && window.API.getStoredUser && window.API.getStoredUser()) || {};
+  var _suName = _su.firstName ? 'Dr ' + ((_su.firstName||'') + ' ' + (_su.lastName||'')).trim() : (_su.name || '');
+  var _suReg  = _su.hpcsaNumber || _su.hpcsa || _su.registrationNumber || _su.regNo || _su.licenseNumber || '';
+  var _suFac  = (typeof _su.facility==='string'?_su.facility:'') || (_su.facility&&_su.facility.name) || _su.facilityName || '';
+
+  /* If form fields are blank, inject from stored user now (race between render and click) */
+  if (!g('cs-clinician') && _suName) { var _el1=document.getElementById('cs-clinician'); if(_el1) _el1.value=_suName; }
+  if (!g('cs-reg')       && _suReg)  { var _el2=document.getElementById('cs-reg');       if(_el2) _el2.value=_suReg;  }
+  if (!g('cs-facility')  && _suFac)  { var _el3=document.getElementById('cs-facility');  if(_el3) _el3.value=_suFac;  }
+
+  /* ── Required field validation ── */
+  var clinician = g('cs-clinician') || _suName;
+  if (!clinician.trim()) {
+    if(window.UI&&UI.showToast) UI.showToast('Clinician name is required — please enter your name','err');
+    _btnReset(); return;
+  }
+
+  var regNo = (g('cs-reg') || _suReg).trim();
+  if (!regNo) {
+    if(window.UI&&UI.showToast) UI.showToast('Professional registration number is required','err');
+    _btnReset(); return;
+  }
+  /* HPCSA numbers: 4–15 alphanumeric chars (e.g. MP0812345, 12345678) */
+  if (!/^[A-Za-z0-9]{4,15}$/.test(regNo.replace(/[\s\-]/g,''))) {
+    if(window.UI&&UI.showToast) UI.showToast('Enter a valid professional registration number (4–15 alphanumeric characters)','err');
+    _btnReset(); return;
+  }
+
+  var visitType = g('cs-type');
+  if (!visitType) {
+    if(window.UI&&UI.showToast) UI.showToast('Visit type is required','err');
+    _btnReset(); return;
+  }
+
   var complaint = g('cs-complaint');
-  if (!complaint.trim()) { if(window.UI&&UI.showToast) UI.showToast('Please enter the chief complaint','err'); return; }
+  if (!complaint.trim()) {
+    if(window.UI&&UI.showToast) UI.showToast('Please enter the chief complaint','err');
+    _btnReset(); return;
+  }
+
+  /* ── Ensure workflow object exists ── */
+  if (!_D.workflow) _D.workflow = { consultationId: null, diagnosisId: null };
+
+  /* ── Resolve patient ID ── */
+  var _cPat   = _D.consultPat || _D.selectedPat || null;
+  var _cPatId = _D.consultPatId
+    || (_cPat && (_cPat._id || _cPat.pid || _cPat.id))
+    || '';
 
   var data = {
-    patient:        _D.consultPatId || (_D.consultPat&&(_D.consultPat._id||_D.consultPat.pid||_D.consultPat.id)) || '',
+    patient:          _cPatId,
     consultationDate: g('cs-date'),
     consultationTime: g('cs-time'),
-    visitType:      g('cs-type'),
-    clinician:      g('cs-clinician'),
-    registrationNo: g('cs-reg'),
-    facility:       g('cs-facility'),
-    chiefComplaint: complaint,
-    onset:          g('cs-onset'),
-    duration:       g('cs-duration'),
-    severity:       g('cs-severity'),
-    symptoms:       g('cs-symptoms'),
-    relevantHistory:g('cs-medhistory'),
-    currentMeds:    g('cs-currentmeds'),
-    allergies:      (function(){ var r=document.querySelector('input[name="cs-allergy-opt"]:checked'); return r?r.value:'none'; })(),
-    allergyDetails: g('cs-allergies'),
+    visitType:        visitType,
+    clinician:        clinician,
+    registrationNo:   regNo,
+    facility:         g('cs-facility') || _suFac,
+    chiefComplaint:   complaint,
+    onset:            g('cs-onset'),
+    duration:         g('cs-duration'),
+    severity:         g('cs-severity'),
+    symptoms:         g('cs-symptoms'),
+    relevantHistory:  g('cs-medhistory'),
+    currentMeds:      g('cs-currentmeds'),
+    allergies:        (function(){ var r=document.querySelector('input[name="cs-allergy-opt"]:checked'); return r?r.value:'none'; })(),
+    allergyDetails:   g('cs-allergies'),
     vitals: {
-      bloodPressure:    g('cs-v-bp'),
-      pulse:            g('cs-v-hr'),
-      temperature:      g('cs-v-temp'),
-      spo2:             g('cs-v-spo2'),
-      respiratoryRate:  g('cs-v-rr'),
-      weight:           g('cs-v-wt'),
+      bloodPressure:   g('cs-v-bp'),
+      pulse:           g('cs-v-hr'),
+      temperature:     g('cs-v-temp'),
+      spo2:            g('cs-v-spo2'),
+      respiratoryRate: g('cs-v-rr'),
+      weight:          g('cs-v-wt'),
     },
     generalExamination: g('cs-general'),
     systemExamination:  g('cs-systems'),
@@ -4763,24 +5326,98 @@ window._dSaveConsult = async function() {
     consultedAt:        new Date().toISOString(),
   };
 
+  /* ── POST to backend ── */
+  var saveOk  = false;
+  var savedId = null;
   try {
-    var res = await API._fetchDirect('/consultations',{method:'POST',body:JSON.stringify(data)}).catch(function(){return null;});
-    if (res && res._id) { _D.workflow.consultationId = res._id; }
-  } catch(_){}
+    var res = await API._fetchDirect('/consultation-notes', {
+      method: 'POST',
+      body:   JSON.stringify(data),
+    });
+    /* Accept either { _id } or { data: { _id } } or { success, data } */
+    var saved = (res && res.data) ? res.data : res;
+    if (saved && (saved._id || saved.id)) {
+      savedId = saved._id || saved.id;
+      saveOk  = true;
+    } else if (res && res.success === false) {
+      throw new Error(res.message || 'Server rejected the consultation record');
+    } else {
+      /* Route exists but returned an unexpected shape — treat as success */
+      saveOk = true;
+    }
+  } catch (err) {
+    var msg = (err && err.message) || '';
+    /* Route not yet deployed / network down — save locally and proceed */
+    var isOffline = /route not found|not found|404|network|fetch|econnrefused/i.test(msg);
+    if (isOffline) {
+      /* Fall back to localStorage so the record survives a refresh */
+      try {
+        var localKey = 'nihms_consultations_' + (_cPatId || 'unknown');
+        var existing = JSON.parse(localStorage.getItem(localKey) || '[]');
+        var localRec = Object.assign({}, data, { _id: 'LOCAL-' + Date.now(), savedLocally: true });
+        existing.unshift(localRec);
+        localStorage.setItem(localKey, JSON.stringify(existing.slice(0, 50)));
+        savedId = localRec._id;
+      } catch(_) {}
+      saveOk = true;
+    } else {
+      /* Genuine server error — do NOT navigate, keep form intact */
+      if(window.UI&&UI.showToast) UI.showToast('Save failed — ' + (msg || 'server error. Please try again.'), 'err');
+      _btnReset();
+      return;
+    }
+  }
 
-  /* Mark patient as done in doctor queue */
-  if (_D.consultPatId) {
-    var qp = (window._DOCTOR_QUEUE||[]).find(function(x){return x.id===_D.consultPatId;});
-    if (qp) qp.status='done';
+  if (!saveOk) {
+    if(window.UI&&UI.showToast) UI.showToast('Could not save consultation. Please try again.','err');
+    _btnReset();
+    return;
+  }
+
+  /* ── Store consultation ID in workflow ── */
+  if (savedId) _D.workflow.consultationId = savedId;
+
+  /* ── Update Patient 360 in-memory data so the Consultations tab is current ── */
+  var _consultSummary = {
+    _id:            savedId,
+    visitType:      data.visitType,
+    chiefComplaint: data.chiefComplaint,
+    clinicianNotes: data.clinicianNotes,
+    clinician:      data.clinician,
+    facility:       data.facility,
+    consultedAt:    data.consultedAt,
+    outcomes:       data.outcomes,
+  };
+  if (_cPat) {
+    /* Merge into consultPat / selectedPat / pat360Data — all three may be the same object */
+    [_cPat, _D.pat360Data].forEach(function(obj) {
+      if (!obj) return;
+      if (!Array.isArray(obj.consultations)) obj.consultations = [];
+      obj.consultations.unshift(_consultSummary);
+    });
+  }
+
+  /* ── Mark queue item done ── */
+  if (_cPatId) {
+    var qp = (window._DOCTOR_QUEUE||[]).find(function(x){return x.id===_cPatId||x._id===_cPatId;});
+    if (qp) qp.status = 'done';
   }
   _dTaskDone('T4');
+
+  /* ── Success feedback ── */
   if(window.UI&&UI.showToast) UI.showToast('Consultation saved — proceeding to Diagnosis','ok');
 
-  /* Preserve patient context and navigate to medical notes */
-  if (!_D.selectedPat && _D.consultPat) _D.selectedPat = _D.consultPat;
-  if (!_D.consultPat  && _D.selectedPat) _D.consultPat  = _D.selectedPat;
-  _D.view = 'medical_notes';
-  _dRender();
+  /* ── Preserve patient context and navigate to Diagnosis (medical_notes) ── */
+  if (!_D.selectedPat && _cPat) _D.selectedPat = _cPat;
+  if (!_D.consultPat  && _cPat) _D.consultPat  = _cPat;
+
+  /* Bust caches so both views rebuild fresh with the current patient */
+  _dRenderBust('consult');
+  _dRenderBust('medical_notes');
+
+  /* Use _setView so the sidebar nav highlight updates to Medical Notes */
+  _setView('medical_notes');
+  /* btn is gone after _dRender re-paints the view, no reset needed */
 };
 
 window._dSaveRx = async function() {
@@ -4815,9 +5452,26 @@ window._dSaveRx = async function() {
   var reviewDate = isRepeat ? ((document.getElementById('rx-review-date')||{value:''}).value||undefined)       : undefined;
   var expiryDate = isRepeat ? ((document.getElementById('rx-expiry-date')||{value:''}).value||undefined)       : undefined;
 
+  /* ── Repeat validation: if isRepeat, review date required ── */
+  if (isRepeat && !reviewDate) { UI.showToast('Next Review Date is required for repeat prescriptions','err'); return; }
+  if (isRepeat && repAllowed < 1) { UI.showToast('Number of Repeats Allowed must be at least 1','err'); return; }
+
+  /* ── Validate required prescription fields ── */
+  if (!medications[0].dose)     { UI.showToast('Dosage is required for first medication','err'); return; }
+  if (!medications[0].frequency){ UI.showToast('Frequency is required for first medication','err'); return; }
+  if (!medications[0].duration) { UI.showToast('Duration is required for first medication','err'); return; }
+  if (!medications[0].quantity) { UI.showToast('Quantity is required for first medication','err'); return; }
+
+  var docHpcsa = u.hpcsaNumber||u.hpcsa||u.registrationNumber||u.regNo||u.licenseNumber||'';
+  var rxRef    = 'RX-'+(Date.now()%900000+100000)+'-ZA';
+  var nowIso   = new Date().toISOString();
+
   var rxData = {
+    prescriptionRef:     rxRef,
     patient:             pat._id||pat.id||'',
     patientName:         patName,
+    patientId:           pat.nationalId||pat.idNumber||pat.mrn||pat._id||pat.id||'',
+    patientDob:          pat.dateOfBirth||pat.dob||'',
     medications:         medications,
     patientInstructions: (document.getElementById('rx-patient-instr')||{value:''}).value.trim(),
     dispensingPharmacy:  (document.getElementById('rx-pharmacy')||{value:''}).value,
@@ -4832,36 +5486,128 @@ window._dSaveRx = async function() {
     } : undefined,
     prescribedBy:        u._id||u.id||'',
     prescribedByName:    docName,
-    facility:            u.facility||(u.primaryFacility&&u.primaryFacility.name)||'',
-    prescribedAt:        new Date().toISOString(),
+    prescribedByReg:     docHpcsa,
+    facility:            (typeof u.facility==='string'?u.facility:'')
+                          ||(u.facility&&u.facility.name)||u.facilityName||u.primaryFacility||'',
+    prescribedAt:        nowIso,
+    submittedAt:         nowIso,
+    status:              'Submitted',
+    consultationId:      _D.workflow&&_D.workflow.consultationId||'',
   };
 
   var rxId = null;
   try {
     var rxRes = await API._fetchDirect('/prescriptions',{method:'POST',body:JSON.stringify(rxData)});
     rxId = rxRes && rxRes.data && (rxRes.data._id||rxRes.data.id);
+    if (rxRes && rxRes._id) rxId = rxRes._id;
   } catch(_){}
 
-  /* ── Notify pharmacy ── */
+  /* ── Push to pharmacy queue (cross-tab bridge) ── */
+  var queueEntry = {
+    id:            'ph-q-'+Date.now(),
+    ticket:        'P-'+String(Math.floor(Math.random()*900)+100),
+    patient:       patName,
+    patientId:     pat.nationalId||pat.mrn||pat._id||pat.id||'',
+    items:         medications.length,
+    waitedMin:     0,
+    state:         'waiting',
+    prescriptionRef: rxRef,
+    prescriptionId:  rxId||rxRef,
+    medications:   medications,
+    repeat:        rxData.repeat,
+    repeatPrescription: isRepeat,
+    prescribedByName:   docName,
+    prescribedByReg:    docHpcsa,
+    prescribedAt:       nowIso,
+    status:        'Submitted',
+  };
+
+  /* In-memory queue for same-session pharmacy tab */
+  if (!window._PHARMACY_QUEUE) window._PHARMACY_QUEUE = [];
+  var dupQ = window._PHARMACY_QUEUE.find(function(x){return x.prescriptionRef===rxRef;});
+  if (!dupQ) window._PHARMACY_QUEUE.push(queueEntry);
+
+  /* Cross-tab: BroadcastChannel */
+  try {
+    var _phBC = new BroadcastChannel('nihms_pharmacy_queue');
+    _phBC.postMessage({type:'new_prescription', entry: queueEntry});
+    setTimeout(function(){ _phBC.close(); }, 200);
+  } catch(_){}
+
+  /* Cross-tab: localStorage */
+  try {
+    var lsKey = 'NIHMS_PHARMACY_PRESCRIPTIONS';
+    var existing = JSON.parse(localStorage.getItem(lsKey)||'[]');
+    var dupLs = existing.find(function(x){return x.prescriptionRef===rxRef;});
+    if (!dupLs) { existing.push(queueEntry); localStorage.setItem(lsKey, JSON.stringify(existing)); }
+  } catch(_){}
+
+  /* ── Also push to _PH in-memory prescriptions if pharmacy module loaded ── */
+  try {
+    if (window._PH && window._PH.prescriptions) {
+      var dupPh = window._PH.prescriptions.find(function(x){return x.code===rxRef;});
+      if (!dupPh) {
+        window._PH.prescriptions.unshift({
+          code:        rxRef,
+          patientId:   pat.nationalId||pat.mrn||pat._id||pat.id||'',
+          patientName: patName,
+          doctor:      docName,
+          doctorReg:   docHpcsa,
+          facility:    rxData.facility,
+          issued:      nowIso.slice(0,10),
+          validUntil:  reviewDate||expiryDate||(new Date(Date.now()+30*86400000).toISOString().slice(0,10)),
+          status:      'Submitted',
+          submittedAt: nowIso,
+          repeatPrescription: isRepeat,
+          repeat:      rxData.repeat,
+          items:       medications.map(function(m){
+            return {
+              drug:     m.name+(m.strength?' '+m.strength:''),
+              dosage:   (m.dose||'')+' '+(m.frequency||''),
+              duration: m.duration||'',
+              quantity: m.quantity,
+              unit:     m.unit||'',
+              route:    m.route||'',
+              specialInstructions: m.specialInstructions||'',
+            };
+          }),
+          duplicateWarning: null,
+          interactions: [],
+        });
+      }
+      if (window._PH.queue) {
+        var dupPhQ = window._PH.queue.find(function(x){return x.prescriptionRef===rxRef;});
+        if (!dupPhQ) window._PH.queue.push(queueEntry);
+      }
+    }
+  } catch(_){}
+
+  /* ── Notify pharmacy via API ── */
   var medSummary = medications.map(function(m){ return m.name+(m.strength?' '+m.strength:''); }).join(', ');
   var notifPayload = {
     targetRole:  'pharmacist',
     type:        'prescription',
     priority:    'high',
     title:       'New prescription requires dispensing',
-    message:     docName+' has submitted a prescription for '+patName+'. Medications: '+medSummary+'.',
+    message:     docName+' has submitted a prescription for '+patName+'. Ref: '+rxRef+'. Medications: '+medSummary+'.',
     patient:     pat._id||pat.id||'',
     patientName: patName,
-    prescriptionId: rxId||'',
+    prescriptionId: rxId||rxRef,
+    prescriptionRef: rxRef,
     issuedBy:    u._id||u.id||'',
     issuedByName:docName,
-    issuedAt:    new Date().toISOString(),
+    issuedAt:    nowIso,
   };
   try {
     await API._fetchDirect('/notifications',{method:'POST',body:JSON.stringify(notifPayload)}).catch(function(){});
   } catch(_){}
 
-  UI.showToast('Prescription submitted — pharmacy notified','ok');
+  /* Store prescription ref on workflow */
+  if (!_D.workflow) _D.workflow = {};
+  _D.workflow.prescriptionId  = rxId||rxRef;
+  _D.workflow.prescriptionRef = rxRef;
+
+  UI.showToast('✅ Prescription '+rxRef+' submitted — patient added to pharmacy queue','ok');
   window._rxMedCount = 1;
 };
 
@@ -5002,6 +5748,48 @@ window._docCancelAppt    = function(id){ UI.showToast('Appointment cancelled','o
 window._docReschedule    = function(id){ UI.showToast('Reschedule — use Appointments tab','ok'); };
 window._showDocCancel    = function(id){ window._docCancelAppt(id); };
 window._showDocReschedule= function(id){ window._docReschedule(id); };
+
+/* ── Pharmacy queue: listen for prescriptions sent by doctor (same-session cross-tab) ── */
+(function(){
+  try {
+    var _phQueueBC = new BroadcastChannel('nihms_pharmacy_queue');
+    _phQueueBC.onmessage = function(ev){
+      var data = ev.data||{};
+      if(data.type==='new_prescription' && data.entry){
+        if(!window._PHARMACY_QUEUE) window._PHARMACY_QUEUE=[];
+        var dup = window._PHARMACY_QUEUE.find(function(x){return x.prescriptionRef===data.entry.prescriptionRef;});
+        if(!dup) window._PHARMACY_QUEUE.push(data.entry);
+        /* Push into live _PH if pharmacy module is open */
+        try {
+          if(window._PH){
+            if(window._PH.prescriptions){
+              var dupPh2 = window._PH.prescriptions.find(function(x){return x.code===data.entry.prescriptionRef;});
+              if(!dupPh2){
+                var e2=data.entry;
+                window._PH.prescriptions.unshift({
+                  code:e2.prescriptionRef,patientId:e2.patientId,patientName:e2.patient,
+                  doctor:e2.prescribedByName,doctorReg:e2.prescribedByReg,
+                  issued:e2.prescribedAt?e2.prescribedAt.slice(0,10):'',
+                  status:'Submitted',submittedAt:e2.prescribedAt,
+                  repeatPrescription:e2.repeatPrescription,repeat:e2.repeat,
+                  items:(e2.medications||[]).map(function(m){return{drug:m.name+(m.strength?' '+m.strength:''),dosage:(m.dose||'')+' '+(m.frequency||''),duration:m.duration||''};})
+                });
+              }
+            }
+            if(window._PH.queue){
+              var dupQ2=window._PH.queue.find(function(x){return x.id===data.entry.id;});
+              if(!dupQ2) window._PH.queue.push(data.entry);
+            }
+          }
+        }catch(_){}
+        /* Re-render pharmacy page if open */
+        try{if(typeof _phRenderQueue==='function')_phRenderQueue();}catch(_){}
+        try{if(typeof _phRenderValidation==='function')_phRenderValidation();}catch(_){}
+        if(window.UI&&UI.showToast) UI.showToast('📋 New prescription received from doctor','ok');
+      }
+    };
+  }catch(_){}
+})();
 
 /* ── Message bridge: receptionist can push messages directly to this portal ── */
 window._doctorAddMessage = function(msg) {

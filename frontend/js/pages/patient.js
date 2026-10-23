@@ -55,6 +55,15 @@ async function _getMyPatientRecord() {
 ══════════════════════════════════════════════════ */
 Pages['myhealth'] = () => {
   if (window._mhInt) clearInterval(window._mhInt);
+  /* Close previous BroadcastChannel if the page was navigated away and back */
+  try { if (window._mhCheckinBC) { window._mhCheckinBC.close(); window._mhCheckinBC = null; } } catch(_) {}
+  /* Listen for token issuance from the receptionist tab – refresh immediately */
+  try {
+    window._mhCheckinBC = new BroadcastChannel('nihms_checkin');
+    window._mhCheckinBC.onmessage = function(ev) {
+      if (ev.data && ev.data.type === 'token_issued') _mhLoad();
+    };
+  } catch(_) {}
   setTimeout(_mhLoad, 0);
   window._mhInt = setInterval(_mhLoad, 30000);
   return '<div id="mh-alerts"></div>' +
@@ -136,6 +145,31 @@ async function _mhLoad() {
       avatarEl.onclick = function() { var fi = document.getElementById('avatar-file-input'); if(fi) fi.click(); };
     }
 
+    /* ── Seed localStorage from URL params (SMS/email link with ?token=&dept=) ── */
+    try {
+      var _urlP = new URLSearchParams(window.location.search);
+      var _urlToken = _urlP.get('token');
+      var _urlDept  = _urlP.get('dept');
+      if (_urlToken && p) {
+        var _patId = p._id || p.id || '';
+        var _seedRecord = {
+          token:     _urlToken,
+          dept:      _urlDept || '',
+          patientId: _patId,
+          date:      new Date().toISOString().slice(0,10),
+          checkedAt: new Date().toISOString(),
+          status:    'waiting',
+        };
+        if (_patId) localStorage.setItem('nihms_patient_token_' + _patId, JSON.stringify(_seedRecord));
+        try {
+          var _allToks2 = JSON.parse(localStorage.getItem('nihms_checkin_tokens') || '{}');
+          if (_patId) _allToks2[_patId] = _seedRecord;
+          localStorage.setItem('nihms_checkin_tokens', JSON.stringify(_allToks2));
+        } catch(_) {}
+        localStorage.setItem('nihms_patient_token', JSON.stringify(_seedRecord));
+      }
+    } catch(_) {}
+
     var results = await Promise.allSettled([
       API._fetchDirect('/queue2/my-token?patientId='+p._id+'&facilityId='+(p.primaryFacility && p.primaryFacility._id || (API.getStoredUser() && (API.getStoredUser().facilityId || API.getStoredUser().facility))), {method:'GET'}),
       API.appointments.list({ patient: p._id, limit: 10 }),
@@ -151,7 +185,27 @@ async function _mhLoad() {
     /* ── Fallback: read token from localStorage if API returned nothing ── */
     if (!qTok || ['completed','cancelled','skipped'].includes(qTok.status)) {
       try {
-        var lsRaw = localStorage.getItem('nihms_patient_token');
+        var _patId2 = p._id || p.id || '';
+        var lsRaw = null;
+        /* 1. Patient-specific key (primary – most reliable, no cross-patient bleed) */
+        if (_patId2) lsRaw = localStorage.getItem('nihms_patient_token_' + _patId2);
+        /* 2. Shared map keyed by patientId (secondary) */
+        if (!lsRaw && _patId2) {
+          try {
+            var _allToks = JSON.parse(localStorage.getItem('nihms_checkin_tokens') || '{}');
+            if (_allToks[_patId2]) lsRaw = JSON.stringify(_allToks[_patId2]);
+          } catch(_) {}
+        }
+        /* 3. Legacy single key – only accept if patientId matches or is absent */
+        if (!lsRaw) {
+          var _legacyRaw = localStorage.getItem('nihms_patient_token');
+          if (_legacyRaw) {
+            try {
+              var _legacyTok = JSON.parse(_legacyRaw);
+              if (!_patId2 || _legacyTok.patientId === _patId2) lsRaw = _legacyRaw;
+            } catch(_) {}
+          }
+        }
         if (lsRaw) {
           var lsTok = JSON.parse(lsRaw);
           var today = new Date().toISOString().slice(0,10);
@@ -366,8 +420,10 @@ async function _mhLoad() {
               '<div style="font-size:12px;color:var(--text-muted)">'+new Date(nextAppt.scheduledAt).toLocaleDateString('en-ZA',{weekday:'short',day:'numeric',month:'short',year:'numeric'})+' at '+new Date(nextAppt.scheduledAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'</div>' +
               '<div style="font-size:12px;color:var(--text-muted)">'+(nextAppt.facility&&nextAppt.facility.name||'')+'</div>' +
               '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">' +
-                (nextAppt.visitType==='telemedicine'?'<button class="btn btn-sm btn-green" onclick="Router.setPage(\'telemedicine\')"><i class="ti ti-video"></i>Join</button>':'') +
-                '<button class="btn btn-sm" onclick="Router.setPage(\'checkin\')"><i class="ti ti-login"></i>Check in</button>' +
+                (nextAppt.visitType==='telemedicine'
+                  ? '<button class="btn btn-sm btn-green" onclick="Router.setPage(\'checkin\')"><i class="ti ti-video"></i>Check in (Telemedicine)</button>'
+                  : '<button class="btn btn-sm" onclick="Router.setPage(\'checkin\')"><i class="ti ti-building-hospital"></i>Visit reception</button>'
+                ) +
                 '<button class="btn btn-sm" onclick="Router.setPage(\'appointments\')"><i class="ti ti-calendar"></i>All</button>' +
               '</div>' +
             '</div>'
@@ -720,7 +776,12 @@ Pages['appointments'] = () => {
             '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap">' +
               '<span class="badge '+badge+'">'+a.status+'</span>' +
               (canAct?'<button class="btn btn-xs" onclick="_showReschedule(\''+a._id+'\',\''+a.visitType+'\',\''+new Date(a.scheduledAt).toISOString().slice(0,16)+'\')"><i class="ti ti-calendar-event"></i>Reschedule</button>':'') +
-              (a.status==='confirmed'&&isToday?'<button class="btn btn-xs btn-green" onclick="_ciDirectCheckin(\''+a._id+'\')"><i class="ti ti-login"></i>Check in</button>':'') +
+              (a.status==='confirmed'&&isToday
+                ? (a.visitType==='telemedicine'
+                    ? '<button class="btn btn-xs btn-green" onclick="_ciDirectCheckin(\''+a._id+'\')"><i class="ti ti-video"></i>Check in (Tele)</button>'
+                    : '<button class="btn btn-xs" style="color:var(--text-muted);cursor:default;pointer-events:none" title="Visit reception to check in"><i class="ti ti-building-hospital"></i>Visit reception</button>'
+                  )
+                : '') +
               (canAct?'<button class="btn btn-xs" style="color:var(--red);border-color:var(--red)" onclick="_showCancelAppt(\''+a._id+'\')"><i class="ti ti-x"></i>Cancel</button>':'') +
             '</div>' +
           '</div>' +
@@ -818,7 +879,7 @@ Pages['appointments'] = () => {
 };
 
 var _rsApptId = null, _cancelApptId = null;
-/* ── Direct check-in from appointments list ── */
+/* ── Direct check-in from appointments list (telemedicine only) ── */
 window._ciDirectCheckin = async function(apptId) {
   var btn = event && event.target && event.target.closest('button');
   if (btn) { btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:12px;height:12px"></div>'; }
@@ -826,34 +887,69 @@ window._ciDirectCheckin = async function(apptId) {
     var p   = await _getMyPatientRecord();
     var u   = API.getStoredUser();
     var fid = (u&&(u.facilityId||u.facility)) || (p&&p.primaryFacility&&p.primaryFacility._id);
-    if (!p || !fid) { UI.showToast('Could not find patient or facility record','err'); return; }
+    if (!p || !fid) { UI.showToast('Could not find patient or facility record','err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-video"></i>Check in';} return; }
 
-    /* ── Validate appointment is TODAY ── */
+    /* ── Fetch appointment and validate ── */
     var apptRes = await API._fetchDirect('/appointments/'+apptId, {method:'GET'});
     var appt    = apptRes && apptRes.data;
-    if (!appt) { UI.showToast('Appointment not found','err'); return; }
+    if (!appt) { UI.showToast('Appointment not found','err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-video"></i>Check in';} return; }
 
+    /* ── TASK 4: Telemedicine-only enforcement ── */
+    var vt = (appt.visitType||'').toLowerCase();
+    if (vt !== 'telemedicine') {
+      UI.showToast('Self check-in is only available for Telemedicine appointments. Please visit reception.','err');
+      if (btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-login"></i>Check in'; }
+      return;
+    }
+
+    /* ── Validate appointment is TODAY ── */
     var apptDate = new Date(appt.scheduledAt);
     var today    = new Date();
     var isToday  = apptDate.getFullYear() === today.getFullYear() &&
                    apptDate.getMonth()    === today.getMonth()    &&
                    apptDate.getDate()     === today.getDate();
-
     if (!isToday) {
       var dateStr = apptDate.toLocaleDateString('en-ZA', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
       UI.showToast('Check-in is only available on the day of your appointment (' + dateStr + ')','err');
-      if (btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-login"></i>Check in'; }
+      if (btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-video"></i>Check in'; }
       return;
     }
 
-    var res = await API._fetchDirect('/queue2/prebooked-checkin',{method:'POST',body:JSON.stringify({patientId:p._id,facilityId:fid,appointmentId:apptId})});
+    var res = await API._fetchDirect('/queue2/prebooked-checkin',{method:'POST',body:JSON.stringify({patientId:p._id,facilityId:fid,appointmentId:apptId,visitType:'telemedicine'})});
     if (res.doctorLate) UI.showToast('Note: Doctor running ~'+res.minutesLate+' min late','warn');
     if (res.data && res.data.token) await _ciSendTokenNotification(res.data);
-    UI.showToast('✅ Checked in! Your queue token is '+res.data.token,'ok');
+    UI.showToast('✅ Checked in! Your queue token is '+(res.data&&res.data.token||''),'ok');
+    /* ── TASK 5: Route to Doctor's Telemedicine Queue ── */
+    var tokenData = res.data || {};
+    var teleReq = {
+      id:          'TELE-'+p._id+'-'+(tokenData.token||Date.now()),
+      patientId:   p._id,
+      patientName: ((p.firstName||'')+' '+(p.lastName||'')).trim(),
+      age:         p.age || p.dateOfBirth || '',
+      sex:         p.gender || p.sex || '',
+      complaint:   'Telemedicine Consultation',
+      priority:    'Normal',
+      requestedBy: 'Patient (self check-in)',
+      requestedAt: new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),
+      notes:       'Patient self-checked in via telemedicine portal. Token: '+(tokenData.token||''),
+      seen:        false,
+      autoAccept:  true,
+      department:  'Telemedicine',
+      isTelemed:   true,
+      appointmentId: apptId,
+      visitType:   'telemedicine',
+      token:       tokenData.token || '',
+    };
+    if (typeof window._doctorAddTeleRequest === 'function') { window._doctorAddTeleRequest(teleReq); }
+    if (_patTeleCh) { try { _patTeleCh.postMessage({ type: 'DOCTOR_PT', doc: teleReq }); } catch(_) {} }
+    try {
+      var stored = JSON.parse(localStorage.getItem('_NIHMS_DOCTOR_QUEUE') || '[]');
+      if (!stored.find(function(r){ return r.id === teleReq.id; })) { stored.push(teleReq); localStorage.setItem('_NIHMS_DOCTOR_QUEUE', JSON.stringify(stored)); }
+    } catch(_) {}
     Router.setPage('checkin');
   } catch(e) {
     UI.showToast(e.message||'Check-in failed','err');
-    if (btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-login"></i>Check in'; }
+    if (btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-video"></i>Check in'; }
   }
 };
 
@@ -920,6 +1016,22 @@ window._submitCancelAppt = async function() {
   try {
     await API.appointments.cancel(_cancelApptId, reason);
     document.getElementById('cancel-modal').style.display='none';
+    /* Bust cached booked-slots so the freed slot shows as available immediately */
+    if (window._BKC && window._BKC.bookedSlots) {
+      /* Find the cancelled appointment's date and remove it from the cache */
+      try {
+        var _cRes = await API._fetchDirect('/appointments/'+_cancelApptId,{method:'GET'}).catch(function(){return null;});
+        var _cApt = _cRes && (_cRes.data || _cRes);
+        var _cRaw = _cApt && (_cApt.scheduledAt || _cApt.appointmentDate || _cApt.date || '');
+        if (_cRaw) {
+          var _cDate = _cRaw.slice(0,10);
+          delete window._BKC.bookedSlots[_cDate];
+        }
+      } catch(_) {
+        /* Fallback: clear entire cache so all dates re-fetch */
+        window._BKC.bookedSlots = {};
+      }
+    }
     UI.showToast('Appointment cancelled','ok'); Router.setPage('appointments');
   } catch(e){ if(al){al.className='alert alert-error';al.innerHTML=e.message;al.classList.remove('hidden');} }
   finally { if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-x"></i>Yes, cancel';} }
@@ -964,10 +1076,14 @@ async function _ciLoad() {
           '<div class="card-title" style="color:var(--green-dark)"><i class="ti ti-calendar-check"></i>Your appointment today — Priority check-in</div>' +
           '<div class="alert-box alert-ok" style="margin-bottom:12px"><i class="ti ti-info-circle"></i>Pre-booked patients receive priority placement.</div>' +
           todayA.map(function(a){
+            var isTele = (a.visitType||'').toLowerCase() === 'telemedicine';
             return '<div style="padding:12px;background:var(--green-light);border-radius:var(--radius);margin-bottom:8px">' +
-              '<div style="font-weight:600;text-transform:capitalize">'+(a.visitType||'').replace('_',' ')+'</div>' +
-              '<div style="font-size:12px;color:var(--text-muted);margin:4px 0">'+new Date(a.scheduledAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+(a.facility?' · '+a.facility.name:'')+'</div>' +
-              '<button class="btn btn-sm btn-green" style="margin-top:10px;width:100%" onclick="_ciPrebookedCI(\''+p._id+'\',\''+fid+'\',\''+a._id+'\')"><i class="ti ti-login"></i>Check in for this appointment</button>' +
+              '<div style="font-weight:600;text-transform:capitalize">'+(a.visitType||'').replace(/_/g,' ')+'</div>' +
+              '<div style="font-size:12px;color:var(--text-muted);margin:4px 0">'+new Date(a.scheduledAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+(a.facility?' · '+(a.facility.name||a.facility):'')+'</div>' +
+              (isTele
+                ? '<button class="btn btn-sm btn-green" style="margin-top:10px;width:100%" onclick="_ciPrebookedCI(\''+p._id+'\',\''+fid+'\',\''+a._id+'\')"><i class="ti ti-video"></i>Check in — Telemedicine</button>'
+                : '<div style="margin-top:10px;padding:9px 12px;background:#FFF9E6;border-left:3px solid #F0A500;border-radius:8px;font-size:12px;color:#7A5C10"><i class="ti ti-building-hospital"></i> Please <strong>visit reception</strong> to check in for this appointment. The receptionist will issue your queue token.</div>'
+              ) +
             '</div>';
           }).join('') +
         '</div>' : '') +
@@ -1004,15 +1120,70 @@ async function _ciLoad() {
 
 window._ciTypeChange = function(v) { var el=document.getElementById('ci-pri-row'); if(el) el.style.display=v==='priority'?'block':'none'; };
 
+/* BroadcastChannel to send telemedicine patients to doctor.js queue */
+var _patTeleCh = null;
+try { _patTeleCh = new BroadcastChannel('nihms_doctor_queue'); } catch(_) {}
+
 window._ciPrebookedCI = async function(pid, fid, apptId) {
   var btn = event&&event.target&&event.target.closest('button');
   if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Checking in...';}
   try {
-    var res = await API._fetchDirect('/queue2/prebooked-checkin',{method:'POST',body:JSON.stringify({patientId:pid,facilityId:fid,appointmentId:apptId})});
+    /* ── TASK 4: Front-end enforcement — verify telemedicine before calling API ── */
+    var apptCheck = await API._fetchDirect('/appointments/'+apptId, {method:'GET'});
+    var apptData  = apptCheck && apptCheck.data;
+    if (!apptData) { UI.showToast('Appointment not found.','err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-video"></i>Check in — Telemedicine';} return; }
+    var vt = (apptData.visitType||'').toLowerCase();
+    if (vt !== 'telemedicine') {
+      UI.showToast('Self check-in is only available for Telemedicine appointments. Please visit reception.','err');
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-login"></i>Check in';} return;
+    }
+    /* ── Duplicate check-in guard ── */
+    try {
+      var existingTok = await API._fetchDirect('/queue2/my-token?patientId='+pid+'&facilityId='+fid, {method:'GET'});
+      var et = existingTok && existingTok.data;
+      if (et && et.appointmentId === apptId && !['completed','cancelled','skipped'].includes(et.status)) {
+        UI.showToast('You are already checked in. Your token is '+et.token,'warn');
+        Router.setPage('checkin'); return;
+      }
+    } catch(_) {}
+    /* ── Call prebooked check-in endpoint ── */
+    var res = await API._fetchDirect('/queue2/prebooked-checkin',{method:'POST',body:JSON.stringify({patientId:pid,facilityId:fid,appointmentId:apptId,visitType:'telemedicine'})});
     if(res.doctorLate) UI.showToast('Note: Doctor running ~'+res.minutesLate+' min late','warn');
     if(res.data&&res.data.token) await _ciSendTokenNotification(res.data);
+    /* ── TASK 5: Route to Doctor's Telemedicine Queue ── */
+    var tokenData = res.data || {};
+    var p = null;
+    try { p = await _getMyPatientRecord(); } catch(_) {}
+    var teleReq = {
+      id:          'TELE-'+pid+'-'+(tokenData.token||Date.now()),
+      patientId:   pid,
+      patientName: p ? ((p.firstName||'')+' '+(p.lastName||'')).trim() : pid,
+      age:         p ? (p.age || p.dateOfBirth || '') : '',
+      sex:         p ? (p.gender || p.sex || '') : '',
+      complaint:   'Telemedicine Consultation',
+      priority:    'Normal',
+      requestedBy: 'Patient (self check-in)',
+      requestedAt: new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),
+      notes:       'Patient self-checked in via telemedicine portal. Token: '+(tokenData.token||''),
+      seen:        false,
+      autoAccept:  true,
+      department:  'Telemedicine',
+      isTelemed:   true,
+      appointmentId: apptId,
+      visitType:   'telemedicine',
+      token:       tokenData.token || '',
+    };
+    /* Direct call if doctor.js is in same tab */
+    if (typeof window._doctorAddTeleRequest === 'function') { window._doctorAddTeleRequest(teleReq); }
+    /* Cross-tab broadcast */
+    if (_patTeleCh) { try { _patTeleCh.postMessage({ type: 'DOCTOR_PT', doc: teleReq }); } catch(_) {} }
+    /* localStorage relay for doctor tab polling */
+    try {
+      var stored = JSON.parse(localStorage.getItem('_NIHMS_DOCTOR_QUEUE') || '[]');
+      if (!stored.find(function(r){ return r.id === teleReq.id; })) { stored.push(teleReq); localStorage.setItem('_NIHMS_DOCTOR_QUEUE', JSON.stringify(stored)); }
+    } catch(_) {}
     Router.setPage('checkin');
-  } catch(e){ UI.showToast(e.message||'Check-in failed','err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-login"></i>Check in';} }
+  } catch(e){ UI.showToast(e.message||'Check-in failed','err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-video"></i>Check in — Telemedicine';} }
 };
 
 window._ciWalkIn = async function(pid, fid) {
@@ -1329,320 +1500,482 @@ window._uploadIdDoc = async function(input) {
 };
 
 /* ══════════════════════════════════════════════════
-   BOOK A VISIT — inline calendar (no overlay)
+   BOOK A VISIT — slot grid (no calendar overlay)
 ══════════════════════════════════════════════════ */
-Pages['book'] = () => {
-  window._BKC = { year: new Date().getFullYear(), month: new Date().getMonth(), selected: null, bookings: {} };
+/* ── Slot availability — mirrors receptionist.js exactly ── */
+var _BK_ALL_SLOTS_WEEKDAY = [
+  '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
+  '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
+  '15:00','15:30','16:00','16:30'
+];
+var _BK_ALL_SLOTS_SAT = [
+  '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
+  '11:00','11:30','12:00','12:30','13:00'
+];
+function _bkGetSlots(dateStr) {
+  var d = new Date(dateStr + 'T00:00:00');
+  var day = d.getDay();
+  if (day === 0) return [];
+  var all = day === 6 ? _BK_ALL_SLOTS_SAT : _BK_ALL_SLOTS_WEEKDAY;
+  var todayStr = new Date().toISOString().slice(0,10);
+  if (dateStr !== todayStr) return all.slice();
+  /* Today: filter out slots within 30 minutes */
+  var now = new Date();
+  var cutoff = now.getHours() * 60 + now.getMinutes() + 30;
+  return all.filter(function(s) {
+    var parts = s.split(':');
+    return parseInt(parts[0]) * 60 + parseInt(parts[1]) >= cutoff;
+  });
+}
 
-  setTimeout(function() {
-    var FACS = [
-      { id:'fac-chb',       name:'Chris Hani Baragwanath CHC', type:'hospital' },
-      { id:'fac-soweto',    name:'Soweto Clinic',               type:'clinic'   },
-      { id:'fac-bophelong', name:'Bophelong Clinic',            type:'clinic'   },
-    ];
-    (async function() {
-      try {
-        var r = await API._fetchDirect('/facilities', { method:'GET' });
-        var apiFacs = r.data || [];
-        if (apiFacs.length) {
-          /* Use real facilities from API */
-          FACS = apiFacs.map(function(af) {
-            return {
-              id:   af._id,
-              name: af.name,
-              type: af.type || 'clinic'
-            };
-          });
-        } else {
-          /* Fall back to hardcoded — try to match by name substring */
-          FACS.forEach(function(hf, i) {
-            /* ID stays as placeholder; backend will reject — warn user */
-          });
-        }
-      } catch(_) {}
-      var sel = document.getElementById('bk-facility');
-      if (sel) {
-        sel.innerHTML = '<option value="">— Select facility —</option>' +
-          FACS.map(function(f){
-            return '<option value="'+f.id+'" data-name="'+f.name+'" data-type="'+f.type+'">'+f.name+'</option>';
-          }).join('');
+Pages['book'] = () => {
+  window._BKC = {
+    facilityId: '', facilityName: '',
+    selectedDate: '', selectedSlot: null,
+    bookedSlots: {}   /* dateStr → [time, time, …] */
+  };
+
+  /* Auto-load facility + patient info */
+  setTimeout(async function() {
+    try {
+      var u = API.getStoredUser();
+      var fid   = u && (u.facilityId || u.facility);
+      var fname = u && (u.facilityName || u.facility_name || '');
+      if (fid && !fname) {
+        try {
+          var fr = await API._fetchDirect('/facilities/'+fid, {method:'GET'});
+          if (fr && fr.data) fname = fr.data.name || '';
+        } catch(_) {}
       }
-    })();
-    // Calendar drawn only when user clicks date field
+      if (!fid) {
+        try {
+          var p = await _getMyPatientRecord();
+          var pf = p && (p.primaryFacility || p.facility);
+          if (pf) { fid = pf._id || pf; fname = pf.name || fname; }
+        } catch(_) {}
+      }
+      window._BKC.facilityId   = fid   || '';
+      window._BKC.facilityName = fname || 'Your facility';
+      var lbl = document.getElementById('bk-facility-lbl');
+      if (lbl) lbl.textContent = fname || 'Your registered facility';
+    } catch(_) {}
+
+    /* Load patient pill */
+    try {
+      var pt = await _getMyPatientRecord();
+      if (pt) {
+        window._BKC._patient = pt;
+        var pname = ((pt.firstName||'') + ' ' + (pt.lastName||'')).trim() || 'You';
+        var initials = ((pt.firstName||'')[0]||'') + ((pt.lastName||'')[0]||'');
+        var pill = document.getElementById('bk-patient-pill');
+        if (pill) pill.innerHTML =
+          '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f0fdfa;border:1.5px solid #7ADAA8;border-radius:10px">' +
+          '<div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#0F6E56,#1A4A9B);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;flex-shrink:0">' + initials.toUpperCase() + '</div>' +
+          '<div><div style="font-weight:700;font-size:13px;color:#111">' + pname + '</div>' +
+          '<div style="font-size:12px;color:#555">' + (pt.phone||pt.email||'Patient') + '</div></div>' +
+          '<i class="ti ti-circle-check" style="margin-left:auto;color:#0F6E56;font-size:18px"></i></div>';
+      }
+    } catch(_) {}
+
+    /* Load upcoming appointments into side panel */
+    window._bkLoadSidePanel();
+
+    /* Auto-trigger slot grid on page load */
+    var dateEl = document.getElementById('bk-slot-date');
+    if (dateEl) {
+      if (!dateEl.value) {
+        /* Set default date: tomorrow (skip Sunday) */
+        var def = new Date();
+        def.setDate(def.getDate() + 1);
+        if (def.getDay() === 0) def.setDate(def.getDate() + 1);
+        dateEl.value = def.toISOString().slice(0, 10);
+      }
+      /* Ensure _BKC.selectedDate is set immediately (before async completes) */
+      window._BKC.selectedDate = dateEl.value;
+      window._bkDateChange(dateEl.value);
+    }
   }, 0);
 
   return `
 <div class="page-title">Book a visit</div>
-<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#EEF7FF;border-left:4px solid #4A9BD4;border-radius:10px;margin-bottom:16px;max-width:1000px;font-size:13px;color:#1A4A9B">
+<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#EEF7FF;border-left:4px solid #4A9BD4;border-radius:10px;margin-bottom:16px;font-size:13px;color:#1A4A9B">
   <i class="ti ti-clock" style="font-size:16px;flex-shrink:0"></i>
-  <span>Clinic hours: <strong>Mon–Fri 07:00–17:00</strong> &middot; <strong>Sat 07:00–13:00</strong> &middot; Same-day bookings need <strong>1 hour notice</strong>.</span>
+  <span>Clinic hours: <strong>Mon–Fri 07:00–17:00</strong> &middot; <strong>Sat 07:00–13:00</strong> &middot; Same-day bookings need <strong>30 min notice</strong>.</span>
 </div>
-<div style="display:grid;grid-template-columns:420px 1fr;gap:20px;max-width:1000px;align-items:start">
+<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">
 
-  <div class="card">
-    <div class="card-title"><i class="ti ti-calendar-plus"></i>New appointment</div>
-    <div class="f-group">
-      <label class="f-label">VISIT TYPE</label>
-      <select class="f-select" id="bk-type" style="margin:0" onchange="window._bkWarnSpecialist()">
-        <option value="consultation">General Consultation</option>
-        <option value="telemedicine">Telemedicine</option>
-        <option value="lab">Lab / Blood Draw</option>
-        <option value="immunisation">Immunisation</option>
-        <option value="mental_health">Mental Health</option>
-        <option value="follow_up">Chronic Care Follow-Up</option>
-        <option value="maternal_child_health">Maternal &amp; Child Health</option>
-        <option value="pharmacy_pickup">Pharmacy Pickup</option>
-        <option value="specialist_referral">Specialist Referral</option>
-        <option value="wellness">Wellness &amp; Preventive Care</option>
-      </select>
+  <!-- Main booking column -->
+  <div>
+
+    <!-- Patient pill removed -->
+
+    <!-- Booking form card -->
+    <div class="card" style="padding:22px">
+      <div style="font-size:15px;font-weight:700;color:#111;margin-bottom:18px;display:flex;align-items:center;gap:8px">
+        <i class="ti ti-calendar-plus" style="color:var(--green-dark)"></i> New appointment
+      </div>
+
+      <!-- Visit type -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">VISIT TYPE / DEPARTMENT</div>
+        <select id="bk-visit-type" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius);font-size:13px;font-family:inherit;background:#fff;outline:none;color:var(--text)"
+          onchange="window._bkWarnSpecialist();window._bkRefreshSlots()">
+          <option value="General Consultation">General Consultation</option>
+          <option value="Telemedicine">Telemedicine</option>
+          <option value="Lab / Blood Draw">Lab / Blood Draw</option>
+          <option value="Immunisation">Immunisation</option>
+          <option value="Mental Health">Mental Health</option>
+          <option value="Chronic Care Follow-Up">Chronic Care Follow-Up</option>
+          <option value="Maternal &amp; Child Health">Maternal &amp; Child Health</option>
+          <option value="Pharmacy Pickup">Pharmacy Pickup</option>
+          <option value="Specialist Referral">Specialist Referral</option>
+          <option value="Wellness &amp; Preventive Care">Wellness &amp; Preventive Care</option>
+        </select>
+      </div>
+
+      <!-- Specialist warning -->
+      <div id="bk-specialist-warn" style="display:none;margin-bottom:14px;padding:10px 14px;background:#FEF2F2;border-left:4px solid #E24B4A;border-radius:8px;font-size:13px;color:#991B1B">
+        <i class="ti ti-alert-triangle"></i> Specialist Referral requires a referral letter from your GP.
+      </div>
+
+      <!-- Facility (read-only) -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">FACILITY</div>
+        <div style="padding:10px 14px;background:var(--bg-surface);border:1.5px solid var(--border);border-radius:var(--radius);font-size:13px;color:var(--text-muted);display:flex;align-items:center;gap:8px">
+          <i class="ti ti-building-hospital" style="font-size:15px;color:var(--green-dark);flex-shrink:0"></i>
+          <span id="bk-facility-lbl">Loading your facility…</span>
+          <i class="ti ti-lock" style="font-size:12px;margin-left:auto;color:var(--text-hint)" title="Assigned automatically"></i>
+        </div>
+      </div>
+
+      <!-- Date picker -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">DATE</div>
+        <input type="date" id="bk-slot-date" min="${new Date().toISOString().slice(0,10)}"
+          style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius);font-size:13px;font-family:inherit;background:#fff;outline:none;color:var(--text)"
+          onchange="window._bkDateChange(this.value)">
+      </div>
+
+      <!-- Slot grid -->
+      <div id="bk-slot-wrap" style="display:none;margin-bottom:18px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase">SELECT A TIME SLOT</div>
+          <div id="bk-slot-summary" style="font-size:11px;font-weight:600;color:#0F6E56"></div>
+        </div>
+        <div id="bk-slot-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"></div>
+        <div id="bk-slot-none" style="display:none;margin-top:8px;padding:12px 14px;background:#FEF2F2;border-left:3px solid #E24B4A;border-radius:8px;font-size:13px;color:#991B1B;text-align:center">
+          <i class="ti ti-calendar-x"></i> No available slots for this date. Please choose another day.
+        </div>
+      </div>
+
+      <!-- Confirm button -->
+      <button id="bk-submit-btn" onclick="window._bkSubmit()"
+        style="width:100%;padding:14px 20px;border:none;border-radius:50px;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(15,110,86,.25);font-family:inherit">
+        <i class="ti ti-calendar-check"></i> Confirm booking
+      </button>
+
+      <div id="bk-alert" style="display:none;margin-top:12px;padding:10px 14px;background:#FEF2F2;border-left:4px solid #E24B4A;border-radius:8px;font-size:13px;color:#991B1B"></div>
     </div>
-    <div id="bk-specialist-warn" style="display:none;margin-bottom:12px;padding:10px 14px;background:#FEF2F2;border-left:4px solid var(--red);border-radius:8px;font-size:13px;color:#991B1B">
-      <i class="ti ti-alert-triangle"></i> Specialist Referral is only available at hospitals (Chris Hani Baragwanath CHC).
-    </div>
-    <div class="f-group">
-      <label class="f-label">FACILITY</label>
-      <select class="f-select" id="bk-facility" style="margin:0" onchange="window._bkWarnSpecialist();window._bkShowCal()">
-        <option value="">Loading...</option>
-      </select>
-    </div>
-    <div class="f-group">
-      <label class="f-label">DATE &amp; TIME</label>
-      <input type="hidden" id="bk-datetime">
-      <div id="bk-selected-display"
-        onclick="window._bkShowCal()"
-        style="padding:11px 14px;border:1.5px solid var(--border);border-radius:var(--radius);font-size:13px;color:var(--text-muted);background:#fff;display:flex;align-items:center;gap:8px;cursor:pointer"
-        onmouseover="this.style.borderColor='var(--green)'" onmouseout="if(!document.getElementById('bk-datetime').value)this.style.borderColor='var(--border)'">
-        <i class="ti ti-calendar" style="font-size:16px;color:var(--green-dark);flex-shrink:0"></i>
-        <span id="bk-selected-lbl">Click to open calendar</span>
-        <i class="ti ti-chevron-down" style="font-size:12px;margin-left:auto;color:var(--text-hint)"></i>
+
+    <!-- Success screen -->
+    <div id="bk-done" style="display:none;margin-top:20px">
+      <div class="card" style="padding:28px;text-align:center">
+        <div style="width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#0F6E56,#1A4A9B);display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+          <i class="ti ti-circle-check" style="font-size:28px;color:#fff"></i>
+        </div>
+        <div style="font-size:18px;font-weight:700;color:#111;margin-bottom:6px">Appointment Booked!</div>
+        <div id="bk-done-detail" style="font-size:13px;color:#555;margin-bottom:18px"></div>
+        <div style="display:flex;flex-direction:column;gap:8px;text-align:left;background:#f4f5f0;border-radius:10px;padding:14px;margin-bottom:18px">
+          <div style="font-size:12px;color:#555"><i class="ti ti-device-mobile" style="color:var(--green-dark)"></i> SMS &amp; email confirmation sent.</div>
+          <div style="font-size:12px;color:#7A5C10"><i class="ti ti-info-circle" style="color:#F0A500"></i> Queue token issued on check-in at the facility.</div>
+        </div>
+        <button onclick="Router.setPage('appointments')" style="padding:10px 24px;border:none;border-radius:50px;background:linear-gradient(135deg,#0F6E56,#1A4A9B);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">
+          <i class="ti ti-list"></i> View my appointments
+        </button>
       </div>
     </div>
-    <button class="btn btn-green" id="bk-submit-btn" style="width:100%;padding:14px;font-size:14px;font-weight:700;margin-top:4px" onclick="window._bkSubmit()">
-      <i class="ti ti-calendar-check"></i>Confirm booking
-    </button>
-    <div id="bk-alert" style="display:none;margin-top:10px;padding:10px 14px;background:#FEF2F2;border-left:4px solid var(--red);border-radius:8px;font-size:13px;color:#991B1B"></div>
-    <div id="bk-success" style="display:none;margin-top:12px;padding:14px;background:#EDFBF3;border-radius:10px;border:1.5px solid var(--green)">
-      <div style="font-weight:700;color:var(--green-dark);margin-bottom:8px"><i class="ti ti-circle-check"></i> Booking confirmed!</div>
-      <div id="bk-success-detail" style="font-size:13px;color:var(--text-muted);margin-bottom:8px"></div>
-      <div style="font-size:12px;padding:8px;background:#fff;border-radius:8px;margin-bottom:6px;color:var(--text-muted)"><i class="ti ti-device-mobile" style="color:var(--green-dark)"></i> SMS &amp; email confirmation sent.</div>
-      <div style="font-size:12px;padding:8px;background:#FFF9E6;border-radius:8px;color:#7A5C10"><i class="ti ti-info-circle"></i> Queue token sent after you <strong>check in at the facility</strong>.</div>
+
+  </div><!-- /main column -->
+
+  <!-- Side panel: upcoming appointments -->
+  <div id="bk-side-panel" style="position:sticky;top:16px">
+    <div class="card" style="padding:18px">
+      <div style="font-size:13px;font-weight:700;color:#111;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+        <i class="ti ti-calendar-event" style="color:var(--green-dark)"></i> Upcoming
+      </div>
+      <div id="bk-side-list" style="font-size:12px;color:#555">
+        <div style="text-align:center;padding:16px 0;color:#aaa"><i class="ti ti-loader" style="font-size:20px"></i><br>Loading…</div>
+      </div>
     </div>
   </div>
 
-  <div class="card" id="bk-cal-card" style="padding:20px;display:none">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <button onclick="window._bkCalNav(-1)" style="width:34px;height:34px;border:1.5px solid var(--border);border-radius:8px;background:none;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;color:var(--text-muted)">&#8249;</button>
-      <strong id="bk-month-lbl" style="font-size:15px"></strong>
-      <button onclick="window._bkCalNav(1)"  style="width:34px;height:34px;border:1.5px solid var(--border);border-radius:8px;background:none;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;color:var(--text-muted)">&#8250;</button>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);text-align:center;margin-bottom:4px">
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted);padding:4px 0">Su</div>
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted);padding:4px 0">Mo</div>
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted);padding:4px 0">Tu</div>
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted);padding:4px 0">We</div>
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted);padding:4px 0">Th</div>
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted);padding:4px 0">Fr</div>
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted);padding:4px 0">Sa</div>
-    </div>
-    <div id="bk-day-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:14px;position:relative"></div>
-    <div id="bk-slot-tip" style="display:none;position:absolute;background:var(--bg-card);border:1.5px solid var(--green);border-radius:10px;padding:10px 14px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:100;min-width:150px;font-size:12px;pointer-events:none">
-      <div style="font-weight:700;color:var(--green-dark);margin-bottom:5px">Available slots:</div>
-      <div id="bk-slot-list"></div>
-    </div>
-    <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:12px">
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.05em;margin-bottom:8px;text-transform:uppercase">Select time</div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <input type="number" id="bk-t-h" value="8" min="1" max="12" style="width:56px;padding:9px;border:1.5px solid var(--border);border-radius:8px;text-align:center;font-size:16px;font-weight:700;font-family:inherit;outline:none" oninput="window._bkUpdLabel()" onfocus="this.select()">
-        <span style="font-weight:700;font-size:20px">:</span>
-        <select id="bk-t-m" style="padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;outline:none" onchange="window._bkUpdLabel()">
-          <option value="00">00</option><option value="30">30</option>
-        </select>
-        <select id="bk-t-ampm" style="padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;outline:none" onchange="window._bkUpdLabel()">
-          <option>AM</option><option>PM</option>
-        </select>
-      </div>
-    </div>
-    <div style="display:flex;gap:12px;font-size:12px;color:var(--text-muted)">
-      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#EDFBF3;border:1.5px solid #7ADAA8;margin-right:4px"></span>Available</span>
-      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#FFF9E6;border:1.5px solid #F0D060;margin-right:4px"></span>Limited</span>
-      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#FEF2F2;border:1.5px solid #E24B4A;margin-right:4px"></span>Fully booked</span>
-    </div>
-  </div>
 </div>`;
 };
 
-/* ── Calendar & booking functions ── */
-/* ── Toggle calendar when date field clicked ── */
-window._bkShowCal = function() {
-  var card = document.getElementById('bk-cal-card');
-  if (!card) return;
-  if (card.style.display === 'block') {
-    /* Second click — hide calendar */
-    card.style.display = 'none';
-    return;
-  }
-  /* First click — show and load */
-  card.style.display = 'block';
-  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  window._bkCalDraw();
-  window._bkFetchBookings();
-};
+/* ── Booking helper functions ── */
 
 window._bkWarnSpecialist = function() {
-  var type = (document.getElementById('bk-type')||{value:''}).value;
-  var sel  = document.getElementById('bk-facility');
-  var opt  = sel&&sel.selectedIndex>=0 ? sel.options[sel.selectedIndex] : null;
-  var name = opt ? (opt.getAttribute('data-name')||opt.text||'') : '';
-  var warn = document.getElementById('bk-specialist-warn'); if(!warn) return;
-  var isClinic = ['soweto clinic','bophelong clinic'].some(function(c){ return name.toLowerCase().includes(c); });
-  warn.style.display = (type==='specialist_referral'&&isClinic&&name) ? 'block' : 'none';
+  var val = (document.getElementById('bk-visit-type')||{value:''}).value;
+  var warn = document.getElementById('bk-specialist-warn'); if (!warn) return;
+  warn.style.display = (val === 'Specialist Referral') ? 'block' : 'none';
 };
 
-window._bkStatus = function(ds) {
-  var d = new Date(ds+'T00:00:00'), day = d.getDay();
-  if (day===0) return 'closed';
-  // Only use real booking data — no fake/placeholder colours
-  // _BKC.loaded is true once API has responded (even with 0 results)
-  if (!window._BKC.loaded) return 'available'; // show all green until data loads
-  var cnt = (window._BKC.bookings[ds]||0);
-  var mx  = day===6 ? 10 : 20;
-  if (cnt >= mx)        return 'full';
-  if (cnt >= mx * 0.7)  return 'limited';
-  return 'available';
+window._bkDateChange = function(dateStr) {
+  window._BKC.selectedDate = dateStr;
+  window._BKC.selectedSlot = null;
+  window._bkRefreshSlots();
 };
 
-window._bkSlots = function(ds) {
-  var s = window._bkStatus(ds); if(s==='closed'||s==='full') return [];
-  var all = new Date(ds+'T00:00:00').getDay()===6
-    ? ['07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00','12:30']
-    : ['07:00','07:30','08:00','09:00','10:00','10:30','11:00','11:30','12:00','13:00','14:00','15:00','16:00','16:30'];
-  return s==='limited' ? all.filter(function(_,i){return i%3===0;}) : all;
-};
+window._bkRefreshSlots = async function() {
+  var dateStr = window._BKC.selectedDate;
+  var wrap = document.getElementById('bk-slot-wrap');
+  var grid = document.getElementById('bk-slot-grid');
+  var none = document.getElementById('bk-slot-none');
+  if (!wrap || !grid) return;
+  if (!dateStr) { wrap.style.display = 'none'; return; }
 
-window._bkCalDraw = function() {
-  var MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
-  var lbl=document.getElementById('bk-month-lbl'), grid=document.getElementById('bk-day-grid');
-  if(!grid) return;
-  if(lbl) lbl.textContent=MONTHS[window._BKC.month]+' '+window._BKC.year;
-  var first=new Date(window._BKC.year,window._BKC.month,1).getDay();
-  var days=new Date(window._BKC.year,window._BKC.month+1,0).getDate();
-  var today=new Date(); today.setHours(0,0,0,0);
-  var html='';
-  for(var i=0;i<first;i++) html+='<div></div>';
-  for(var d=1;d<=days;d++) {
-    var dt=new Date(window._BKC.year,window._BKC.month,d); dt.setHours(0,0,0,0);
-    var ds=window._BKC.year+'-'+String(window._BKC.month+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
-    var past=dt<today, isTd=dt.getTime()===today.getTime(), sel=window._BKC.selected===ds;
-    var st=past?'past':window._bkStatus(ds), ok=!past&&st!=='closed'&&st!=='full';
-    var bg='transparent',col='var(--text)',bdr='1px solid transparent',fw='400',cur='default';
-    if(sel)                        {bg='var(--green-dark)';col='#fff';bdr='2px solid var(--green-dark)';fw='700';}
-    else if(isTd&&ok)              {bg='#EDFBF3';bdr='2px solid var(--green)';}
-    else if(st==='available'&&ok)  {bg='#EDFBF3';bdr='1.5px solid #7ADAA8';}
-    else if(st==='limited'&&ok)    {bg='#FFF9E6';bdr='1.5px solid #F0D060';col='#7A5C10';}
-    else if(st==='full')           {bg='#FEF2F2';bdr='1.5px solid rgba(226,75,74,.3)';col='#E24B4A';}
-    else if(past||st==='closed')   {col='#ccc';}
-    if(ok) cur='pointer';
-    var ev=ok?' onclick="window._bkSelDate(\''+ds+'\')" onmouseenter="window._bkHover(event,\''+ds+'\')" onmouseleave="window._bkHideHover()"':'';
-    html+='<div style="text-align:center;padding:8px 2px;border-radius:8px;background:'+bg+';color:'+col+';border:'+bdr+';font-weight:'+fw+';cursor:'+cur+';font-size:13px"'+ev+'>'+d+'</div>';
+  /* Check for Sunday */
+  var dayOfWeek = new Date(dateStr + 'T00:00:00').getDay();
+  if (dayOfWeek === 0) {
+    wrap.style.display = 'block';
+    grid.innerHTML = '';
+    if (none) { none.style.display = 'block'; none.innerHTML = '<i class="ti ti-calendar-x"></i> Clinic is closed on Sundays. Please choose another day.'; }
+    return;
   }
-  grid.innerHTML=html;
+
+  /* Show wrap with loading state */
+  wrap.style.display = 'block';
+  if (none) none.style.display = 'none';
+  grid.innerHTML = [
+    '<div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:8px;padding:18px;color:#777;font-size:13px">',
+    '<div style="width:16px;height:16px;border:2px solid #e0e0e0;border-top-color:#0F6E56;border-radius:50%;animation:spin .7s linear infinite"></div>',
+    'Loading available slots…</div>'
+  ].join('');
+
+  /* Inject spin keyframe once */
+  if (!document.getElementById('_bk-spin-style')) {
+    var st = document.createElement('style');
+    st.id = '_bk-spin-style';
+    st.textContent = '@keyframes spin{to{transform:rotate(360deg)}}';
+    document.head.appendChild(st);
+  }
+
+  /* Fetch already-booked slots for this date+facility */
+  var fid   = (window._BKC && window._BKC.facilityId) || '';
+  var booked = [];
+  if (fid && dateStr) {
+    try {
+      /* Use local date boundaries to avoid UTC-shift issues (SAST = UTC+2) */
+      var fromISO = dateStr + 'T00:00:00.000+02:00';
+      var toISO   = dateStr + 'T23:59:59.999+02:00';
+      var res = await API._fetchDirect(
+        '/appointments?facility='+fid+'&from='+encodeURIComponent(fromISO)+'&to='+encodeURIComponent(toISO)+'&limit=200',
+        {method:'GET'}
+      );
+      (res && res.data || [])
+        .filter(function(a){ return !['cancelled','canceled','no_show'].includes(a.status); })
+        .forEach(function(a){
+          var rawDt = a.scheduledAt || a.date || '';
+          if (rawDt) {
+            var dtObj = new Date(rawDt);
+            if (!isNaN(dtObj.getTime())) {
+              /* Normalise to HH:MM in SAST */
+              var hh = String(dtObj.getHours()).padStart(2,'0');
+              var mm = String(dtObj.getMinutes()).padStart(2,'0');
+              booked.push(hh + ':' + mm);
+            }
+          } else if (a.time) {
+            booked.push(a.time.slice(0,5));
+          }
+        });
+    } catch(_) {}
+  }
+  window._BKC.bookedSlots[dateStr] = booked;
+
+  /* All possible slots for this weekday → subtract booked → subtract past */
+  var allSlots  = _bkGetSlots(dateStr);   /* already filters past slots for today */
+  var available = allSlots.filter(function(s){ return booked.indexOf(s) === -1; });
+  var takenSet  = {};
+  booked.forEach(function(b){ takenSet[b] = true; });
+
+  if (!allSlots.length) {
+    grid.innerHTML = '';
+    if (none) { none.style.display = 'block'; none.innerHTML = '<i class="ti ti-calendar-x"></i> No slots available for this date. Please choose another day.'; }
+    return;
+  }
+
+  if (none) none.style.display = 'none';
+
+  /* Render all slots: available (green), booked/past (grey disabled) */
+  var allDisplay = _BK_ALL_SLOTS_WEEKDAY;
+  if (dayOfWeek === 6) allDisplay = _BK_ALL_SLOTS_SAT;
+
+  /* For today, also grey out past slots that _bkGetSlots already removed */
+  var availSet = {};
+  available.forEach(function(s){ availSet[s] = true; });
+
+  grid.innerHTML = allDisplay.map(function(t) {
+    var isAvail = !!availSet[t];
+    var isTaken = !!takenSet[t];
+    var isSel   = window._BKC.selectedSlot === t;
+    var label   = t;
+
+    if (isSel && isAvail) {
+      return '<button data-bkslot="'+t+'" onclick="window._bkPickSlot(\''+t+'\')" style="'+
+        'padding:10px 4px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;'+
+        'border:1.5px solid #0F6E56;background:#f0fdfa;color:#0F6E56;'+
+        'font-family:inherit;box-shadow:0 0 0 2px rgba(15,110,86,.15)">'+label+'</button>';
+    } else if (isAvail) {
+      return '<button data-bkslot="'+t+'" onclick="window._bkPickSlot(\''+t+'\')" style="'+
+        'padding:10px 4px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;'+
+        'border:1.5px solid #e0e0e0;background:#fff;color:#111;'+
+        'font-family:inherit;transition:border-color .12s,background .12s" '+
+        'onmouseover="this.style.borderColor=\'#0F6E56\';this.style.background=\'#f0fdfa\'" '+
+        'onmouseout="this.style.borderColor=\'#e0e0e0\';this.style.background=\'#fff\'">'+label+'</button>';
+    } else {
+      /* Taken or past — show greyed out, not clickable */
+      var title = isTaken ? 'Already booked' : 'Past — not available';
+      return '<button disabled title="'+title+'" style="'+
+        'padding:10px 4px;border-radius:8px;font-size:12px;font-weight:400;cursor:not-allowed;'+
+        'border:1.5px solid #f0f0f0;background:#fafafa;color:#ccc;font-family:inherit;'+
+        'text-decoration:line-through">'+label+'</button>';
+    }
+  }).join('');
+
+  /* Summary line */
+  var avCount = available.length;
+  var summary = document.getElementById('bk-slot-summary');
+  if (summary) {
+    summary.textContent = avCount + ' of ' + allDisplay.length + ' slots available';
+    summary.style.color = avCount === 0 ? '#E24B4A' : avCount <= 4 ? '#7A5C10' : '#0F6E56';
+  }
 };
 
-window._bkCalNav = function(dir) {
-  window._BKC.month+=dir;
-  if(window._BKC.month>11){window._BKC.month=0;window._BKC.year++;}
-  if(window._BKC.month<0) {window._BKC.month=11;window._BKC.year--;}
-  window._bkCalDraw(); window._bkFetchBookings();
+window._bkPickSlot = function(t) {
+  window._BKC.selectedSlot = t;
+  /* Update all available slot buttons to reflect new selection */
+  var btns = document.querySelectorAll('[data-bkslot]');
+  btns.forEach(function(btn) {
+    var sel = btn.getAttribute('data-bkslot') === t;
+    btn.style.border     = '1.5px solid ' + (sel ? '#0F6E56' : '#e0e0e0');
+    btn.style.background = sel ? '#f0fdfa' : '#fff';
+    btn.style.color      = sel ? '#0F6E56' : '#111111';
+    btn.style.fontWeight = sel ? '700' : '500';
+    btn.style.boxShadow  = sel ? '0 0 0 2px rgba(15,110,86,.15)' : 'none';
+  });
+  /* Hide alert if they had an error and then picked a slot */
+  var al = document.getElementById('bk-alert');
+  if (al) al.style.display = 'none';
 };
 
-window._bkSelDate = function(ds) {
-  window._BKC.selected=ds; window._bkCalDraw(); window._bkUpdLabel();
-};
-
-window._bkHover = function(e, ds) {
-  var slots=window._bkSlots(ds), tip=document.getElementById('bk-slot-tip'), list=document.getElementById('bk-slot-list');
-  if(!tip||!list||!slots.length) return;
-  list.innerHTML=slots.slice(0,3).map(function(s){return '<div style="color:var(--green-dark);font-weight:600;padding:2px 0">'+s+'</div>';}).join('')+(slots.length>3?'<div style="color:var(--text-muted);margin-top:3px">+'+(slots.length-3)+' more</div>':'');
-  var el=e.currentTarget||e.target, r=el.getBoundingClientRect(), gr=document.getElementById('bk-day-grid');
-  if(gr){var g=gr.getBoundingClientRect();tip.style.left=(r.left-g.left)+'px';tip.style.top=(r.bottom-g.top+4)+'px';}
-  tip.style.display='block';
-};
-window._bkHideHover = function(){ var t=document.getElementById('bk-slot-tip'); if(t) t.style.display='none'; };
-
-window._bkUpdLabel = function() {
-  if(!window._BKC.selected) return;
-  var h=parseInt((document.getElementById('bk-t-h')||{value:'8'}).value)||8;
-  var m=(document.getElementById('bk-t-m')||{value:'00'}).value;
-  var ap=(document.getElementById('bk-t-ampm')||{value:'AM'}).value;
-  var h24=ap==='PM'&&h<12?h+12:(ap==='AM'&&h===12?0:h);
-  var dtVal=window._BKC.selected+'T'+String(h24).padStart(2,'0')+':'+m;
-  var inp=document.getElementById('bk-datetime'); if(inp) inp.value=dtVal;
-  var d=new Date(dtVal);
-  var disp=d.toLocaleDateString('en-ZA',{weekday:'short',day:'numeric',month:'short',year:'numeric'})+' at '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-  var lbl=document.getElementById('bk-selected-lbl'), box=document.getElementById('bk-selected-display');
-  if(lbl){lbl.textContent=disp;lbl.style.color='var(--text)';}
-  if(box) box.style.borderColor='var(--green)';
-};
-
-window._bkFetchBookings = async function() {
+window._bkLoadSidePanel = async function() {
+  var list = document.getElementById('bk-side-list'); if (!list) return;
   try {
-    var fid=(document.getElementById('bk-facility')||{value:''}).value; if(!fid) return;
-    var type=(document.getElementById('bk-type')||{value:''}).value;
-    var start=new Date(window._BKC.year,window._BKC.month,1).toISOString();
-    var end=new Date(window._BKC.year,window._BKC.month+1,0,23,59).toISOString();
-    var res=await API._fetchDirect('/appointments?facility='+fid+(type?'&visitType='+type:'')+'&from='+encodeURIComponent(start)+'&to='+encodeURIComponent(end)+'&limit=300',{method:'GET'});
-    window._BKC.bookings={};
-    (res.data||[]).filter(function(a){return !['cancelled','no_show'].includes(a.status);}).forEach(function(a){
-      var d=new Date(a.scheduledAt);
-      var k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-      window._BKC.bookings[k]=(window._BKC.bookings[k]||0)+1;
-    });
-    window._BKC.loaded = true;
-    window._bkCalDraw();
+    var p = window._BKC._patient || await _getMyPatientRecord();
+    if (!p) { list.innerHTML = '<div style="color:#aaa;text-align:center;padding:12px 0">No data</div>'; return; }
+    /* Fetch appointments using same method as My Appointments page, filter client-side */
+    var res = await API.appointments.list({ patient: p._id, limit: 30 });
+    var _now = new Date();
+    var _excluded = ['cancelled','canceled','no_show','completed'];
+    var apts = (res && res.data || [])
+      .filter(function(a){
+        if (_excluded.includes(a.status)) return false;
+        var rawDt = a.scheduledAt || a.date || '';
+        return rawDt ? new Date(rawDt) > _now : false;
+      })
+      .sort(function(a,b){
+        return new Date(a.scheduledAt||a.date||0) - new Date(b.scheduledAt||b.date||0);
+      });
+    if (!apts.length) { list.innerHTML = '<div style="color:#aaa;text-align:center;padding:12px 0;font-size:12px">No upcoming appointments</div>'; return; }
+    var DEPT_COLS = {'General Consultation':'#0F6E56','Telemedicine':'#1A4A9B','Lab / Blood Draw':'#7B5EA7','Immunisation':'#E07A10','Mental Health':'#185FA5','Chronic Care Follow-Up':'#1D9E75'};
+    list.innerHTML = apts.slice(0,5).map(function(a) {
+      var rawDt = a.scheduledAt || a.date || '';
+      var d = rawDt ? new Date(rawDt) : null;
+      var dstr = d && !isNaN(d) ? d.toLocaleDateString('en-ZA',{day:'numeric',month:'short'}) : '—';
+      var tstr = d && !isNaN(d) ? d.toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',hour12:false}) : (a.time||'');
+      var dept = a.visitType || a.department || 'Appointment';
+      var col  = DEPT_COLS[dept] || '#0F6E56';
+      return '<div style="padding:8px 10px;border-radius:8px;background:#f4f5f0;margin-bottom:8px;border-left:3px solid '+col+'">'+
+        '<div style="font-weight:600;font-size:12px;color:#111">'+dept+'</div>'+
+        '<div style="font-size:11px;color:#555;margin-top:2px">'+dstr+(tstr?' &middot; '+tstr:'')+'</div>'+
+        '</div>';
+    }).join('');
   } catch(_) {
-    // Even on error, mark loaded so we don't keep showing spinner state
-    window._BKC.loaded = true;
-    window._bkCalDraw();
+    list.innerHTML = '<div style="color:#aaa;text-align:center;padding:12px 0;font-size:12px">Could not load appointments</div>';
   }
 };
 
 window._bkSubmit = async function() {
-  var facSel=document.getElementById('bk-facility'), facility=facSel?facSel.value:'';
-  var opt=facSel&&facSel.selectedIndex>=0?facSel.options[facSel.selectedIndex]:null;
-  var facName=opt?(opt.getAttribute('data-name')||opt.text||''):'';
-  var type=(document.getElementById('bk-type')||{value:''}).value;
-  var dt=(document.getElementById('bk-datetime')||{value:''}).value;
-  var al=document.getElementById('bk-alert'), btn=document.getElementById('bk-submit-btn');
-  function showErr(msg){if(!al)return;al.innerHTML='<i class="ti ti-alert-circle"></i> '+msg;al.style.display='block';}
-  if(al) al.style.display='none';
-  if(!facility){showErr('Please select a facility.');return;}
-  if(!dt){showErr('Please click a date on the calendar first.');return;}
-  var dtObj=new Date(dt),day=dtObj.getDay(),mins=dtObj.getHours()*60+dtObj.getMinutes();
-  if(day===0){showErr('Clinic closed on Sundays.');return;}
-  if(day>=1&&day<=5&&mins<420){showErr('Clinic opens at 07:00 on weekdays.');return;}
-  if(day>=1&&day<=5&&mins>=1020){showErr('Clinic closes at 17:00 on weekdays.');return;}
-  if(day===6&&mins<420){showErr('Clinic opens at 07:00 on Saturdays.');return;}
-  if(day===6&&mins>=780){showErr('Clinic closes at 13:00 on Saturdays.');return;}
-  if(dtObj<=new Date()){showErr('Please select a future date and time.');return;}
-  if(type==='specialist_referral'&&['soweto clinic','bophelong clinic'].some(function(c){return facName.toLowerCase().includes(c);})){showErr('Specialist Referral only available at hospitals.');return;}
-  if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner" style="width:16px;height:16px"></div> Booking...';}
+  var facility  = (window._BKC && window._BKC.facilityId)   || '';
+  var facName   = (window._BKC && window._BKC.facilityName)  || '';
+  var dept      = (document.getElementById('bk-visit-type')||{value:'General Consultation'}).value;
+  /* Sync date from DOM input in case _bkDateChange was never triggered */
+  var _dateInputEl = document.getElementById('bk-slot-date');
+  if (_dateInputEl && _dateInputEl.value && !window._BKC.selectedDate) {
+    window._BKC.selectedDate = _dateInputEl.value;
+    window._bkDateChange(_dateInputEl.value);
+  }
+  var dateStr   = window._BKC.selectedDate;
+  var slotTime  = window._BKC.selectedSlot;
+  var al        = document.getElementById('bk-alert');
+  var btn       = document.getElementById('bk-submit-btn');
+
+  function showErr(msg) {
+    if (!al) return;
+    al.innerHTML = '<i class="ti ti-alert-circle"></i> ' + msg;
+    al.style.display = 'block';
+    al.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+  if (al) al.style.display = 'none';
+
+  if (!facility)  { showErr('Could not determine your facility. Please refresh and try again.'); return; }
+  if (!dateStr)   { showErr('Please select a date first.'); return; }
+  if (!slotTime)  { showErr('Please select a time slot.'); return; }
+
+  /* Build scheduledAt ISO string */
+  var scheduledAt = new Date(dateStr + 'T' + slotTime + ':00').toISOString();
+  var dtObj = new Date(scheduledAt);
+  if (dtObj <= new Date()) { showErr('Please select a future date and time.'); return; }
+
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;display:inline-block"></div> Booking…'; }
+
   try {
-    var p=await _getMyPatientRecord(); if(!p){showErr('Patient record not found.');return;}
-    var labels={consultation:'General Consultation',telemedicine:'Telemedicine',lab:'Lab / Blood Draw',immunisation:'Immunisation',mental_health:'Mental Health',follow_up:'Chronic Care Follow-Up',maternal_child_health:'Maternal & Child Health',pharmacy_pickup:'Pharmacy Pickup',specialist_referral:'Specialist Referral',wellness:'Wellness & Preventive Care'};
-    var typeLabel=labels[type]||type;
-    var dateStr=dtObj.toLocaleDateString('en-ZA',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
-    var timeStr=dtObj.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-    await API.appointments.create({patient:p._id,facility:facility,visitType:type,scheduledAt:dtObj.toISOString(),facilityName:facName});
-    if(p.phone) API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:p.phone,message:'NIHMS: '+typeLabel+' at '+facName+' confirmed for '+dateStr+' at '+timeStr+'. Check in at the facility to receive your queue number.'})}).catch(function(){});
-    if(p.email) API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:p.email,subject:'NIHMS Appointment Confirmed — '+typeLabel,html:'<div style="font-family:Arial;max-width:520px;margin:0 auto"><div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);padding:20px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Confirmed</h2></div><div style="padding:24px;background:#f9f9f9;border-radius:0 0 10px 10px"><p>Dear '+p.firstName+' '+p.lastName+',</p><table style="width:100%;border-collapse:collapse;margin:12px 0"><tr><td style="padding:8px;border:1px solid #ddd;background:#f0f0f0;font-weight:600">Visit type</td><td style="padding:8px;border:1px solid #ddd">'+typeLabel+'</td></tr><tr><td style="padding:8px;border:1px solid #ddd;background:#f0f0f0;font-weight:600">Facility</td><td style="padding:8px;border:1px solid #ddd">'+facName+'</td></tr><tr><td style="padding:8px;border:1px solid #ddd;background:#f0f0f0;font-weight:600">Date &amp; time</td><td style="padding:8px;border:1px solid #ddd">'+dateStr+' at '+timeStr+'</td></tr></table><div style="padding:12px;background:#FFF9E6;border-radius:8px;font-size:13px;color:#7A5C10">Your queue number will be sent after you check in at the facility.</div></div></div>'})}).catch(function(){});
-    var sd=document.getElementById('bk-success-detail'),sc=document.getElementById('bk-success');
-    if(sd) sd.innerHTML='<strong>'+typeLabel+'</strong> at '+facName+'<br>'+dateStr+' at '+timeStr;
-    if(sc){sc.style.display='block';sc.scrollIntoView({behavior:'smooth',block:'nearest'});}
-    if(btn){btn.disabled=true;btn.style.opacity='0.5';}
-    setTimeout(function(){Router.setPage('appointments');},3500);
-  } catch(e){
-    showErr(e.message||'Booking failed. Please try again.');
-    if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-calendar-check"></i>Confirm booking';}
+    var p = window._BKC._patient || await _getMyPatientRecord();
+    if (!p) { showErr('Patient record not found. Please log in again.'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-calendar-check"></i> Confirm booking';} return; }
+
+    var dateLabel = dtObj.toLocaleDateString('en-ZA',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+    var timeLabel = slotTime;
+    var ref       = 'APT-' + Date.now().toString().slice(-5);
+
+    await API.appointments.create({
+      patient:     p._id,
+      facility:    facility,
+      visitType:   dept,
+      department:  dept,
+      scheduledAt: scheduledAt,
+      facilityName: facName
+    });
+
+    /* Notify */
+    var smsMsg = 'NIHMS APPOINTMENT CONFIRMED. Dear '+(p.firstName||'Patient')+', your appointment ('+ref+') is booked at '+dept+' on '+dateLabel+' at '+timeLabel+'. Please arrive 10 min early.';
+    var emailHtml = '<div style="font-family:inherit;max-width:520px;margin:0 auto"><div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);padding:24px;border-radius:10px 10px 0 0;text-align:center"><h2 style="color:#fff;margin:0">Appointment Confirmed</h2></div><div style="background:#f4f5f0;padding:24px;border-radius:0 0 10px 10px"><p>Dear <strong>'+((p.firstName||'')+' '+(p.lastName||'')).trim()+'</strong>,</p><table style="width:100%;border-collapse:collapse;margin:16px 0"><tr><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#777;font-size:13px">Reference</td><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;font-weight:700;color:#0F6E56">'+ref+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#777;font-size:13px">Department</td><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;font-weight:600">'+dept+'</td></tr><tr><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#777;font-size:13px">Date</td><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;font-weight:600">'+dateLabel+'</td></tr><tr><td style="padding:8px 12px;color:#777;font-size:13px">Time</td><td style="padding:8px 12px;font-weight:600">'+timeLabel+'</td></tr></table><p style="font-size:13px;color:#555">Please arrive 10 minutes before your appointment time.</p></div></div>';
+    try {
+      if (p.phone) await API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:p.phone,message:smsMsg})}).catch(function(){});
+      if (p.email) await API._fetchDirect('/notifications/email',{method:'POST',body:JSON.stringify({to:p.email,subject:'NIHMS — Appointment confirmed: '+ref,html:emailHtml})}).catch(function(){});
+    } catch(_) {}
+
+    /* Show done screen */
+    var formCard = btn && btn.closest('.card');
+    if (formCard) formCard.style.display = 'none';
+    var done = document.getElementById('bk-done');
+    var detail = document.getElementById('bk-done-detail');
+    if (detail) detail.innerHTML = '<strong>'+dept+'</strong> &middot; '+facName+'<br>'+dateLabel+' at '+timeLabel;
+    if (done) { done.style.display = 'block'; done.scrollIntoView({behavior:'smooth',block:'nearest'}); }
+
+    setTimeout(function(){ Router.setPage('appointments'); }, 4000);
+  } catch(e) {
+    showErr(e.message || 'Booking failed. Please try again.');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-calendar-check"></i> Confirm booking'; }
   }
 };
 

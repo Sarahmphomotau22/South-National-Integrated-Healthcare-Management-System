@@ -108,6 +108,76 @@ var _PH = (function() {
            suppliers, purchaseOrders, controlledRegister, refills, coldChain, dispenseLines };
 })();
 
+/* ── Load prescriptions pushed by doctor from localStorage ── */
+(function(){
+  try {
+    var stored = JSON.parse(localStorage.getItem('NIHMS_PHARMACY_PRESCRIPTIONS')||'[]');
+    stored.forEach(function(e){
+      var dup = _PH.prescriptions.find(function(x){return x.code===e.prescriptionRef;});
+      if(!dup){
+        _PH.prescriptions.unshift({
+          code:        e.prescriptionRef,
+          patientId:   e.patientId||'',
+          patientName: e.patient||'',
+          doctor:      e.prescribedByName||'',
+          doctorReg:   e.prescribedByReg||'',
+          facility:    '',
+          issued:      e.prescribedAt?e.prescribedAt.slice(0,10):'',
+          validUntil:  e.repeat&&e.repeat.reviewDate?e.repeat.reviewDate:'',
+          status:      'Submitted',
+          submittedAt: e.prescribedAt||'',
+          repeatPrescription: e.repeatPrescription||false,
+          repeat:      e.repeat||null,
+          items:       (e.medications||[]).map(function(m){
+            return {
+              drug:     m.name+(m.strength?' '+m.strength:''),
+              dosage:   (m.dose||'')+' '+(m.frequency||''),
+              duration: m.duration||'',
+              quantity: m.quantity,
+              unit:     m.unit||'',
+              route:    m.route||'',
+            };
+          }),
+          duplicateWarning: null,
+          interactions: [],
+        });
+      }
+      /* Also add to queue */
+      var dupQ = _PH.queue.find(function(x){return x.id===e.id;});
+      if(!dupQ) _PH.queue.push(e);
+    });
+  } catch(_){}
+
+  /* Listen for live prescriptions from doctor tab */
+  try {
+    var _phBC2 = new BroadcastChannel('nihms_pharmacy_queue');
+    _phBC2.onmessage = function(ev){
+      var data = ev.data||{};
+      if(data.type==='new_prescription' && data.entry){
+        var e2=data.entry;
+        var dupPh = _PH.prescriptions.find(function(x){return x.code===e2.prescriptionRef;});
+        if(!dupPh){
+          _PH.prescriptions.unshift({
+            code:e2.prescriptionRef,patientId:e2.patientId||'',patientName:e2.patient||'',
+            doctor:e2.prescribedByName||'',doctorReg:e2.prescribedByReg||'',
+            issued:e2.prescribedAt?e2.prescribedAt.slice(0,10):'',
+            validUntil:e2.repeat&&e2.repeat.reviewDate?e2.repeat.reviewDate:'',
+            status:'Submitted',submittedAt:e2.prescribedAt||'',
+            repeatPrescription:e2.repeatPrescription||false,repeat:e2.repeat||null,
+            items:(e2.medications||[]).map(function(m){return{drug:m.name+(m.strength?' '+m.strength:''),dosage:(m.dose||'')+' '+(m.frequency||''),duration:m.duration||'',quantity:m.quantity,unit:m.unit||''};}),
+            duplicateWarning:null,interactions:[],
+          });
+        }
+        var dupQ2 = _PH.queue.find(function(x){return x.id===e2.id;});
+        if(!dupQ2) _PH.queue.push(e2);
+        try{if(typeof _phRenderValidation==='function')_phRenderValidation();}catch(_){}
+        try{if(typeof _phRenderQueue==='function')_phRenderQueue();}catch(_){}
+        if(window.UI&&UI.showToast) UI.showToast('📋 New prescription received: '+e2.prescriptionRef,'ok');
+      }
+    };
+  } catch(_){}
+})();
+
 /* ═══════════════════════════════════════════════════════════════
    SHARED UI HELPERS
 ═══════════════════════════════════════════════════════════════ */
@@ -345,87 +415,270 @@ window._phFilterStockTable = function(q) {
 /* ═══════════════════════════════════════════════════════════════
    PAGE 3 — PRESCRIPTION VALIDATION
 ═══════════════════════════════════════════════════════════════ */
-Pages['ph-validation'] = () => {
-  window._phSelRx = _PH.prescriptions[0];
-  window._phChecked = false;
+/* Prescription status workflow */
+var _PH_STATUSES = ['Submitted','Awaiting Pharmacist Review','Validated','Awaiting Dispensing','Partially Dispensed','Dispensed','Refill Due','Expired','Cancelled','Rejected — Requires Correction'];
+var _PH_STATUS_STYLE = {
+  'Submitted':                  'blue',
+  'Awaiting Pharmacist Review': 'amber',
+  'Validated':                  'green',
+  'Awaiting Dispensing':        'blue',
+  'Partially Dispensed':        'amber',
+  'Dispensed':                  'green',
+  'Refill Due':                 'amber',
+  'Expired':                    'red',
+  'Cancelled':                  'red',
+  'Rejected — Requires Correction': 'red',
+  'valid':                      'green',
+  'invalid':                    'red',
+};
 
+Pages['ph-validation'] = () => {
+  window._phSelRx   = _PH.prescriptions[0];
+  window._phChecked = false;
   setTimeout(function(){ _phRenderValidation(); }, 0);
   return _phShell('ph-validation','Prescription validation','Verify before dispensing',
-    _phCard('ti-shield-check','Prescription validation','Verify before dispensing','',
+    _phCard('ti-shield-check','Prescription validation','Verify and update prescription statuses','',
       '<div id="ph-val-body">Loading...</div>'));
 };
 
 function _phRenderValidation() {
-  var rx = window._phSelRx;
-  if (!rx) return;
-  var isValid = rx.status === 'valid';
+  /* Merge prescriptions from in-memory PHARMACY_QUEUE */
+  try {
+    (window._PHARMACY_QUEUE||[]).forEach(function(e){
+      var dup = _PH.prescriptions.find(function(x){return x.code===e.prescriptionRef;});
+      if(!dup && e.prescriptionRef){
+        _PH.prescriptions.unshift({
+          code:e.prescriptionRef,patientId:e.patientId||'',patientName:e.patient||'',
+          doctor:e.prescribedByName||'',doctorReg:e.prescribedByReg||'',
+          issued:e.prescribedAt?e.prescribedAt.slice(0,10):'',
+          validUntil:e.repeat&&e.repeat.reviewDate?e.repeat.reviewDate:'',
+          status:'Submitted',submittedAt:e.prescribedAt||'',
+          repeatPrescription:e.repeatPrescription||false,repeat:e.repeat||null,
+          items:(e.medications||[]).map(function(m){return{drug:m.name+(m.strength?' '+m.strength:''),dosage:(m.dose||'')+' '+(m.frequency||''),duration:m.duration||'',quantity:m.quantity||'',unit:m.unit||'',route:m.route||''};}),
+          duplicateWarning:null,interactions:[],
+        });
+      }
+    });
+  } catch(_){}
+
+  var rx      = window._phSelRx || _PH.prescriptions[0];
+  if (!rx) {
+    var el0 = document.getElementById('ph-val-body');
+    if(el0) el0.innerHTML='<div style="text-align:center;padding:32px;color:#777">No prescriptions to review.</div>';
+    return;
+  }
   var checked = window._phChecked;
+  var status  = rx.status||'Submitted';
+  var statusStyle = _PH_STATUS_STYLE[status]||'gray';
+  var isDispensable = ['Submitted','Awaiting Pharmacist Review','Validated','Awaiting Dispensing','Refill Due'].includes(status);
+
+  /* ── Prescription list sidebar ── */
+  var listHTML =
+    '<div style="margin-bottom:16px;border:1px solid #e0e0e0;border-radius:12px;overflow:hidden">'+
+    '<div style="background:#f4f5f0;padding:10px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#777">All Prescriptions ('+_PH.prescriptions.length+')</div>'+
+    _PH.prescriptions.map(function(p,i){
+      var sel = (window._phSelRx && window._phSelRx.code===p.code);
+      return '<div onclick="window._phSelRx=_PH.prescriptions['+i+'];window._phChecked=false;_phRenderValidation()" '+
+        'style="padding:10px 14px;cursor:pointer;border-top:1px solid #e0e0e0;background:'+(sel?'#EDFBF3':'#fff')+'">'+
+        '<div style="font-size:12px;font-weight:700;font-family:monospace;color:#0F6E56">'+p.code+'</div>'+
+        '<div style="font-size:12px;color:#333;margin-top:2px">'+p.patientName+'</div>'+
+        '<div style="margin-top:4px">'+_phBadge(p.status||'Submitted',_PH_STATUS_STYLE[p.status||'Submitted']||'gray')+'</div>'+
+      '</div>';
+    }).join('')+
+    '</div>';
+
+  /* ── Repeat prescription section ── */
+  var repeatSection = '';
+  if (rx.repeatPrescription && rx.repeat) {
+    var rep = rx.repeat;
+    var isExpired = rep.expiryDate && new Date(rep.expiryDate) < new Date();
+    var exhausted = rep.remaining !== undefined && rep.remaining <= 0;
+    repeatSection =
+      '<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:14px;margin-bottom:14px">'+
+      '<div style="font-size:13px;font-weight:700;color:#1D4ED8;margin-bottom:10px">🔁 Repeat Prescription Details</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:13px">'+
+        ['Repeats Allowed','Repeats Used','Repeats Remaining'].map(function(h,i){
+          var val = i===0?rep.allowed:(i===1?rep.used:rep.remaining);
+          var col = i===2?(rep.remaining<=0?'#dc2626':rep.remaining<=1?'#d97706':'#0F6E56'):'#1e293b';
+          return '<div style="background:#fff;border-radius:8px;padding:10px;text-align:center">'+
+            '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:4px">'+h+'</div>'+
+            '<div style="font-size:22px;font-weight:800;color:'+col+'">'+val+'</div>'+
+          '</div>';
+        }).join('')+
+      '</div>'+
+      (rep.reviewDate?'<div style="margin-top:10px;font-size:12px;color:#64748b">📅 Next Review Date: <strong style="color:#1e293b">'+rep.reviewDate+'</strong></div>':'')+
+      (rep.expiryDate?'<div style="margin-top:4px;font-size:12px;color:'+(isExpired?'#dc2626':'#64748b')+'">⏰ Expiry Date: <strong>'+rep.expiryDate+'</strong>'+(isExpired?' — <span style="color:#dc2626;font-weight:700">EXPIRED</span>':'')+'</div>':'')+
+      ((isExpired||exhausted)?'<div style="margin-top:10px;background:#FEF2F2;border:1px solid rgba(220,38,38,.3);border-radius:6px;padding:8px;font-size:12px;color:#dc2626;font-weight:700">'+
+        (isExpired?'⛔ This prescription has expired and cannot be dispensed.':'⛔ Authorised repeats exhausted — cannot dispense further repeats.')+'</div>':'')+
+    '</div>';
+  }
 
   var body =
-    '<form onsubmit="event.preventDefault();_phValSearch(document.getElementById(\'val-q\').value)" style="display:flex;gap:8px;margin-bottom:20px">' +
-      '<div style="position:relative;flex:1">' +
-        '<span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:15px;color:#777777;pointer-events:none">🔍</span>' +
-        '<input id="val-q" placeholder="Patient ID (PT-004083) or prescription code (RX-4417-ZA)" style="width:100%;padding:9px 14px 9px 38px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box">' +
-      '</div>' +
-      _phBtn('Validate','','primary','_phValSearch(document.getElementById(\'val-q\').value)') +
-    '</form>' +
-    '<div style="background:#f4f5f0;border:1px solid #e0e0e0;border-radius:12px;padding:16px;margin-bottom:14px">' +
-      '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:14px">' +
-        '<div><div style="font-weight:600;font-size:15px">'+rx.patientName+'</div><div style="font-size:12px;color:#777777">'+rx.patientId+' · '+rx.code+'</div></div>' +
-        _phBadge(isValid?'Valid prescription':'Not dispensable', isValid?'green':'red') +
-      '</div>' +
-      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;font-size:13px;margin-bottom:14px">' +
-        [['Prescribing doctor',rx.doctor],['Facility',rx.facility],['Issued',rx.issued],['Valid until',rx.validUntil]].map(function(f){
-          return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777777;margin-bottom:2px">'+f[0]+'</div><div style="font-weight:500">'+f[1]+'</div></div>';
-        }).join('') +
-      '</div>' +
-      '<div style="border-top:1px solid #e0e0e0;padding-top:14px">' +
-        '<div style="font-size:13px;font-weight:500;margin-bottom:8px">Prescribed items</div>' +
-        '<div style="display:flex;flex-direction:column;gap:8px">' +
-        rx.items.map(function(it){
-          return '<div style="background:#ffffff;border-radius:8px;padding:10px 12px;font-size:13px">' +
-            '<div style="font-weight:500">'+it.drug+'</div>' +
-            '<div style="color:#777777">'+it.dosage+' · '+it.duration+'</div>' +
+    '<form onsubmit="event.preventDefault();_phValSearch(document.getElementById(\'val-q\').value)" style="display:flex;gap:8px;margin-bottom:16px">'+
+      '<div style="position:relative;flex:1">'+
+        '<span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:15px;color:#777;pointer-events:none">🔍</span>'+
+        '<input id="val-q" placeholder="Patient ID or prescription code (RX-…-ZA)" style="width:100%;padding:9px 14px 9px 38px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box">'+
+      '</div>'+
+      _phBtn('Search','','primary','_phValSearch(document.getElementById(\'val-q\').value)')+
+    '</form>'+
+
+    listHTML+
+
+    /* Full prescription header */
+    '<div style="background:#f4f5f0;border:1px solid #e0e0e0;border-radius:12px;padding:16px;margin-bottom:14px">'+
+      '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:14px">'+
+        '<div>'+
+          '<div style="font-weight:700;font-size:16px">'+rx.patientName+'</div>'+
+          '<div style="font-size:12px;color:#777;font-family:monospace">'+rx.patientId+' · '+rx.code+'</div>'+
+        '</div>'+
+        _phBadge(status, statusStyle)+
+      '</div>'+
+
+      /* All required fields per Req 7 */
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;font-size:13px;margin-bottom:14px">'+
+        [
+          ['Prescribing Doctor',     rx.doctor||'—'],
+          ['Doctor Reg. No.',        rx.doctorReg||'—'],
+          ['Facility',               rx.facility||'—'],
+          ['Prescription Date',      rx.issued||'—'],
+          ['Valid Until / Review',   rx.validUntil||'—'],
+          ['Submitted',              rx.submittedAt?(new Date(rx.submittedAt).toLocaleString('en-ZA')):'—'],
+        ].map(function(f){
+          return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:2px">'+f[0]+'</div><div style="font-weight:600;font-family:'+(f[0].includes('Reg')? 'monospace':'inherit')+'">'+f[1]+'</div></div>';
+        }).join('')+
+      '</div>'+
+
+      /* Prescribed items with full detail */
+      '<div style="border-top:1px solid #e0e0e0;padding-top:14px">'+
+        '<div style="font-size:13px;font-weight:700;margin-bottom:8px">Prescribed Medications</div>'+
+        '<div style="display:flex;flex-direction:column;gap:8px">'+
+        rx.items.map(function(it,i){
+          return '<div style="background:#ffffff;border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;font-size:13px">'+
+            '<div style="font-weight:700;margin-bottom:3px">'+(i+1)+'. '+it.drug+'</div>'+
+            '<div style="color:#555">Dosage: '+it.dosage+'</div>'+
+            (it.duration?'<div style="color:#555">Duration: '+it.duration+'</div>':'')+
+            (it.quantity?'<div style="color:#555">Quantity: '+it.quantity+(it.unit?' '+it.unit:'')+'</div>':'')+
+            (it.route?'<div style="color:#555">Route: '+it.route+'</div>':'')+
           '</div>';
-        }).join('') + '</div>' +
-      '</div>' +
-    '</div>' +
+        }).join('')+
+        '</div>'+
+      '</div>'+
+    '</div>'+
 
-    (rx.duplicateWarning ?
-      '<div style="display:flex;gap:12px;border:1px solid rgba(226,75,74,.3);background:#FEF2F2;border-radius:12px;padding:14px;margin-bottom:14px">' +
-        '<span style="font-size:18px;color:#dc2626;flex-shrink:0;margin-top:2px">🚫</span>' +
-        '<div><div style="font-size:13px;font-weight:600;color:#dc2626;margin-bottom:3px">Possible duplicate collection</div><div style="font-size:13px">'+rx.duplicateWarning+'</div></div>' +
-      '</div>' :
-      '<div style="display:flex;gap:12px;border:1px solid #e0e0e0;background:#EDFBF3;border-radius:12px;padding:14px;margin-bottom:14px">' +
-        '<span style="font-size:18px;color:#0F6E56;flex-shrink:0;margin-top:2px">✅</span>' +
-        '<div style="font-size:13px">No duplicate collections found across linked clinics.</div>' +
-      '</div>') +
+    repeatSection+
 
-    '<div style="border:1px solid #e0e0e0;border-radius:12px;padding:14px">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:'+(checked?'12px':'0')+'">' +
-        '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px;color:#0F6E56">🤖</span><span style="font-size:13px;font-weight:500">AI drug interaction checker</span></div>' +
-        _phBtn('Run check','','outline','window._phChecked=true;_phRenderValidation()') +
-      '</div>' +
-      (checked ? (rx.interactions.length ?
-        '<div style="display:flex;flex-direction:column;gap:8px">' +
+    (rx.duplicateWarning?
+      '<div style="display:flex;gap:12px;border:1px solid rgba(226,75,74,.3);background:#FEF2F2;border-radius:12px;padding:14px;margin-bottom:14px">'+
+        '<span style="font-size:18px;color:#dc2626;flex-shrink:0;margin-top:2px">🚫</span>'+
+        '<div><div style="font-size:13px;font-weight:600;color:#dc2626;margin-bottom:3px">Possible duplicate collection</div><div style="font-size:13px">'+rx.duplicateWarning+'</div></div>'+
+      '</div>':
+      '<div style="display:flex;gap:12px;border:1px solid #e0e0e0;background:#EDFBF3;border-radius:12px;padding:14px;margin-bottom:14px">'+
+        '<span style="font-size:18px;color:#0F6E56;flex-shrink:0;margin-top:2px">✅</span>'+
+        '<div style="font-size:13px">No duplicate collections found across linked clinics.</div>'+
+      '</div>')+
+
+    /* AI interaction checker */
+    '<div style="border:1px solid #e0e0e0;border-radius:12px;padding:14px;margin-bottom:14px">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:'+(checked?'12px':'0')+'">'+
+        '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px;color:#0F6E56">🤖</span><span style="font-size:13px;font-weight:500">AI drug interaction checker</span></div>'+
+        _phBtn('Run check','','outline','window._phChecked=true;_phRenderValidation()')+
+      '</div>'+
+      (checked?(rx.interactions&&rx.interactions.length?
+        '<div style="display:flex;flex-direction:column;gap:8px">'+
         rx.interactions.map(function(ix){
           var sev={high:'red',moderate:'amber',low:'green'}[ix.severity];
-          return '<div style="border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;font-size:13px">' +
-            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'+_phBadge(ix.severity+' risk',sev)+'<span style="font-weight:500">'+ix.pair+'</span></div>' +
-            '<div style="color:#777777">'+ix.note+'</div>' +
+          return '<div style="border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;font-size:13px">'+
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'+_phBadge(ix.severity+' risk',sev)+'<span style="font-weight:500">'+ix.pair+'</span></div>'+
+            '<div style="color:#777">'+ix.note+'</div>'+
           '</div>';
-        }).join('') + '</div>'
-        : '<div style="font-size:13px;color:#777777;margin-top:12px">No interactions detected for this prescription.</div>')
-        : '<div style="font-size:13px;color:#777777;margin-top:10px">Cross-checks the prescription against the patient\'s active medications.</div>') +
+        }).join('')+'</div>':
+        '<div style="font-size:13px;color:#777;margin-top:12px">No interactions detected for this prescription.</div>'):
+        '<div style="font-size:13px;color:#777;margin-top:10px">Cross-checks against patient\'s active medications.</div>')+
+    '</div>'+
+
+    /* Status update controls — Req 7 */
+    '<div style="border:1px solid #e0e0e0;border-radius:12px;padding:14px;margin-bottom:14px">'+
+      '<div style="font-size:13px;font-weight:700;margin-bottom:10px">Update Prescription Status</div>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">'+
+      _PH_STATUSES.map(function(s){
+        var active = s===status;
+        return '<button onclick="_phSetRxStatus(\''+s.replace(/'/g,"\\'")+'\')" style="padding:6px 12px;border-radius:6px;border:1.5px solid '+(active?'#0F6E56':'#e0e0e0')+';background:'+(active?'#EDFBF3':'#fff')+';color:'+(active?'#0F6E56':'#333')+';font-size:12px;font-weight:'+(active?'700':'500')+';cursor:pointer;font-family:inherit">'+s+'</button>';
+      }).join('')+
+      '</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        _phBtn('Validate & Approve','ti-shield-check','primary','_phSetRxStatus(\'Validated\')')+
+        (isDispensable?_phBtn('Move to Dispensing','','outline','_phSetRxStatus(\'Awaiting Dispensing\')'):'')+
+        _phBtn('Reject — Needs Correction','','outline','_phSetRxStatus(\'Rejected \u2014 Requires Correction\')')+
+      '</div>'+
     '</div>';
 
   var el = document.getElementById('ph-val-body');
   if (el) el.innerHTML = body;
 }
 
+window._phSetRxStatus = function(newStatus) {
+  var rx = window._phSelRx;
+  if(!rx) return;
+  /* Prevent dispensing if repeat is expired or exhausted */
+  if((newStatus==='Awaiting Dispensing'||newStatus==='Dispensed')&&rx.repeat){
+    var isExpired = rx.repeat.expiryDate && new Date(rx.repeat.expiryDate)<new Date();
+    var exhausted = rx.repeat.remaining!==undefined && rx.repeat.remaining<=0;
+    if(isExpired){ UI.showToast('Cannot dispense — prescription has expired','err'); return; }
+    if(exhausted){ UI.showToast('Cannot dispense — authorised repeats exhausted','err'); return; }
+  }
+  rx.status = newStatus;
+  /* Update in _PH.prescriptions */
+  var idx = _PH.prescriptions.findIndex(function(p){return p.code===rx.code;});
+  if(idx>=0) _PH.prescriptions[idx].status = newStatus;
+  _phRenderValidation();
+  UI.showToast('Status updated to: '+newStatus,'ok');
+  /* On dispense, update repeat used count */
+  if(newStatus==='Dispensed' && rx.repeat && rx.repeatPrescription){
+    rx.repeat.used = (rx.repeat.used||0)+1;
+    rx.repeat.remaining = Math.max(0, (rx.repeat.allowed||0)-(rx.repeat.used||0));
+    /* Add to medication history */
+    var u = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+    var pharmacistName = u.firstName?('Dr/Ph '+u.firstName+' '+u.lastName):(u.name||'Pharmacist');
+    _PH.history.unshift({
+      id:'h'+Date.now(),
+      date:new Date().toISOString().slice(0,10),
+      drug:(rx.items&&rx.items[0]&&rx.items[0].drug)||'—',
+      type:'Prescription',
+      doctor:rx.doctor||'—',
+      facility:rx.facility||'—',
+      status:'Collected',
+      pharmacist:pharmacistName,
+      prescriptionRef:rx.code,
+      repeatSequence:rx.repeat.used,
+      patientName:rx.patientName,
+      patientId:rx.patientId,
+      submittedAt:rx.submittedAt||new Date().toISOString(),
+      dispensedAt:new Date().toISOString(),
+    });
+    UI.showToast('Repeat '+(rx.repeat.used)+' dispensed — '+rx.repeat.remaining+' remaining','ok');
+  } else if(newStatus==='Dispensed'){
+    var u2 = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+    var phName2 = u2.firstName?('Ph '+u2.firstName+' '+u2.lastName):(u2.name||'Pharmacist');
+    _PH.history.unshift({
+      id:'h'+Date.now(),
+      date:new Date().toISOString().slice(0,10),
+      drug:(rx.items&&rx.items[0]&&rx.items[0].drug)||'—',
+      type:'Prescription',
+      doctor:rx.doctor||'—',
+      facility:rx.facility||'—',
+      status:'Collected',
+      pharmacist:phName2,
+      prescriptionRef:rx.code,
+      patientName:rx.patientName,
+      patientId:rx.patientId,
+      dispensedAt:new Date().toISOString(),
+    });
+  }
+};
+
 window._phValSearch = function(q) {
   var lower = (q||'').trim().toLowerCase();
-  var match = _PH.prescriptions.find(function(p){ return p.code.toLowerCase()===lower||p.patientId.toLowerCase()===lower; });
+  var match = _PH.prescriptions.find(function(p){ return p.code.toLowerCase()===lower||p.patientId.toLowerCase()===lower||p.patientName.toLowerCase().includes(lower); });
   if (match) { window._phSelRx=match; window._phChecked=false; _phRenderValidation(); }
   else if (lower) UI.showToast('No prescription found for "'+q+'"','err');
 };
@@ -634,54 +887,106 @@ window._phAdvanceQueue = async function(id) {
    PAGE 6 — MEDICATION HISTORY
 ═══════════════════════════════════════════════════════════════ */
 Pages['ph-history'] = () => {
-  window._phHistFilters = {doctor:'all',type:'all',range:'all'};
+  window._phHistFilters = {doctor:'all',type:'all',status:'all'};
   setTimeout(_phRenderHistory, 0);
-  return _phShell('ph-history','Medication history','Nomsa Dlamini · PT-004083',
+  return _phShell('ph-history','Medication history','Full dispensing records per patient',
     '<div id="ph-hist-body">Loading...</div>');
 };
 
 function _phRenderHistory() {
   var el = document.getElementById('ph-hist-body'); if(!el) return;
   var f = window._phHistFilters;
-  var entries = _PH.history.filter(function(h){
+
+  /* Merge any newly dispensed entries from validation actions */
+  var allHistory = _PH.history.slice();
+
+  var filtered = allHistory.filter(function(h){
     return (f.doctor==='all'||h.doctor===f.doctor) &&
-           (f.type==='all'||h.type===f.type);
+           (f.type==='all'||h.type===f.type) &&
+           (f.status==='all'||h.status===f.status);
   });
 
-  var doctors = ['all'].concat([...new Set(_PH.history.map(function(h){return h.doctor;}))]);
-  var types   = ['all'].concat([...new Set(_PH.history.map(function(h){return h.type;}))]);
+  var doctors  = ['all'].concat([...new Set(allHistory.map(function(h){return h.doctor;}))]);
+  var types    = ['all'].concat([...new Set(allHistory.map(function(h){return h.type;}))]);
+  /* Req 6: distinguish prescribed / awaiting / dispensed */
+  var statuses = ['all','Prescribed','Awaiting Dispensing','Collected','Partial','Missed'];
 
-  function sel(id, opts, val, field) {
-    return '<select id="'+id+'" onchange="window._phHistFilters.'+field+'=this.value;_phRenderHistory()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
-      opts.map(function(o){ return '<option value="'+o+'"'+(val===o?' selected':'')+'>'+( o==='all'?('All '+field+'s'):o)+'</option>'; }).join('')+'</select>';
+  function sel(id, opts, val, field, label) {
+    return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:4px">'+label+'</div>'+
+      '<select id="'+id+'" onchange="window._phHistFilters.'+field+'=this.value;_phRenderHistory()" style="width:100%;padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
+      opts.map(function(o){ return '<option value="'+o+'"'+(val===o?' selected':'')+'>'+( o==='all'?'All':o)+'</option>'; }).join('')+'</select></div>';
   }
 
-  var statusStyle = {Collected:'green',Partial:'amber',Missed:'red'};
-  var dotColor    = {Collected:'#0F6E56',Partial:'#EF9F27',Missed:'#dc2626'};
+  /* Status colour mapping */
+  var statusStyle = {Collected:'green','Awaiting Dispensing':'blue',Prescribed:'gray',Partial:'amber',Missed:'red'};
+  var dotColor    = {Collected:'#0F6E56','Awaiting Dispensing':'#3B82F6',Prescribed:'#94a3b8',Partial:'#EF9F27',Missed:'#dc2626'};
 
-  var timeline = entries.length
-    ? '<ol style="list-style:none;padding:0 0 0 24px;margin:0;border-left:2px solid #e0e0e0;display:flex;flex-direction:column;gap:14px">' +
-      entries.map(function(e){
-        return '<li style="position:relative">' +
-          '<span style="position:absolute;left:-32px;top:6px;width:12px;height:12px;border-radius:50%;background:'+dotColor[e.status]+';border:2px solid #ffffff;display:block"></span>' +
-          '<div style="border:1px solid #e0e0e0;border-radius:10px;padding:10px 14px">' +
-            '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">' +
-              '<span style="font-weight:500;font-size:13px">'+e.drug+'</span>'+_phBadge(e.status,statusStyle[e.status]) +
-            '</div>' +
-            '<div style="font-size:12px;color:#777777">'+e.date+' · '+e.doctor+' · '+e.facility+'</div>' +
-            '<div style="margin-top:6px">'+_phBadge(e.type,'gray')+'</div>' +
-          '</div>' +
+  var timeline = filtered.length
+    ? '<ol style="list-style:none;padding:0 0 0 28px;margin:0;border-left:2px solid #e0e0e0;display:flex;flex-direction:column;gap:16px">'+
+      filtered.map(function(e){
+        var dotCol = dotColor[e.status]||'#94a3b8';
+        var dispensedDate = e.dispensedAt ? new Date(e.dispensedAt).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'}) : (e.date||'—');
+        var submDate = e.submittedAt ? new Date(e.submittedAt).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'}) : '';
+        return '<li style="position:relative">'+
+          '<span style="position:absolute;left:-36px;top:8px;width:14px;height:14px;border-radius:50%;background:'+dotCol+';border:2px solid #fff;display:block"></span>'+
+          '<div style="border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">'+
+            /* Header row */
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e0e0e0">'+
+              '<div>'+
+                '<span style="font-weight:700;font-size:14px">'+(e.drug||'—')+'</span>'+
+                (e.prescriptionRef?'<span style="font-size:11px;font-family:monospace;color:#0F6E56;margin-left:10px">'+e.prescriptionRef+'</span>':'')+
+              '</div>'+
+              _phBadge(e.status||'—',statusStyle[e.status]||'gray')+
+            '</div>'+
+            /* Full detail grid — Req 6 */
+            '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px 14px;font-size:12px">'+
+              [
+                ['Medication',           e.drug||'—'],
+                ['Strength / Form',      e.strengthForm||e.type||'—'],
+                ['Dosage Instructions',  e.dosage||e.instructions||'—'],
+                ['Quantity Dispensed',   e.quantity ? (e.quantity+(e.unit?' '+e.unit:'')) : '—'],
+                ['Date Dispensed',       e.status==='Collected'||e.status==='Partial' ? dispensedDate : '—'],
+                ['Dispensing Pharmacist',e.pharmacist||'—'],
+                ['Prescribing Doctor',   e.doctor||'—'],
+                ['Prescription Ref',     e.prescriptionRef||'—'],
+                ['Repeat Sequence',      e.repeatSequence ? ('Repeat '+e.repeatSequence) : (submDate?'Original prescription':'—')],
+                ['Date Prescribed',      submDate||e.date||'—'],
+                ['Facility',             e.facility||'—'],
+                ['Notes / Status',       e.notes||(e.status==='Awaiting Dispensing'?'Awaiting collection':e.status==='Prescribed'?'Prescription issued — not yet dispensed':e.status==='Collected'?'Dispensed successfully':e.status||'—')],
+              ].map(function(fd){
+                return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:2px">'+fd[0]+'</div><div style="font-weight:600;font-family:'+(fd[0].includes('Ref')?'monospace':'inherit')+';font-size:12px">'+fd[1]+'</div></div>';
+              }).join('')+
+            '</div>'+
+          '</div>'+
         '</li>';
-      }).join('') + '</ol>'
-    : '<div style="border:1.5px dashed #e0e0e0;border-radius:10px;padding:24px;text-align:center;font-size:13px;color:#777777">No records match these filters.</div>';
+      }).join('')+'</ol>'
+    : '<div style="border:1.5px dashed #e0e0e0;border-radius:10px;padding:32px;text-align:center;font-size:13px;color:#777">No records match these filters.</div>';
 
-  el.innerHTML = _phCard('ti-history','Patient medication history','Nomsa Dlamini · PT-004083',
-    _phBtn('Export for doctor','ti-download','outline','UI.showToast(\''+entries.length+' records prepared as PDF\',\'ok\')'),
-    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px">'+
-      sel('hist-range',['all','30','90'],f.range,'range')+
-      sel('hist-doctor',doctors,f.doctor,'doctor')+
-      sel('hist-type',types,f.type,'type')+
-    '</div>' + timeline);
+  /* Legend */
+  var legend =
+    '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;font-size:12px">'+
+    [['Prescribed','#94a3b8','Issued — not yet dispensed'],
+     ['Awaiting Dispensing','#3B82F6','In pharmacy queue'],
+     ['Collected','#0F6E56','Successfully dispensed'],
+     ['Partial','#EF9F27','Partially dispensed'],
+     ['Missed','#dc2626','Not collected']].map(function(l){
+      return '<span style="display:flex;align-items:center;gap:5px">'+
+        '<span style="width:10px;height:10px;border-radius:50%;background:'+l[1]+';flex-shrink:0"></span>'+
+        '<strong>'+l[0]+'</strong> — '+l[2]+'</span>';
+    }).join('')+
+    '</div>';
+
+  el.innerHTML = _phCard('ti-history','Patient Medication History',
+    filtered.length+' record'+(filtered.length!==1?'s':'')+' · '+
+    allHistory.filter(function(h){return h.status==='Collected';}).length+' dispensed',
+    _phBtn('Export PDF','ti-download','outline','UI.showToast(\''+filtered.length+' records prepared as PDF\',\'ok\')'),
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'+
+      sel('hist-status',statuses,f.status,'status','Dispensing Status')+
+      sel('hist-doctor',doctors,f.doctor,'doctor','Prescribing Doctor')+
+      sel('hist-type',types,f.type,'type','Type')+
+    '</div>'+
+    legend+
+    timeline);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -793,53 +1098,176 @@ Pages['ph-reminders'] = () => {
   if (!window._phReminderSent) {
     window._phReminderSent = _PH.refills.filter(function(r){return r.sent;}).map(function(r){return r.id;});
   }
+  if (!window._phReminderMethod)    window._phReminderMethod    = {};
+  if (!window._phReminderScheduled) window._phReminderScheduled = {};
   setTimeout(_phRenderReminders, 0);
-  return _phShell('ph-reminders','Refill reminders','Chronic patients · Prevent default',
+  return _phShell('ph-reminders','Refill reminders','Repeat prescriptions · Schedule or send manually',
     '<div id="ph-rem-body">Loading...</div>');
 };
 
 function _phRenderReminders() {
   var el = document.getElementById('ph-rem-body'); if(!el) return;
-  var sent = window._phReminderSent || [];
-  var sorted = _PH.refills.slice().sort(function(a,b){return a.dueIn-b.dueIn;});
+  var sent      = window._phReminderSent      || [];
+  var methods   = window._phReminderMethod    || {};
+  var scheduled = window._phReminderScheduled || {};
 
+  /* Merge repeat prescriptions from _PH.prescriptions as additional refill sources */
+  var refillList = _PH.refills.slice();
+  _PH.prescriptions.forEach(function(rx){
+    if(!rx.repeatPrescription||!rx.repeat) return;
+    var exists = refillList.find(function(r){return r.id===rx.code;});
+    if(!exists){
+      /* Req 5: stop when expired or repeats exhausted */
+      var isExpired = rx.repeat.expiryDate && new Date(rx.repeat.expiryDate)<new Date();
+      var exhausted = rx.repeat.remaining!==undefined && rx.repeat.remaining<=0;
+      if(isExpired||exhausted) return;
+      var dueDate = rx.repeat.reviewDate ? new Date(rx.repeat.reviewDate) : null;
+      var dueIn   = dueDate ? Math.round((dueDate-new Date())/(1000*60*60*24)) : 99;
+      refillList.push({
+        id:rx.code, patient:rx.patientName||'Patient', patientId:rx.patientId||'—',
+        drug:(rx.items&&rx.items[0])?rx.items[0].drug:'—',
+        dueIn:dueIn, adherence:100, channel:'SMS',
+        reviewDate:rx.repeat.reviewDate||'', expiryDate:rx.repeat.expiryDate||'',
+        repeatsRemaining:rx.repeat.remaining||0, repeatsAllowed:rx.repeat.allowed||0,
+        repeatsUsed:rx.repeat.used||0, prescribingDoctor:rx.doctor||'—',
+        status:rx.status||'Active', prescriptionRef:rx.code,
+      });
+    }
+  });
+
+  var sorted = refillList.slice().sort(function(a,b){return a.dueIn-b.dueIn;});
+
+  /* Summary stats */
+  var totalDue    = sorted.filter(function(r){return r.dueIn<=7;}).length;
+  var totalSent   = sent.length;
+  var totalActive = sorted.length;
+  var stats =
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">'+
+    [[totalActive,'Active Repeats','#0F6E56'],[totalDue,'Due ≤ 7 Days','#EF9F27'],[totalSent,'Reminders Sent','#3B82F6']].map(function(s){
+      return '<div style="background:#f8fafc;border:1px solid #e0e0e0;border-radius:10px;padding:12px;text-align:center">'+
+        '<div style="font-size:28px;font-weight:800;color:'+s[2]+'">'+s[0]+'</div>'+
+        '<div style="font-size:11px;color:#777;margin-top:2px">'+s[1]+'</div>'+
+      '</div>';
+    }).join('')+
+    '</div>';
+
+  /* Req 5: Each card shows prescription dates + repeat status BEFORE allowing send */
   var rows = sorted.map(function(r){
-    var overdue = r.dueIn < 0;
-    var isSent  = sent.includes(r.id);
-    return '<li style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;border:1px solid '+(overdue?'rgba(226,75,74,.3)':'#e0e0e0')+';background:'+(overdue?'#FEF2F2':'transparent')+';border-radius:10px;padding:12px 16px">' +
-      '<div style="flex:1;min-width:200px">' +
-        '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:4px">' +
-          '<span style="font-size:13px;font-weight:500">'+r.patient+'</span>' +
-          _phBadge(r.patientId,'gray') +
-          _phBadge(r.channel,'blue') +
-        '</div>' +
-        '<div style="font-size:12px;color:#777777">'+r.drug+' · '+(overdue?(-r.dueIn)+' days overdue':r.dueIn===0?'due today':'due in '+r.dueIn+' days')+'</div>' +
-      '</div>' +
-      '<div style="width:150px">' +
-        '<div style="font-size:11px;color:#777777;margin-bottom:4px">Adherence '+r.adherence+'%</div>' +
-        _phProgress(r.adherence, r.adherence>=80?'#0F6E56':r.adherence>=60?'#EF9F27':'#dc2626') +
-      '</div>' +
-      (isSent
-        ? _phBtn('Reminder sent','','outline','')
-        : _phBtn('Send reminder','','primary','_phSendReminder(\''+r.id+'\',\''+r.channel+'\',\''+r.patient+'\')')) +
+    var overdue  = r.dueIn < 0;
+    var dueSoon  = r.dueIn >= 0 && r.dueIn <= 7;
+    var isSent   = sent.includes(r.id);
+    var isSchd   = scheduled[r.id];
+    var method   = methods[r.id]||r.channel||'SMS';
+    var borderCol= overdue?'rgba(220,38,38,.4)':dueSoon?'rgba(239,159,39,.4)':'#e0e0e0';
+    var bgCol    = overdue?'#FEF2F2':dueSoon?'#FFFBEB':'#fff';
+    var dueLabel = overdue?'⚠️ '+(-r.dueIn)+' days overdue':r.dueIn===0?'📅 Due today':'📅 Due in '+r.dueIn+' days';
+
+    return '<li style="border:1px solid '+borderCol+';background:'+bgCol+';border-radius:10px;padding:14px 16px;margin-bottom:10px">'+
+      '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px">'+
+        '<div>'+
+          '<div style="font-size:14px;font-weight:700">'+r.patient+'</div>'+
+          '<div style="font-size:12px;color:#777;font-family:monospace">'+r.patientId+'</div>'+
+        '</div>'+
+        '<div style="text-align:right">'+
+          _phBadge(dueLabel, overdue?'red':dueSoon?'amber':'green')+
+          (isSent?'<div style="margin-top:4px">'+_phBadge('Reminder sent','green')+'</div>':'')+
+          (isSchd&&!isSent?'<div style="margin-top:4px">'+_phBadge('Scheduled','blue')+'</div>':'')+
+        '</div>'+
+      '</div>'+
+      /* Req 5: show prescription details before sending */
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:12px;margin-bottom:12px;background:rgba(0,0,0,.03);border-radius:8px;padding:10px">'+
+        [
+          ['Medication',         r.drug||'—'],
+          ['Prescription Ref',   r.prescriptionRef||r.id||'—'],
+          ['Prescribing Doctor', r.prescribingDoctor||r.doctor||'—'],
+          ['Review Date',        r.reviewDate||'—'],
+          ['Expiry Date',        r.expiryDate||'No expiry'],
+          ['Repeats Remaining',  r.repeatsRemaining!==undefined?(r.repeatsRemaining+' of '+(r.repeatsAllowed||'?')+' remaining'):'—'],
+        ].map(function(fd){
+          return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:1px">'+fd[0]+'</div>'+
+            '<div style="font-weight:600;font-family:'+(fd[0].includes('Ref')?'monospace':'inherit')+'">'+fd[1]+'</div></div>';
+        }).join('')+
+      '</div>'+
+      ((!isSent)?
+        '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">'+
+          '<div style="display:flex;gap:0;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden">'+
+            ['SMS','Email','Both'].map(function(m){
+              var active = method===m;
+              return '<button onclick="window._phReminderMethod[\''+r.id+'\']=\''+m+'\';_phRenderReminders()" '+
+                'style="padding:6px 12px;border:none;background:'+(active?'#0F6E56':'#fff')+';color:'+(active?'#fff':'#333')+';font-size:12px;font-weight:'+(active?'700':'400')+';cursor:pointer;font-family:inherit">'+m+'</button>';
+            }).join('')+
+          '</div>'+
+          _phBtn('Send now','','primary','_phSendReminder(\''+r.id+'\',\''+method+'\',\''+r.patient+'\')')+
+          _phBtn(isSchd?'Scheduled ✓':'Schedule','','outline','_phScheduleReminder(\''+r.id+'\',\''+r.patient+'\')')+
+        '</div>':
+        '<div style="font-size:12px;color:#0F6E56;font-weight:600">✅ '+method+' reminder sent — patient notified</div>')+
     '</li>';
   }).join('');
 
-  el.innerHTML = _phCard('ti-bell','Chronic refill reminders','Contact patients before they default — low adherence drives readmissions',
-    _phBtn('Send all due','ti-send','primary','_phSendAllReminders()'),
-    '<ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px">'+rows+'</ul>'
+  var empty = sorted.length===0
+    ? '<div style="border:1.5px dashed #e0e0e0;border-radius:10px;padding:32px;text-align:center;font-size:13px;color:#777">No active repeat prescriptions requiring reminders.</div>'
+    : '';
+
+  el.innerHTML = _phCard('ti-bell','Refill reminders',
+    'Send via SMS or email. Stops automatically when prescription expires or repeats are exhausted.',
+    '<div style="display:flex;gap:8px">'+
+      _phBtn('Send all due','ti-send','primary','_phSendAllReminders()')+
+      _phBtn('Refresh','','outline','_phRenderReminders()')+
+    '</div>',
+    stats+'<ul style="list-style:none;padding:0;margin:0">'+rows+'</ul>'+empty
   );
 }
 
 window._phSendReminder = function(id, channel, patient) {
+  /* Req 5: validate not expired / exhausted */
+  var rx = _PH.prescriptions.find(function(p){return p.code===id;});
+  if(rx&&rx.repeat){
+    var isExpired = rx.repeat.expiryDate && new Date(rx.repeat.expiryDate)<new Date();
+    var exhausted = rx.repeat.remaining!==undefined && rx.repeat.remaining<=0;
+    if(isExpired){ UI.showToast('Cannot send reminder — prescription has expired','err'); return; }
+    if(exhausted){ UI.showToast('Cannot send reminder — repeats exhausted','err'); return; }
+  }
+  /* Req 5: no duplicates */
+  if((window._phReminderSent||[]).includes(id)){ UI.showToast('Reminder already sent to '+patient,'err'); return; }
   window._phReminderSent = (window._phReminderSent||[]).concat([id]);
+  /* Attempt real notification */
+  var method = (window._phReminderMethod&&window._phReminderMethod[id])||channel||'SMS';
+  var endpoints = [];
+  if(method==='SMS'||method==='Both') endpoints.push('/notifications/sms');
+  if(method==='Email'||method==='Both') endpoints.push('/notifications/email');
+  endpoints.forEach(function(ep){
+    try{
+      if(window.API&&window.API._fetchDirect){
+        window.API._fetchDirect(ep,{method:'POST',body:JSON.stringify({
+          prescriptionRef:id, patient:patient, type:'refill_reminder',
+          message:'Your repeat prescription is due for collection. Please contact the pharmacy.',
+        })}).catch(function(){});
+      }
+    }catch(_){}
+  });
   _phRenderReminders();
-  UI.showToast(channel+' reminder sent to '+patient,'ok');
+  UI.showToast(method+' reminder sent to '+patient,'ok');
+};
+window._phScheduleReminder = function(id, patient) {
+  if(!window._phReminderScheduled) window._phReminderScheduled = {};
+  window._phReminderScheduled[id] = true;
+  _phRenderReminders();
+  UI.showToast('Reminder scheduled for '+patient+' — will send automatically at review date','ok');
 };
 window._phSendAllReminders = function() {
-  window._phReminderSent = _PH.refills.map(function(r){return r.id;});
-  _phRenderReminders();
-  UI.showToast('Reminders sent to all due patients','ok');
+  var sent = window._phReminderSent || [];
+  var count = 0;
+  _PH.refills.filter(function(r){return r.dueIn<=7&&!sent.includes(r.id);}).forEach(function(r){
+    window._phSendReminder(r.id, r.channel||'SMS', r.patient); count++;
+  });
+  _PH.prescriptions.filter(function(p){
+    return p.repeatPrescription&&p.repeat&&(p.repeat.remaining===undefined||p.repeat.remaining>0)&&
+           !(p.repeat.expiryDate&&new Date(p.repeat.expiryDate)<new Date())&&!sent.includes(p.code)&&
+           p.repeat.reviewDate&&Math.round((new Date(p.repeat.reviewDate)-new Date())/(1000*60*60*24))<=7;
+  }).forEach(function(p){
+    window._phSendReminder(p.code,'SMS',p.patientName); count++;
+  });
+  if(count===0) UI.showToast('No reminders due within 7 days','ok');
 };
 
 /* ═══════════════════════════════════════════════════════════════

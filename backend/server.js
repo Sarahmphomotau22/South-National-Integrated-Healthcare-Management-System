@@ -109,6 +109,16 @@ try {
   app.use('/api/v1/notifications', require('./routes/notifications'));
 } catch(_) { logger.warn('notifications route not found — skipping'); }
 
+// ── Vaccinations ──────────────────────────────────────────────────────────────
+app.use('/api/v1/vaccinations', require('./routes/vaccinations'));
+// Sub-resource: POST /api/v1/patients/:patientId/vaccinations (nurse.js)
+app.use('/api/v1/patients/:patientId/vaccinations', (req, _res, next) => {
+  req.body = req.body || {};
+  req.body.patientId = req.body.patientId || req.params.patientId;
+  next();
+}, require('./routes/vaccinations'));
+
+
 // ── 404 + error handler ───────────────────────────────────────────────────────
 app.use(notFound);
 app.use(errorHandler);
