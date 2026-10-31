@@ -56,27 +56,26 @@ window.Router = (() => {
       label: 'Doctor', icon: 'ti-stethoscope',
       default: 'doctor',
       nav: [
-        { section: 'Today' },
+        
         { id: 'doctor',           icon: 'ti-layout-dashboard',  label: 'Dashboard'         },
         { id: 'doc_appointments', icon: 'ti-calendar-event',    label: 'Appointments'      },
-        { id: 'doc_tasks',        icon: 'ti-checkbox',          label: 'Clinical Tasks'    },
-        { section: 'Patients' },
-        { id: 'patient_file',     icon: 'ti-folder-open',       label: 'Patient File'      },
+        
+        ,
+        
         { id: 'patients',         icon: 'ti-users',             label: 'Patient 360°'      },
-        { id: 'medical_notes',    icon: 'ti-notes',             label: 'Medical Notes'     },
+       
         { section: 'Orders & Results' },
-        { id: 'prescriptions',    icon: 'ti-pill',              label: 'Prescriptions'     },
+       
         { id: 'lab',              icon: 'ti-flask',             label: 'Lab Orders'        },
         { id: 'lab_results',      icon: 'ti-chart-bar',         label: 'Lab Results'       },
         { id: 'radiology',        icon: 'ti-camera',            label: 'Radiology'         },
-        { id: 'referrals',        icon: 'ti-arrows-exchange',   label: 'Referrals'         },
+      
         { section: 'Communication' },
         { id: 'telemedicine',     icon: 'ti-video',             label: 'Telemedicine'      },
         { id: 'messages',         icon: 'ti-message',           label: 'Messages'          },
-        { id: 'notifications',    icon: 'ti-bell',              label: 'Notifications'     },
         { section: 'Documents' },
-        { id: 'med_certs',        icon: 'ti-file-certificate',  label: 'Issue Certificate' },
-        { id: 'doc_all_certs',    icon: 'ti-certificate',       label: 'Cert Registry'     },
+       
+        { id: 'doc_all_certs',    icon: 'ti-certificate',       label: 'Medical Cert Registry'     },
       ]
     },
 

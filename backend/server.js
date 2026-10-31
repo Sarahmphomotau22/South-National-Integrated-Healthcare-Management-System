@@ -1,4 +1,3 @@
-
 'use strict';
 
 const express      = require('express');
@@ -15,6 +14,7 @@ const logger  = require('./utils/logger');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 
 // ── Route imports ──
+const messageRoutes      = require('./routes/messages');
 const authRoutes         = require('./routes/auth');
 const userRoutes         = require('./routes/users');
 const patientRoutes      = require('./routes/patients');
@@ -61,15 +61,30 @@ app.use(cors({
 }));
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
+const isDev = (process.env.NODE_ENV || 'development') !== 'production';
+
+// Global limiter — disabled in dev, 300 req/15min in production
 app.use(rateLimit({
-  windowMs: 15 * 60 * 1000, max: 300,   // raised to 300 for production
-  standardHeaders: true, legacyHeaders: false,
+  windowMs: 15 * 60 * 1000,
+  max: isDev ? 0 : 300,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: { success: false, message: 'Too many requests. Please try again in a few minutes.' },
-  skip: (req) => req.path === '/health', // never rate-limit health checks
+  skip: (req) => isDev || req.path === '/health',
+}));
+
+// Strict login limiter — disabled in dev, 10 attempts/15min in production
+app.use('/api/v1/auth/login', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: isDev ? 0 : 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many login attempts. Please try again in 15 minutes.' },
+  skip: () => isDev,
 }));
 
 // ── General middleware ────────────────────────────────────────────────────────
-
+app.use('/api/v1/medical-notes', require('./routes/medicalNotes'));
 app.use(compression());
 app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));
 app.use(express.json({ limit: '10kb' }));
@@ -89,6 +104,8 @@ app.get('/health', (_req, res) => {
 });
 
 // ── API routes ────────────────────────────────────────────────────────────────
+app.use('/api/v1/messages',           messageRoutes);
+app.use('/api/v1/medical-notes',      require('./routes/medicalNotes'));
 app.use('/api/v1/auth',               authRoutes);
 app.use('/api/v1/users',              userRoutes);
 app.use('/api/v1/patients',           patientRoutes);
@@ -103,7 +120,7 @@ app.use('/api/v1/queue2',             require('./routes/queue2'));
 app.use('/api/v1/consultation-notes', require('./routes/consultationNotes'));
 app.use('/api/v1/surveys',            require('./routes/surveys'));
 app.use('/api/v1/ml',                 require('./routes/ml'));
-app.use('/api/v1/ml', require('./routes/ml_triage'));
+app.use('/api/v1/ml',                 require('./routes/ml_triage'));
 // Notifications route (SMS + email)
 try {
   app.use('/api/v1/notifications', require('./routes/notifications'));

@@ -17,36 +17,10 @@ var _D = {
   selectedPat:    null,
   pat360Id:       null,
   consultId:      null,
-  notifications:  [
-    { id:1, type:'critical', icon:'🔴', text:'Critical lab result — Patient A: Troponin elevated',  time:'08:42', read:false },
-    { id:2, type:'warn',     icon:'🟠', text:'Prescription approval pending — Patient B',            time:'08:30', read:false },
-    { id:3, type:'info',     icon:'🟡', text:'Referral response received from Cardiology',              time:'07:55', read:true  },
-    { id:4, type:'ok',       icon:'🟢', text:'Lab results ready — Patient D (CBC)',                 time:'07:20', read:true  },
-  ],
-  messages: [
-    { id:1, from:'Nurse Station',    role:'Nurse',        text:'Patient Yaw Appiah vitals recorded. BP 142/88, stable. Ready for consultation.',     time:'08:50', unread:true  },
-    { id:2, from:'Reception',        role:'Receptionist', text:'Patient has arrived and is checked in. Please expect them after vitals.', time:'08:45', unread:true  },
-    { id:3, from:'Dr Sithole',       role:'Doctor',       text:'Referral accepted — Grace Mahlangu, Cardiology Friday 09:00.',                         time:'08:15', unread:true  },
-    { id:4, from:'Pharmacy',         role:'Pharmacy',     text:'Amlodipine 10mg dispensed for Nomsa Dlamini. Script on file.',                         time:'07:30', unread:false },
-    { id:5, from:'Nurse Station',    role:'Nurse',        text:'EMERGENCY: Johan van Wyk BP 190/110. Requesting immediate review.',                     time:'07:15', unread:false },
-    { id:6, from:'Reception',        role:'Receptionist', text:'Appointment reminder: 11:00 follow-up Sipho Ndlovu is confirmed.',                       time:'07:00', unread:false },
-  ],
-  tasks: [
-    { id:'T1', type:'critical', label:'Review critical lab result',   patient:'Nomsa Dlamini',  done:false },
-    { id:'T2', type:'warn',     label:'Approve prescription renewal', patient:'Sipho Ndlovu',   done:false },
-    { id:'T3', type:'warn',     label:'Review referral response',     patient:'Grace Mahlangu', done:false },
-    { id:'T4', type:'ok',       label:'Complete consultation notes',  patient:'Johan van Wyk',  done:false },
-  ],
-  todaySchedule: [
-    { time:'08:00', patient:'Nomsa Dlamini',   type:'Consultation', status:'done'   },
-    { time:'09:00', patient:'Sipho Ndlovu',    type:'Follow-up',    status:'done'   },
-    { time:'10:00', patient:'Johan van Wyk',   type:'Consultation', status:'active' },
-    { time:'10:30', patient:'Patient C',type:'Telemedicine', status:'upcoming'},
-    { time:'11:00', patient:'Grace Mahlangu',  type:'Consultation', status:'upcoming'},
-    { time:'12:00', patient:'Yaw Appiah',      type:'Follow-up',    status:'upcoming'},
-    { time:'14:00', patient:'Kwame Asante',    type:'Consultation', status:'upcoming'},
-    { time:'15:30', patient:'Abena Mensah',    type:'Lab review',   status:'upcoming'},
-  ],
+  notifications:  [], /* populated from API */
+  messages: [], /* populated from API on first open */
+  tasks: [], /* populated from API */
+  todaySchedule: [], /* populated from API */
   msgCompose: '', msgTo: '',
   certForm:   { type:'Sick', patient:'', from:'', to:'', diagnosis:'', notes:'' },
   radForm:    { type:'X-Ray', patient:'', region:'', indication:'', urgent:false },
@@ -172,12 +146,16 @@ Pages['doc_dashboard'] = function(){
     }
     _drainDoctorQueue();
     setTimeout(_drainDoctorQueue, 500);
-    window.addEventListener('storage', function(e) {
-      if (e.key === '_NIHMS_DOCTOR_REQ' && e.newValue) {
-        try { _handleDoctorPt(JSON.parse(e.newValue)); } catch(_) {}
-      }
-      if (e.key === '_NIHMS_DOCTOR_QUEUE' && e.newValue) { _drainDoctorQueue(); }
-    });
+    /* Guard: only attach the storage listener once across all re-inits */
+    if (!window._dStorageListenerAdded) {
+      window._dStorageListenerAdded = true;
+      window.addEventListener('storage', function(e) {
+        if (e.key === '_NIHMS_DOCTOR_REQ' && e.newValue) {
+          try { _handleDoctorPt(JSON.parse(e.newValue)); } catch(_) {}
+        }
+        if (e.key === '_NIHMS_DOCTOR_QUEUE' && e.newValue) { _drainDoctorQueue(); }
+      });
+    }
     try {
       var _docCh = new BroadcastChannel('nihms_doctor_queue');
       _docCh.onmessage = function(e) {
@@ -242,7 +220,6 @@ function _dPage(view) {
 }
 
 Pages['doc_appointments'] = _dPage('doc_appointments');
-Pages['doc_tasks']     = _dPage('doc_tasks');
 Pages['consult']       = _dPage('consult');
 Pages['patients']      = _dPage('patients');
 Pages['medical_notes'] = _dPage('medical_notes');
@@ -254,10 +231,8 @@ Pages['referrals']     = _dPage('referrals');
 Pages['follow_up']     = _dPage('follow_up');
 Pages['telemedicine']  = _dPage('telemedicine');
 Pages['messages']      = _dPage('messages');
-Pages['notifications'] = _dPage('notifications');
 Pages['med_certs']      = _dPage('med_certs');
 Pages['doc_all_certs']  = _dPage('doc_all_certs');
-Pages['patient_file']   = _dPage('patient_file');
 Pages['queue']         = _dPage('dashboard');
 
 /* ─── View HTML cache — invalidated only when _dRenderBust(view) called ── */
@@ -266,10 +241,31 @@ function _dRenderBust(view){ if(view) delete _dCache[view]; else _dCache={}; }
 
 /* Views that must always re-render (live data changes every visit) */
 /* consult and medical_notes are patient-context-dependent — never serve stale cache */
-var _dNoCache = { dashboard:1, patients:1, doc_appointments:1, messages:1, notifications:1, doc_tasks:1, consult:1, medical_notes:1, pat360:1 };
+var _dNoCache = { dashboard:1, patients:1, doc_appointments:1, messages:1, consult:1, medical_notes:1, pat360:1, prescriptions:1 };
+
+/* ─── Cached current user — resolved once per render cycle ────────── */
+/* Prefer window.NIHMS_USER (set by the NIHMS shell for the logged-in  */
+/* staff member) over API.getStoredUser() which may return stale data.  */
+var _dCurrentUser = null;
+function _dGetUser(){
+  return _dCurrentUser || (_dCurrentUser =
+    window.NIHMS_USER ||
+    (window.API && window.API.getStoredUser && window.API.getStoredUser()) ||
+    {});
+}
+
+/* ─── Debounce guard — prevents render storms from rapid state changes ─ */
+var _dRenderPending = false;
+function _dRenderScheduled(){
+  if(_dRenderPending) return;
+  _dRenderPending = true;
+  requestAnimationFrame(function(){ _dRenderPending = false; _dRender(); });
+}
 
 /* ─── Render engine ────────────────────────────────────────────────── */
 function _dRender(){
+  /* Reset per-render user cache so each render cycle gets a fresh lookup */
+  _dCurrentUser = null;
   if(!document.getElementById('nihms-style')){
     var s=document.createElement('style');s.id='nihms-style';
     s.textContent='*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}body{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif}'+
@@ -293,11 +289,9 @@ function _dRender(){
     medical_notes:_dMedicalNotes,
     telemedicine:_dTelemedicine,
     messages:    _dMessages,
-    notifications:_dNotifications,
     med_certs:    _dMedCerts,
     doc_all_certs:_dAllCerts,
-    doc_tasks:   _dTasks,
-    patient_file:_dPatientFile,
+
   };
   var v = _D.view;
   /* Use cached HTML for static views; rebuild live views every time */
@@ -314,10 +308,8 @@ function _dRender(){
 /* ─── Sidebar (cached by badge fingerprint) ────────────────────────── */
 var _dSidebarCache = { key:'', html:'' };
 function _dSidebar(){
-  var unreadN = _D.notifications.filter(function(n){return !n.read;}).length;
   var unreadM = _D.messages.filter(function(m){return m.unread;}).length;
-  var pendingT= _D.tasks.filter(function(t){return !t.done;}).length;
-  var cacheKey = _D.view+'|'+unreadN+'|'+unreadM+'|'+pendingT;
+  var cacheKey = _D.view+'|'+unreadM;
   if (_dSidebarCache.key === cacheKey) return _dSidebarCache.html;
 
   function nav(label, icon, view, badge, badgeColor){
@@ -331,7 +323,7 @@ function _dSidebar(){
   function sec(t){return '<div style="padding:10px 14px 3px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:'+C.muted+'">'+t+'</div>';}
 
   /* User info */
-  var user = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{firstName:'',lastName:'',role:'doctor'};
+  var user = _dGetUser()||{firstName:'',lastName:'',role:'doctor'};
   var ini  = ((user.firstName||'D')[0]+((user.lastName||'')[0]||'')).toUpperCase()||'DR';
   var docName = (user.firstName||user.lastName) ? 'Dr '+(user.firstName||'')+(user.lastName?' '+user.lastName:'') : 'Dr Molefe';
 
@@ -343,7 +335,6 @@ function _dSidebar(){
   sec('Today')+
   nav('Dashboard','🏠','dashboard','','')+
   nav('Appointments','📅','doc_appointments','','')+
-  nav('Clinical Tasks','✅','doc_tasks',pendingT||'',C.amber)+
   sec('Patients')+
   nav('Patient 360°','👥','patients','','')+
   nav('Medical Notes','📝','medical_notes','','')+
@@ -376,10 +367,7 @@ function _dHeader(title, sub, action){
 ══════════════════════════════════════════════════════════════════ */
 function _dDashboard(){
   var waiting = (window._DOCTOR_QUEUE||[]).filter(function(p){return p.status!=='done';});
-  var unreadN = _D.notifications.filter(function(n){return !n.read;}).length;
   var unreadM = _D.messages.filter(function(m){return m.unread;}).length;
-  var pendingT= _D.tasks.filter(function(t){return !t.done;}).length;
-
   /* Use live API data when already cached, else fall back to static seed */
   var aptCount = (window._dAptData && window._dAptData.length !== undefined)
     ? window._dAptData.length
@@ -394,7 +382,6 @@ function _dDashboard(){
     {id:'kpi-apt', label:"Today's Appointments", value:aptCount,  color:C.teal,   icon:'📅'},
     {id:'kpi-wait',label:'Waiting Patients',      value:waiting.length, color:C.amber, icon:'⏳'},
     {id:'kpi-lab', label:'Pending Lab Results',   value:labCount, color:C.purple, icon:'🧪'},
-    {id:'kpi-task',label:'Pending Tasks',         value:pendingT, color:C.red,    icon:'✅'},
   ];
 
   var kpiHtml = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">'+
@@ -408,9 +395,11 @@ function _dDashboard(){
   '</div>';
 
   /* ── Async refresh: deferred 400 ms so paint happens before network ── */
+  /* Guard: skip if user has navigated away from dashboard before timer fires */
   setTimeout(async function(){
+    if (_D.view !== 'dashboard') return;
     try {
-      var u   = window.API && window.API.getStoredUser ? window.API.getStoredUser() : null;
+      var u   = _dGetUser();
       var did = u && (u._id || u.id);
       var now   = new Date();
       var start = new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString();
@@ -480,27 +469,13 @@ function _dDashboard(){
   var schedHtml = '<div id="dash-tele-list" style="padding:20px;text-align:center;color:'+C.muted+'">'+
     '<span style="font-size:20px">📹</span><br><span style="font-size:12px">Loading…</span>'+
   '</div>';
-  /* Trigger async load after host API is ready (~same window as KPI loader at 400 ms) */
-  setTimeout(window._dDashTeleLoad, 450);
-
-  /* Pending tasks */
-  var tasksHtml = _D.tasks.filter(function(t){return !t.done;}).slice(0,4).map(function(t){
-    var icon  = {critical:'🔴',warn:'🟠',info:'🟡',ok:'🟢'}[t.type]||'⚪';
-    return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f8fafc">'+
-      '<span style="font-size:14px">'+icon+'</span>'+
-      '<div style="flex:1"><div style="font-size:12px;font-weight:600;color:'+C.text+'">'+t.label+'</div><div style="font-size:11px;color:'+C.muted+'">'+t.patient+'</div></div>'+
-      _btn('Done','_dTaskDone(\''+t.id+'\')',C.green,true)+
-    '</div>';
-  }).join('');
-
-  /* Notifications strip */
-  var notifHtml = _D.notifications.filter(function(n){return !n.read;}).slice(0,3).map(function(n){
-    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid #f8fafc">'+
-      '<span style="font-size:14px;flex-shrink:0">'+n.icon+'</span>'+
-      '<div style="flex:1;font-size:12px;color:'+C.text+'">'+n.text+'</div>'+
-      '<div style="font-size:10px;color:'+C.muted+';flex-shrink:0">'+n.time+'</div>'+
-    '</div>';
-  }).join('');
+  /* Trigger async load after host API is ready — guard: skip if user navigated away */
+  setTimeout(function(){
+    if(_D.view==='dashboard') {
+      if(window._dDashTeleLoad)  window._dDashTeleLoad();
+      if(window._dDashSchedLoad) window._dDashSchedLoad();
+    }
+  }, 450);
 
   /* Greeting banner */
   var _greetHour = new Date().getHours();
@@ -545,18 +520,88 @@ function _dDashboard(){
           '</div>'+
         '</div>'+schedHtml)+
       '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+
-        _card('<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'+
-          '<div style="font-size:14px;font-weight:700;color:'+C.text+'">Pending Actions</div>'+
-          '<button onclick="_setView(\'doc_tasks\')" style="font-size:12px;color:'+C.amber+';border:none;background:transparent;cursor:pointer">View all →</button>'+
-        '</div>'+tasksHtml)+
-        _card('<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'+
-          '<div style="font-size:14px;font-weight:700;color:'+C.text+'">Notifications</div>'+
-          '<button onclick="_setView(\'notifications\')" style="font-size:12px;color:'+C.red+';border:none;background:transparent;cursor:pointer">View all →</button>'+
-        '</div>'+notifHtml)+
+
+      /* Today's Schedule panel */
+      _card('<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'+
+        '<div style="display:flex;align-items:center;gap:8px">'+
+          '<span style="font-size:16px">📅</span>'+
+          '<div style="font-size:14px;font-weight:700;color:'+C.text+'">Today\'s Schedule</div>'+
+          '<span id="dash-sched-count" style="font-size:11px;color:'+C.muted+';background:#f1f5f9;padding:1px 7px;border-radius:20px"></span>'+
+        '</div>'+
+        '<button onclick="_D.view=\'appointments\';_dRender()" style="font-size:12px;color:'+C.teal+';border:none;background:transparent;cursor:pointer;font-family:inherit">View all →</button>'+
       '</div>'+
+      '<div id="dash-sched-list" style="padding:16px;text-align:center;color:'+C.muted+';font-size:12px">'+
+        '<span style="font-size:20px">📅</span><br>Loading…'+
+      '</div>')+
+
     '</div>';
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   DASHBOARD — TODAY'S SCHEDULE loader
+   Fetches today's appointments for the logged-in doctor and renders
+   them as a timeline list into #dash-sched-list.
+══════════════════════════════════════════════════════════════════ */
+window._dDashSchedLoad = async function(){
+  var wrap  = document.getElementById('dash-sched-list');
+  var badge = document.getElementById('dash-sched-count');
+  if (!wrap) return;
+
+  var C2 = C; /* closure */
+  var statusColor = { done:'#6b7280', active:C2.teal, upcoming:C2.blue };
+  var statusLabel = { done:'Done', active:'In Progress', upcoming:'Upcoming' };
+
+  try {
+    var u   = _dGetUser();
+    var did = u && (u._id || u.id);
+    var now   = new Date();
+    var start = new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString();
+    var end   = new Date(now.getFullYear(),now.getMonth(),now.getDate(),23,59,59).toISOString();
+
+    var aptRes  = await window.API.appointments.list({ doctor:did, dateFrom:start, dateTo:end, limit:50 });
+    var aptItems = (aptRes&&aptRes.data)||(Array.isArray(aptRes)?aptRes:[]);
+
+    if (!aptItems.length) {
+      wrap.innerHTML = '<div style="padding:20px;text-align:center;color:'+C2.muted+';font-size:13px">No appointments scheduled for today.</div>';
+      if (badge) badge.textContent = '0';
+      return;
+    }
+
+    /* Normalise */
+    var rows = aptItems.map(function(a){
+      var pat  = a.patient||{};
+      var name = (pat.firstName ? ((pat.firstName+' '+(pat.lastName||'')).trim()) : null) || pat.name || a.patientName || 'Unknown';
+      var rawTime = a.scheduledAt ? new Date(a.scheduledAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}) : (a.time||'—');
+      var st = a.status==='in_progress'?'active':a.status==='completed'||a.status==='done'?'done':'upcoming';
+      var vt = a.visitType||a.type||'Consultation';
+      return { time:rawTime, patient:name, type:vt, status:st, patId:pat._id||pat.id||a.patientId||'' };
+    }).sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
+
+    /* Update _D.todaySchedule */
+    _D.todaySchedule = rows;
+    var aptEl = document.getElementById('kpi-apt');
+    if (aptEl) aptEl.textContent = rows.length;
+    if (badge) badge.textContent = rows.length;
+
+    wrap.innerHTML = rows.map(function(r){
+      var sc = statusColor[r.status]||C2.blue;
+      var sl = statusLabel[r.status]||r.status;
+      var initials = r.patient.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase();
+      return '<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #f0f4f8">'+
+        '<div style="width:44px;text-align:right;font-size:12px;font-weight:700;color:'+C2.muted+';flex-shrink:0">'+r.time+'</div>'+
+        '<div style="width:2px;align-self:stretch;background:'+sc+';border-radius:2px;flex-shrink:0"></div>'+
+        '<div style="width:32px;height:32px;border-radius:50%;background:'+sc+'20;border:1.5px solid '+sc+'50;color:'+sc+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+initials+'</div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:13px;font-weight:600;color:'+C2.text+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+r.patient+'</div>'+
+          '<div style="font-size:11px;color:'+C2.muted+'">'+r.type+'</div>'+
+        '</div>'+
+        '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:'+sc+'18;color:'+sc+';white-space:nowrap">'+sl+'</span>'+
+      '</div>';
+    }).join('');
+  } catch(e){
+    if (wrap) wrap.innerHTML = '<div style="padding:16px;text-align:center;color:#dc2626;font-size:12px">⚠ Could not load schedule</div>';
+  }
+};
 
 /* ══════════════════════════════════════════════════════════════════
    DASHBOARD — TODAY'S TELEMEDICINE loader
@@ -575,7 +620,7 @@ window._dDashTeleLoad = async function(){
 
   try {
     /* Use same bare API global as all other loaders in this file */
-    var u   = (typeof API !== 'undefined' && API.getStoredUser) ? API.getStoredUser() : null;
+    var u   = _dGetUser();
     var did = u && (u._id || u.id);
 
     /* Today's date window */
@@ -946,7 +991,7 @@ function _dAppointments(){
     if (!calArea) return;
     try {
       calArea.innerHTML = '<div style="padding:32px;text-align:center;color:'+C.muted+'"><div class="spinner" style="width:24px;height:24px;margin:0 auto 10px"></div>Loading appointments…</div>';
-      var u   = API.getStoredUser ? API.getStoredUser() : null;
+      var u   = _dGetUser();
       var did = u && (u._id || u.id);
       var today = new Date(); today.setHours(0,0,0,0);
       var todayStr = today.toISOString().slice(0,10);
@@ -1058,16 +1103,6 @@ function _dPatients(){
         '<div id="doc-pat-results">'+
           (_D.patients&&_D.patients.length?_dPatRows(_D.patients):'<div style="padding:20px;text-align:center;color:'+C.muted+';font-size:13px">Search for a patient or browse below</div>')+
         '</div>')+
-      '<div style="margin-top:14px">'+
-        '<div style="font-size:13px;font-weight:700;color:'+C.text+';margin-bottom:10px">Today\'s Patients</div>'+
-        _card(_D.todaySchedule.map(function(s,i){
-          return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f8fafc;cursor:pointer" onclick="_dSetPat360(\''+s.patient+'\')">'+
-            '<div style="width:32px;height:32px;border-radius:50%;background:'+C.blueLt+';border:1.5px solid '+C.blueBd+';color:'+C.blue+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+s.patient.split(' ').map(function(n){return n[0];}).join('').slice(0,2)+'</div>'+
-            '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:'+C.text+'">'+s.patient+'</div><div style="font-size:11px;color:'+C.muted+'">'+s.time+' · '+s.type+'</div></div>'+
-            '<span style="font-size:12px;color:'+C.blue+';font-weight:600">Open 360° →</span>'+
-          '</div>';
-        }).join(''),'padding:10px 14px')+
-      '</div>'+
     '</div>';
 }
 
@@ -1316,16 +1351,16 @@ function _dPat360(){
 ══════════════════════════════════════════════════════════════════ */
 function _dConsult(){
   var p       = _D.consultPat || _D.selectedPat || null;
-  var u       = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  var u       = _dGetUser();
   var today   = new Date();
   var todayFmt= today.toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
   var todayIso= today.toISOString().slice(0,10);
   var timeNow = today.toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'});
 
   /* Resolve clinician info from logged-in user */
-  var docName     = u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'');
+  var docName     = u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'Dr Sipho Molefe');
   var docHpcsa    = u.hpcsaNumber||u.hpcsa||u.registrationNumber||u.regNo||u.licenseNumber||'';
-  var docFacility = (typeof u.facility==='string'?u.facility:'')||(u.facility&&u.facility.name)||(u.primaryFacility&&u.primaryFacility.name)||u.facilityName||'';
+  var docFacility = (typeof u.facility==='string'?u.facility:'')||(u.facility&&u.facility.name)||(u.primaryFacility&&u.primaryFacility.name)||u.facilityName||'Johannesburg CHC';
 
   /* Resolve patient */
   var patFirst  = p ? (p.firstName||p.first_name||p.name||'') : '';
@@ -1569,7 +1604,7 @@ function _dConsult(){
   /* ── Auto-fill doctor fields from DB after render ── */
   setTimeout(function() {
     /* 1. Try to fill from already-stored user first (instant, no network) */
-    var _u = (window.API && window.API.getStoredUser && window.API.getStoredUser()) || {};
+    var _u = _dGetUser();
     function _fillIfEmpty(id, val) {
       if (!val) return;
       var el = document.getElementById(id);
@@ -1618,12 +1653,12 @@ function _dConsult(){
 
 /* ── Prescription helpers ── */
 var _rxRoutes = [
-  'Oral (PO)','Sublingual (SL)','Topical','Inhalation',
+  '','Oral (PO)','Sublingual (SL)','Topical','Inhalation',
   'Intravenous (IV)','Intramuscular (IM)','Subcutaneous (SC)','Rectal (PR)',
   'Ophthalmic','Otic','Nasal','Other'
 ];
 var _rxFreqs = [
-  'Once only (single dose)','Once daily (OD)','Twice daily (BD)','Three times daily (TDS)','Four times daily (QID)',
+  '','Once only (single dose)','Once daily (OD)','Twice daily (BD)','Three times daily (TDS)','Four times daily (QID)',
   'Every 4 hours','Every 6 hours','Every 8 hours',
   'At night (NOCTE)','As needed (PRN)'
 ];
@@ -1638,7 +1673,7 @@ function _rxInp(id, label, ph, type, required){
   return '<div>'+_rxLabel(label,required)+'<input id="'+id+'" type="'+(type||'text')+'" placeholder="'+(ph||'')+'" style="'+_rxFieldStyle()+'"></div>';
 }
 function _rxSel(id, label, opts, required){
-  return '<div>'+_rxLabel(label,required)+'<select id="'+id+'" style="'+_rxFieldStyle()+'">'+opts.map(function(o){return '<option value="'+o+'">'+o+'</option>';}).join('')+'</select></div>';
+  return '<div>'+_rxLabel(label,required)+'<select id="'+id+'" style="'+_rxFieldStyle()+'">'+opts.map(function(o){return o===''?'<option value="">Select...</option>':'<option value="'+o+'">'+o+'</option>';}).join('')+'</select></div>';
 }
 function _rxTa(id, label, ph, rows){
   return '<div>'+_rxLabel(label,false)+'<textarea id="'+id+'" rows="'+(rows||3)+'" placeholder="'+(ph||'')+'" style="'+_rxFieldStyle()+';resize:vertical"></textarea></div>';
@@ -1673,8 +1708,10 @@ function _rxMedBlock(n, removable){
 }
 
 function _dPrescriptions(){
+  /* Reset submit guard every time the prescription form renders */
+  _rxSubmitting = false;
   var p    = _D.consultPat;
-  var u    = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  var u    = _dGetUser();
   var today= new Date();
   var todayFmt = today.toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
 
@@ -1849,9 +1886,13 @@ function _dPrescriptions(){
 
         /* Actions */
         '<div style="display:flex;gap:10px;margin-top:4px;margin-bottom:8px">'+
-          '<button onclick="_dSaveRx()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+          '<button id="rx-submit-btn" type="button" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'+
             'Submit Prescription'+
+          '</button>'+
+          '<button onclick="_D.view=\'medical_notes\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>'+
+            'Back to Diagnosis &amp; Clinical Assessment'+
           '</button>'+
           '<button onclick="_D.view=\'dashboard\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Cancel</button>'+
         '</div>'+
@@ -1917,7 +1958,7 @@ window._dSaveLabOrder = async function(){
   var indication = ((document.getElementById('lab-indication')||{value:''}).value||'').trim();
   if(!test)       { if(window.UI)UI.showToast('Select a laboratory test','err'); return; }
   if(!indication) { if(window.UI)UI.showToast('Clinical indication is required','err'); return; }
-  var u3   = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  var u3   = _dGetUser();
   var pat3 = _D.consultPat||_D.pat360Data||_D.selectedPat||{};
   var payload = {
     patient:           pat3._id||pat3.id||'',
@@ -2014,7 +2055,7 @@ function _dLab(){
     var labPatDob   = labPat && labPat.dateOfBirth
       ? new Date(labPat.dateOfBirth).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'})
       : '—';
-    var u2          = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+    var u2          = _dGetUser();
     var labDoc      = u2.firstName ? ('Dr '+((u2.firstName||'')+' '+(u2.lastName||'')).trim()) : (u2.name||'—');
     var labFacility = (typeof u2.facility==='string'?u2.facility:'') || (u2.facility&&u2.facility.name) || (u2.primaryFacility&&u2.primaryFacility.name) || u2.facilityName || 'Current healthcare facility';
     var labRegNo    = u2.hpcsaNumber||u2.hpcsa||u2.registrationNumber||u2.regNo||u2.licenseNumber||'';
@@ -2167,6 +2208,10 @@ function _dLab(){
             '<button onclick="_dSaveLabOrder()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
               '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'+
               'Submit'+
+            '</button>'+
+            '<button onclick="_D.labNewOrder=false;_D.view=\'medical_notes\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>'+
+              'Back to Diagnosis &amp; Clinical Assessment'+
             '</button>'+
             '<button onclick="_D.labNewOrder=false;_D.view=\'dashboard\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Cancel</button>'+
           '</div>'+
@@ -2584,7 +2629,7 @@ function _dRadiology(){
     ? new Date(radPat.dateOfBirth).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'}) : '—';
   var today      = new Date().toISOString().slice(0,10);
   var todayFmt   = new Date().toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
-  var u          = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  var u          = _dGetUser();
   var docName    = u.firstName?('Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim()):(u.name||'—');
   var docFacility= (typeof u.facility==='string'?u.facility:'')|| (u.facility&&u.facility.name)||u.facilityName||'Current healthcare facility';
   var docHpcsa   = u.hpcsaNumber||u.hpcsa||u.registrationNumber||'';
@@ -2933,8 +2978,6 @@ function _dRadiology(){
         '<div style="display:flex;flex-direction:column;gap:12px">'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Clinician</div>'+
             '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+docName+'</div></div>'+
-          '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">HPCSA Reg. No.</div>'+
-            '<div style="font-size:13px;font-weight:700;color:'+(docHpcsa?C.text:C.muted)+';font-family:monospace">'+(docHpcsa||'Not on record')+'</div></div>'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Facility</div>'+
             '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+docFacility+'</div></div>'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Date</div>'+
@@ -3111,7 +3154,7 @@ function _dReferrals(){
   var refPatDob  = refPat && refPat.dateOfBirth
     ? new Date(refPat.dateOfBirth).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'}) : '—';
   var todayFmt   = new Date().toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
-  var u          = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  var u          = _dGetUser();
   var docName    = u.firstName?('Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim()):(u.name||'—');
   var docFacility= (typeof u.facility==='string'?u.facility:'')|| (u.facility&&u.facility.name)||u.facilityName||'Current healthcare facility';
   var docHpcsa   = u.hpcsaNumber||u.hpcsa||u.registrationNumber||'';
@@ -3190,38 +3233,153 @@ function _dReferrals(){
     desc.style.display = d ? 'block' : 'none';
   };
 
+  /* ── Toggle destination fields (global) ── */
+  window._rfToggleDest = function(val){
+    var deptDiv = document.getElementById('ref-dest-dept');
+    var extDiv  = document.getElementById('ref-dest-ext');
+    if (!deptDiv || !extDiv) return;
+    var isDept = val === 'Department within this facility';
+    deptDiv.style.display = isDept ? 'block' : 'none';
+    extDiv.style.display  = isDept ? 'none'  : 'block';
+  };
+
   /* ── Save referral (global) ── */
   window._dSubmitReferral = async function(){
-    var specialty  = (document.getElementById('ref-specialty')||{value:''}).value;
-    var dest       = (document.querySelector('input[name="ref-dest"]:checked')||{value:''}).value;
-    var urgency    = (document.querySelector('input[name="ref-urgency"]:checked')||{value:'Routine'}).value;
-    var reason     = ((document.getElementById('ref-reason')||{value:''}).value||'').trim();
-    var findings   = ((document.getElementById('ref-findings')||{value:''}).value||'').trim();
-    var question   = ((document.getElementById('ref-question')||{value:''}).value||'').trim();
-    var addInstr   = ((document.getElementById('ref-add-instr')||{value:''}).value||'').trim();
-    var preferred  = ((document.getElementById('ref-preferred')||{value:''}).value||'').trim();
-    if(!reason){ if(window.UI)UI.showToast('Reason for referral is required','err'); return; }
+    /* ── Duplicate-submit guard ── */
+    var _rfBtn = document.getElementById('btn-submit-referral');
+    if (_rfBtn && _rfBtn.getAttribute('data-submitting')) return;
+    if (_rfBtn) { _rfBtn.setAttribute('data-submitting','1'); _rfBtn.disabled=true; _rfBtn.style.opacity='0.7'; _rfBtn.textContent='Submitting…'; }
+    function _rfBtnReset(){ if(_rfBtn){ _rfBtn.removeAttribute('data-submitting'); _rfBtn.disabled=false; _rfBtn.style.opacity=''; _rfBtn.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Submit Referral'; } }
+    function _rfToast(m,t){ try{if(window.UI&&window.UI.showToast)window.UI.showToast(m,t);}catch(_){} }
+
+    var gv = function(id){ var e=document.getElementById(id); return e?(e.value||'').trim():''; };
+
+    /* ── Patient guard ── */
     var pat5 = _D.consultPat||_D.pat360Data||_D.selectedPat||{};
+    if (!pat5._id && !pat5.id) {
+      _rfBtnReset();
+      _rfToast('No patient selected — cannot submit referral','err');
+      return;
+    }
+
+    /* ── Field validation ── */
+    var _rfMissing = []; var _rfEls = [];
+    function _rfChk(id, label) {
+      var el = document.getElementById(id);
+      var val = el ? (el.value||'').trim() : '';
+      if (!val) {
+        _rfMissing.push(label);
+        if (el) {
+          el.style.border = '2px solid #e53e3e'; el.style.background = '#fff5f5';
+          function _clr(ev){ ev.target.style.border=''; ev.target.style.background=''; ev.target.removeEventListener('input',_clr); ev.target.removeEventListener('change',_clr); }
+          el.addEventListener('input',_clr); el.addEventListener('change',_clr);
+          _rfEls.push(el);
+        }
+      }
+      return !!val;
+    }
+    _rfChk('ref-specialty', 'Specialty');
+    _rfChk('ref-reason',    'Reason for Referral');
+
+    /* ── Destination validation ── */
+    var dest = (document.querySelector('input[name="ref-dest"]:checked')||{value:''}).value;
+    if (!dest) { _rfMissing.push('Referral Destination'); }
+    else if (dest === 'Department within this facility') {
+      var deptEl = document.getElementById('ref-dept');
+      if (deptEl && !deptEl.value.trim()) {
+        _rfMissing.push('Department');
+        deptEl.style.border='2px solid #e53e3e'; deptEl.style.background='#fff5f5';
+        _rfEls.push(deptEl);
+      }
+    } else if (dest === 'Another hospital or healthcare facility') {
+      var facNameEl = document.getElementById('ref-ext-facility');
+      if (facNameEl && !facNameEl.value.trim()) {
+        _rfMissing.push('Receiving Facility Name');
+        facNameEl.style.border='2px solid #e53e3e'; facNameEl.style.background='#fff5f5';
+        _rfEls.push(facNameEl);
+      }
+    }
+
+    if (_rfMissing.length) {
+      if (_rfEls.length) _rfEls[0].scrollIntoView({behavior:'smooth',block:'center'});
+      _rfBtnReset();
+      _rfToast('Please complete: '+_rfMissing.join(' | '),'err');
+      return;
+    }
+
+    /* ── Collect all field values ── */
+    var specialty  = gv('ref-specialty');
+    var urgency    = (document.querySelector('input[name="ref-urgency"]:checked')||{value:'Routine'}).value;
+    var reason     = gv('ref-reason');
+    var findings   = gv('ref-findings');
+    var question   = gv('ref-question');
+    var addInstr   = gv('ref-add-instr');
+    var preferred  = gv('ref-preferred');
+    var deptVal    = gv('ref-dept');
+    var extFacName = gv('ref-ext-facility');
+    var extFacAddr = gv('ref-ext-address');
+
+    /* ── Checklist items ── */
+    var chkConsult = !!(document.getElementById('ref-chk-consult')&&document.getElementById('ref-chk-consult').checked);
+    var chkLab     = !!(document.getElementById('ref-chk-lab')    &&document.getElementById('ref-chk-lab').checked);
+    var chkMeds    = !!(document.getElementById('ref-chk-meds')   &&document.getElementById('ref-chk-meds').checked);
+    var linkedDocs = [];
+    if (chkConsult && _D.workflow && _D.workflow.consultationId) linkedDocs.push({type:'consultation', id:_D.workflow.consultationId});
+    if (chkConsult && _D.workflow && _D.workflow.diagnosisId)    linkedDocs.push({type:'diagnosis',     id:_D.workflow.diagnosisId});
+    if (chkLab     && _D.workflow && _D.workflow.labOrderId)     linkedDocs.push({type:'lab',           id:_D.workflow.labOrderId});
+    if (chkMeds    && _D.workflow && _D.workflow.prescriptionId) linkedDocs.push({type:'prescription',  id:_D.workflow.prescriptionId});
+
+    /* ── Generate unique reference number ── */
+    var refNum = 'REF-'+(new Date().getFullYear())+'-'+
+      (function(){var a=new Uint8Array(4);if(window.crypto&&window.crypto.getRandomValues)window.crypto.getRandomValues(a);else for(var k=0;k<4;k++)a[k]=Math.floor(Math.random()*256);return Array.from(a,function(b){return b.toString(16).toUpperCase().padStart(2,'0');}).join('');})();
+
+    /* ── Build payload ── */
     var payload = {
-      patient:         pat5._id||pat5.id||'',
-      patientName:     ((pat5.firstName||pat5.name||'')+' '+(pat5.lastName||'')).trim()||'Unknown',
-      specialty:       specialty,
-      destination:     dest,
-      urgency:         urgency,
-      reason:          reason,
-      clinicalFindings:findings,
-      specialistQuestion:question,
-      additionalInstructions:addInstr,
-      preferredClinician:preferred,
-      orderedBy:       (u._id||u.id||''),
-      orderedByName:   docName,
-      facility:        docFacility,
-      orderedAt:       new Date().toISOString(),
-      status:          'pending'
+      referenceNumber:       refNum,
+      patient:               pat5._id||pat5.id||'',
+      patientName:           ((pat5.firstName||pat5.name||'')+' '+(pat5.lastName||'')).trim()||'Unknown',
+      consultationId:        (_D.workflow&&_D.workflow.consultationId)||undefined,
+      referringDoctorId:     (u._id||u.id||''),
+      referringDoctorName:   docName,
+      referralDate:          new Date().toISOString(),
+      specialty:             specialty,
+      destination:           dest,
+      department:            deptVal||undefined,
+      receivingFacilityName: extFacName||undefined,
+      receivingFacilityAddress: extFacAddr||undefined,
+      preferredClinician:    preferred||undefined,
+      urgency:               urgency,
+      reasonForReferral:     reason,
+      clinicalFindings:      findings||undefined,
+      specialistQuestion:    question||undefined,
+      additionalInstructions:addInstr||undefined,
+      linkedDocuments:       linkedDocs.length ? linkedDocs : undefined,
+      facility:              docFacility,
+      status:                'Submitted',
+      idempotencyKey:        'ref-'+(pat5._id||pat5.id||'x')+'-'+Date.now(),
     };
-    try{ await API._fetchDirect('/referrals',{method:'POST',body:JSON.stringify(payload)}); }catch(_){}
-    if(window.UI)UI.showToast('Referral submitted','ok');
-    _D.view='referrals'; _dRender();
+
+    /* ── Submit to API ── */
+    try {
+      var _rfRes = await API._fetchDirect('/referrals',{method:'POST',body:JSON.stringify(payload)});
+      if (_rfRes && (_rfRes.error || _rfRes.status === false || (_rfRes.statusCode && _rfRes.statusCode >= 400))) {
+        _rfBtnReset();
+        _rfToast((_rfRes.message||_rfRes.error||'Could not submit referral — please try again.'),'err');
+        return;
+      }
+      /* Store referral ID in workflow */
+      var _rfSaved = (_rfRes&&_rfRes.data)?_rfRes.data:_rfRes;
+      if (_rfSaved && (_rfSaved._id||_rfSaved.id) && _D.workflow) {
+        _D.workflow.referralId = _rfSaved._id||_rfSaved.id;
+        _D.workflow.referralRef = refNum;
+      }
+      _rfBtnReset();
+      _rfToast('Referral '+refNum+' submitted successfully','ok');
+      setTimeout(function(){ _D.view='referrals'; _dRender(); }, 1200);
+    } catch(rfErr) {
+      _rfBtnReset();
+      _rfToast((rfErr&&rfErr.message)||'Could not submit referral — please try again.','err');
+    }
   };
 
   /* ── Sidebar ── */
@@ -3232,8 +3390,6 @@ function _dReferrals(){
         '<div style="display:flex;flex-direction:column;gap:12px">'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Clinician</div>'+
             '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+docName+'</div></div>'+
-          '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">HPCSA Reg. No.</div>'+
-            '<div style="font-size:13px;font-weight:700;color:'+(docHpcsa?C.text:C.muted)+';font-family:monospace">'+(docHpcsa||'Not on record')+'</div></div>'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Facility</div>'+
             '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+docFacility+'</div></div>'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Referral Date</div>'+
@@ -3286,10 +3442,18 @@ function _dReferrals(){
               '<div style="display:flex;flex-direction:column;gap:8px">'+
                 ['Department within this facility','Another hospital or healthcare facility'].map(function(opt,i){
                   return '<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid '+C.border+';border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:'+C.text+';background:#fff">'+
-                    '<input type="radio" name="ref-dest" value="'+opt+'"'+(i===0?' checked':'')+' style="accent-color:'+C.teal+'">'+opt+
+                    '<input type="radio" name="ref-dest" value="'+opt+'"'+(i===0?' checked':'')+' onchange="_rfToggleDest(this.value)" style="accent-color:'+C.teal+'">'+opt+
                   '</label>';
                 }).join('')+
               '</div>'+
+            '</div>'+
+            /* Conditional destination fields */
+            '<div id="ref-dest-dept" style="display:block;margin-top:8px">'+
+              _rfInp('ref-dept','Department','e.g. Cardiology Ward, ICU, Surgical Unit',true)+
+            '</div>'+
+            '<div id="ref-dest-ext" style="display:none;margin-top:8px">'+
+              _rfInp('ref-ext-facility','Receiving Facility Name','Name of the hospital or facility',true)+
+              _rfInp('ref-ext-address','Facility Address / Location','Street address or area',false)+
             '</div>'+
             /* Preferred clinician */
             _rfInp('ref-preferred','Preferred Clinician (optional)','Specialist name if known',false)+
@@ -3333,12 +3497,12 @@ function _dReferrals(){
           '<div style="font-size:12px;color:'+C.muted+';margin-bottom:12px">Before submitting, ensure relevant clinical documents are linked to the referral.</div>'+
           '<div style="display:flex;flex-direction:column;gap:10px">'+
             [
-              'Relevant consultation and diagnosis records',
-              'Available laboratory and imaging results',
-              'Medication and allergy information'
+              {id:'ref-chk-consult', label:'Relevant consultation and diagnosis records'},
+              {id:'ref-chk-lab',     label:'Available laboratory and imaging results'},
+              {id:'ref-chk-meds',    label:'Medication and allergy information'}
             ].map(function(item){
               return '<label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;font-weight:600;color:'+C.text+'">'+
-                '<input type="checkbox" style="width:16px;height:16px;accent-color:'+C.teal+'">'+item+
+                '<input type="checkbox" id="'+item.id+'" style="width:16px;height:16px;accent-color:'+C.teal+'">'+item.label+
               '</label>';
             }).join('')+
           '</div>'
@@ -3346,17 +3510,30 @@ function _dReferrals(){
 
         /* Actions */
         '<div style="display:flex;gap:10px;margin-top:4px;margin-bottom:8px">'+
-          '<button onclick="_dSubmitReferral()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+          '<button id="btn-submit-referral" onclick="_dSubmitReferral()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'+
             'Submit Referral'+
           '</button>'+
-          '<button onclick="_D.view=\'dashboard\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Cancel</button>'+
+          '<button onclick="_D.view=\'medical_notes\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>'+
+            'Back to Diagnosis &amp; Clinical Assessment'+
+          '</button>'+
+          '<button onclick="_rfCancelConfirm()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Cancel</button>'+
         '</div>'+
 
       '</div>'+
       refSidebar+
     '</div>';
 }
+
+/* ── Referral cancel guard (global) ── */
+window._rfCancelConfirm = function(){
+  var hasData = ['ref-reason','ref-findings','ref-question','ref-preferred','ref-dept','ref-ext-facility'].some(function(id){
+    var el = document.getElementById(id); return el && (el.value||'').trim().length > 0;
+  });
+  if (hasData && !confirm('You have unsaved referral information. Leave without submitting?')) return;
+  _D.view = 'dashboard'; _dRender();
+};
 
 /* ══════════════════════════════════════════════════════════════════
    MEDICAL NOTES
@@ -3373,7 +3550,7 @@ function _dMedicalNotes(){
   var todayFmt  = new Date().toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
   var todayIso  = new Date().toISOString().slice(0,10);
 
-  var u         = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  var u         = _dGetUser();
   var docName   = u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'—');
   var docHpcsa  = u.hpcsaNumber||u.hpcsa||u.registrationNumber||'';
   var docFacility = (typeof u.facility==='string'?u.facility:'')
@@ -3443,34 +3620,105 @@ function _dMedicalNotes(){
 
   /* ── Save handler ── */
   window._dSaveNote = async function(){
-    var gv = function(id){ var e=document.getElementById(id); return e?e.value.trim():''; };
+    var gv  = function(id){ var e=document.getElementById(id); return e?e.value.trim():''; };
+    var u    = _dGetUser();
+    var pat6 = _D.consultPat||_D.pat360Data||_D.selectedPat||{};
+
+    /* ── Shared field-highlight helper ── */
+    function _cnChk(id, label) {
+      var el = document.getElementById(id);
+      var val = el ? (el.value||'').trim() : '';
+      if (!val) {
+        _cnMissing.push(label);
+        if (el) {
+          el.style.border = '2px solid #e53e3e';
+          el.style.background = '#fff5f5';
+          function _clr(ev){ ev.target.style.border=''; ev.target.style.background=''; ev.target.removeEventListener('input',_clr); ev.target.removeEventListener('change',_clr); }
+          el.addEventListener('input', _clr);
+          el.addEventListener('change', _clr);
+          _cnEls.push(el);
+        }
+      }
+      return !!val;
+    }
+
+    /* ── Validate all required fields ── */
+    var _cnMissing = []; var _cnEls = [];
+    _cnChk('mn-primary-diag',   'Primary Diagnosis');
+    _cnChk('mn-primary-icd',    'ICD-10 Code');
+    _cnChk('mn-primary-status', 'Diagnosis Status');
+    _cnChk('mn-assessment',     'Clinical Assessment');
+    _cnChk('mn-findings',       'Clinical Findings');
+
+    if (_cnMissing.length) {
+      if (_cnEls.length) _cnEls[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      try{ if(window.UI&&window.UI.showToast) window.UI.showToast('Please complete: '+_cnMissing.join(' | '),'err'); }catch(_e){}
+      return false;
+    }
+
+    /* ── Patient guard ── */
+    if (!pat6._id && !pat6.id) {
+      try{ if(window.UI&&window.UI.showToast) window.UI.showToast('No patient selected — cannot save diagnosis','err'); }catch(_e){}
+      return false;
+    }
+
+    /* Prevent duplicate submissions */
+    var _snBtn = document.getElementById('btn-save-diag');
+    if (_snBtn && _snBtn.getAttribute('data-saving')) return false;
+    if (_snBtn) { _snBtn.setAttribute('data-saving','1'); _snBtn.disabled=true; _snBtn.style.opacity='0.7'; _snBtn.textContent='Saving…'; }
+
     var diagName = gv('mn-primary-diag');
     var icd10    = gv('mn-primary-icd');
-    if(!diagName){ if(window.UI)UI.showToast('Primary diagnosis is required','err'); return; }
     var riskEl   = document.querySelector('input[name="mn-risk"]:checked');
     var bases    = Array.from(document.querySelectorAll('.mn-basis:checked')).map(function(e){return e.value;});
-    var pat6     = _D.consultPat||_D.pat360Data||_D.selectedPat||{};
-    var payload  = {
-      patient:            pat6._id||pat6.id||'',
-      patientName:        mnPatName,
-      primaryDiagnosis:   diagName,
-      icd10:              icd10,
-      diagnosisStatus:    gv('mn-primary-status'),
-      clinicalAssessment: gv('mn-assessment'),
-      clinicalFindings:   gv('mn-findings'),
+    var docName  = u.firstName ? ('Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim()) : (u.name||'Doctor');
+
+    var payload = {
+      patient:               pat6._id||pat6.id||'',
+      patientName:           mnPatName,
+      primaryDiagnosis:      diagName,
+      icd10:                 icd10,
+      diagnosisStatus:       gv('mn-primary-status'),
+      clinicalAssessment:    gv('mn-assessment'),
+      clinicalFindings:      gv('mn-findings'),
       differentialDiagnosis: gv('mn-differential'),
-      riskLevel:          riskEl?riskEl.value:'Stable',
-      confirmationBasis:  bases,
-      additionalNotes:    gv('mn-add-notes'),
-      orderedBy:          (u._id||u.id||''),
-      orderedByName:      docName,
-      recordedAt:         new Date().toISOString()
+      riskLevel:             riskEl ? riskEl.value : 'Stable',
+      confirmationBasis:     bases,
+      additionalNotes:       gv('mn-add-notes'),
+      orderedBy:             (u._id||u.id||''),
+      orderedByName:         docName,
+      recordedAt:            new Date().toISOString(),
+      /* Link diagnosis to the consultation saved earlier this visit */
+      consultationNote:      (_D.workflow && _D.workflow.consultationId) || undefined,
+      consultationId:        (_D.workflow && _D.workflow.consultationId) || undefined,
+      /* Idempotency key: stable per patient + ICD-10 + date so retries don’t duplicate */
+      idempotencyKey:        'diag-'+(pat6._id||pat6.id||'x')+'-'+icd10.replace(/\s+/g,'')+'-'+(new Date().toISOString().slice(0,10)),
     };
-    try{ await API._fetchDirect('/medical-notes',{method:'POST',body:JSON.stringify(payload)}); }catch(_){}
-    if(window.UI)UI.showToast('Diagnosis saved','ok');
+    function _snReset(){ if(_snBtn){ _snBtn.removeAttribute('data-saving'); _snBtn.disabled=false; _snBtn.style.opacity=''; _snBtn.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Save Diagnosis'; } }
+    try {
+      var _mnRes = await API._fetchDirect('/medical-notes',{method:'POST',body:JSON.stringify(payload)});
+      var _mnSaved = (_mnRes && _mnRes.data) ? _mnRes.data : _mnRes;
+      /* Treat API-level errors as failures even when they don't throw */
+      if (_mnRes && (_mnRes.error || _mnRes.status === false || (_mnRes.statusCode && _mnRes.statusCode >= 400))) {
+        _snReset();
+        try{ if(window.UI&&window.UI.showToast) window.UI.showToast((_mnRes.message||_mnRes.error||'Could not save diagnosis — please try again.'),'err'); }catch(_e){}
+        return false;
+      }
+      if (_mnSaved && (_mnSaved._id || _mnSaved.id)) {
+        if (_D.workflow) _D.workflow.diagnosisId = _mnSaved._id || _mnSaved.id;
+      }
+      _snReset();
+      try{ if(window.UI&&window.UI.showToast) window.UI.showToast('Diagnosis saved successfully','ok'); }catch(_e){}
+      return true;
+    } catch(err) {
+      _snReset();
+      var msg = (err&&err.message)||'Could not save diagnosis — please try again.';
+      try{ if(window.UI&&window.UI.showToast) window.UI.showToast(msg,'err'); }catch(_e){}
+      return false;
+    }
   };
 
-  /* ── End Consultation handler — Req 9 ── */
+    /* ── End Consultation handler — Req 9 ── */
   window._dEndConsult = async function(){
     /* Prevent duplicate submissions */
     var btn = document.getElementById('btn-end-consult');
@@ -3478,26 +3726,67 @@ function _dMedicalNotes(){
     if (btn) btn.setAttribute('data-submitted','1');
 
     var gv = function(id){ var e=document.getElementById(id); return e?e.value.trim():''; };
+    function _ecToast(msg,type){ try{ if(window.UI&&window.UI.showToast)window.UI.showToast(msg,type); else console.warn('[EndConsult]',msg); }catch(_){} }
 
-    /* Validate required diagnosis fields */
-    var diagName = gv('mn-primary-diag');
-    if(!diagName){ if(window.UI)UI.showToast('Primary diagnosis is required before ending the consultation','err'); if(btn)btn.removeAttribute('data-submitted'); return; }
-    var riskEl = document.querySelector('input[name="mn-risk"]:checked');
-    if(!riskEl){ if(window.UI)UI.showToast('Risk / Severity assessment is required','err'); if(btn)btn.removeAttribute('data-submitted'); return; }
-
-    /* Confirm patient identity */
+    /* Confirm patient identity first */
     var pat8 = _D.consultPat||_D.selectedPat||_D.pat360Data||{};
-    if(!pat8._id && !pat8.id){ if(window.UI)UI.showToast('No patient selected — cannot end consultation','err'); if(btn)btn.removeAttribute('data-submitted'); return; }
+    if(!pat8._id && !pat8.id){
+      _ecToast('No patient selected — cannot end consultation','err');
+      if(btn)btn.removeAttribute('data-submitted'); return;
+    }
 
-    /* Save diagnosis first */
-    await window._dSaveNote();
+    /* Field-level validation with red highlights */
+    var _ecMissing = []; var _ecEls = [];
+    function _ecChk(id, label) {
+      var el = document.getElementById(id);
+      var val = el ? (el.value||'').trim() : '';
+      if (!val) {
+        _ecMissing.push(label);
+        if (el) {
+          el.style.border = '2px solid #e53e3e';
+          el.style.background = '#fff5f5';
+          function _clr(ev){ ev.target.style.border=''; ev.target.style.background=''; ev.target.removeEventListener('input',_clr); ev.target.removeEventListener('change',_clr); }
+          el.addEventListener('input', _clr);
+          el.addEventListener('change', _clr);
+          _ecEls.push(el);
+        }
+      }
+      return !!val;
+    }
+    _ecChk('mn-primary-diag',   'Primary Diagnosis');
+    _ecChk('mn-primary-icd',    'ICD-10 Code');
+    _ecChk('mn-primary-status', 'Diagnosis Status');
+    _ecChk('mn-assessment',     'Clinical Assessment');
+    _ecChk('mn-findings',       'Clinical Findings');
+
+    /* Check risk radio separately */
+    var riskEl = document.querySelector('input[name="mn-risk"]:checked');
+    if (!riskEl) {
+      _ecMissing.push('Risk / Severity');
+      var riskGroup = document.querySelector('[data-field="mn-risk"]');
+      if (riskGroup) { riskGroup.style.outline='2px solid #e53e3e'; riskGroup.style.borderRadius='6px'; _ecEls.push(riskGroup); }
+    }
+
+    if (_ecMissing.length) {
+      if (_ecEls.length) _ecEls[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      _ecToast('Please complete: '+_ecMissing.join(' | '),'err');
+      if(btn)btn.removeAttribute('data-submitted'); return;
+    }
+
+    /* Save diagnosis — abort end-consult if save fails */
+    var noteSaved = await window._dSaveNote();
+    if (!noteSaved) { if(btn)btn.removeAttribute('data-submitted'); return; }
 
     var nowIso = new Date().toISOString();
-    var clinician8 = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+    var clinician8 = _dGetUser();
     var clinName   = clinician8.firstName ? 'Dr '+((clinician8.firstName||'')+' '+(clinician8.lastName||'')).trim() : (clinician8.name||'Unknown');
     var facility8  = (typeof clinician8.facility==='string'?clinician8.facility:'')
                      ||(clinician8.facility&&clinician8.facility.name)||clinician8.facilityName||'';
-    var consultId  = _D.workflow&&_D.workflow.consultationId||('CONSULT-'+Date.now());
+    var consultId  = _D.workflow&&_D.workflow.consultationId;
+    if (!consultId) {
+      _ecToast('No active consultation found — cannot end consultation. Please refresh and try again.','err');
+      if(btn)btn.removeAttribute('data-submitted'); return;
+    }
 
     /* Generate unique survey token */
     var surveyToken = (function(){
@@ -3522,14 +3811,25 @@ function _dMedicalNotes(){
       surveyUrl:        surveyUrl,
       surveyStatus:     'Pending',
     };
-    try { await API._fetchDirect('/consultations/'+consultId+'/complete',{method:'POST',body:JSON.stringify(completionPayload)}).catch(function(){}); }catch(_){}
+    var _ecApiOk = false;
+    try {
+      var _ecRes = await API._fetchDirect('/consultations/'+consultId+'/complete',{method:'POST',body:JSON.stringify(completionPayload)});
+      if (_ecRes && (_ecRes.error || _ecRes.status === false || _ecRes.statusCode >= 400)) {
+        _ecToast((_ecRes.message||_ecRes.error||'Could not complete consultation — please try again.'),'err');
+        if(btn)btn.removeAttribute('data-submitted'); return;
+      }
+      _ecApiOk = true;
+    } catch(ecErr) {
+      _ecToast((ecErr&&ecErr.message)||'Could not complete consultation — please try again.','err');
+      if(btn)btn.removeAttribute('data-submitted'); return;
+    }
 
     /* Store survey token locally */
     if (!_D.workflow) _D.workflow = {};
     _D.workflow.surveyToken   = surveyToken;
     _D.workflow.surveyUrl     = surveyUrl;
     _D.workflow.completedAt   = nowIso;
-    _D.workflow.consultStatus = 'Completed';
+    if (_ecApiOk) _D.workflow.consultStatus = 'Completed';
 
     /* ── Send survey via SMS + email (async, non-blocking) ── */
     var smsMsg = 'Thank you for visiting our healthcare facility. Please take a moment to share your experience by completing our patient feedback survey: '+surveyUrl+'. Your feedback helps us improve our services.';
@@ -3621,8 +3921,6 @@ function _dMedicalNotes(){
         '<div style="display:flex;flex-direction:column;gap:12px">'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Clinician</div>'+
             '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+docName+'</div></div>'+
-          '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">HPCSA Reg. No.</div>'+
-            '<div style="font-size:13px;font-weight:700;color:'+(docHpcsa?C.text:C.muted)+';font-family:monospace">'+(docHpcsa||'Not on record')+'</div></div>'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Facility</div>'+
             '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+docFacility+'</div></div>'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Date</div>'+
@@ -3654,7 +3952,12 @@ function _dMedicalNotes(){
       '</div>'+
       '<div>'+_mnL('Diagnosis Status',true)+
         '<select id="mn-primary-status" style="'+_mnF()+'">'+
-          '<option>Provisional</option><option>Confirmed</option><option>Differential</option>'+
+          '<option value="">-- Select Status --</option>'+
+          '<option value="Provisional">Provisional</option>'+
+          '<option value="Confirmed">Confirmed</option>'+
+          '<option value="Differential">Differential</option>'+
+          '<option value="Resolved">Resolved</option>'+
+          '<option value="Chronic">Chronic</option>'+
         '</select>'+
       '</div>'+
     '</div>';
@@ -3759,22 +4062,17 @@ function _dMedicalNotes(){
           '</div>'
         )+
 
-        /* Actions */
+        /* Actions — three equal buttons in one row */
         '<div style="display:flex;gap:10px;margin-top:4px;margin-bottom:8px">'+
-          '<button onclick="_dSaveNote()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+          '<button id="btn-save-diag" onclick="_dSaveNote()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'+
             'Save Diagnosis'+
           '</button>'+
-          '<button onclick="(function(){var pat=_D.consultPat||_D.selectedPat||{};_D.consultPat=null;_D.consultPatId=null;_D.view=\'dashboard\';_dRender();})()" style="padding:12px 24px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;color:#64748b;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
-        '</div>'+
-
-        /* End Consultation button — Req 9.1 */
-        '<div style="margin-top:8px;margin-bottom:8px">'+
-          '<button id="btn-end-consult" onclick="_dEndConsult()" style="width:100%;padding:14px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#dc2626 0%,#7c3aed 100%);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 2px 8px rgba(220,38,38,.25)">'+
-            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="20 6 9 17 4 12"/></svg>'+
+          '<button id="btn-end-consult" onclick="_dEndConsult()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="20 6 9 17 4 12"/></svg>'+
             'End Consultation'+
           '</button>'+
-          '<div style="font-size:11px;color:#64748b;text-align:center;margin-top:6px">Saves and marks this consultation as completed. A feedback survey will be sent to the patient.</div>'+
+          '<button onclick="(function(){var pat=_D.consultPat||_D.selectedPat||{};_D.consultPat=null;_D.consultPatId=null;_D.view=\'dashboard\';_dRender();})()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Cancel</button>'+
         '</div>'+
 
       '</div>'+
@@ -3925,7 +4223,7 @@ function _dFollowUp(){
   var todayFmt   = new Date().toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
   var todayIso   = new Date().toISOString().slice(0,10);
 
-  var u          = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  var u          = _dGetUser();
   var docName    = u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'—');
   var docHpcsa   = u.hpcsaNumber||u.hpcsa||u.registrationNumber||'';
   var docFacility= (typeof u.facility==='string'?u.facility:'')
@@ -4117,6 +4415,10 @@ function _dFollowUp(){
           '<button onclick="_dSaveFollowUp(false)" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'+
             'Save Follow-Up'+
+          '</button>'+
+          '<button onclick="_D.view=\'medical_notes\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>'+
+            'Back to Diagnosis &amp; Clinical Assessment'+
           '</button>'+
           '<button onclick="_dSaveFollowUp(true)" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
             '📅 Book Next Appointment'+
@@ -4328,11 +4630,96 @@ window._dEndTeleCall = async function(appointmentId){
 ══════════════════════════════════════════════════════════════════ */
 function _dMessages(){
   var msgs   = _D.messages;
-  var u      = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  var u      = _dGetUser();
   var docName= u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'Doctor');
 
-  var unreadCount = msgs.filter(function(m){return m.unread;}).length;
-  var sentCount   = msgs.filter(function(m){return m.from==='Dr (You)';}).length + 12; /* sample sent */
+  /* Load messages from API on every view open or view change.
+     _msgsLoaded is set to false AFTER data arrives so a tab switch always refetches. */
+  var _msgUser = _dGetUser();
+  var _msgDoctorId = String(_msgUser._id || _msgUser.id || '');
+  var _currentView = window._msgView || 'inbox';
+  if (_msgDoctorId && (!_D._msgsLoaded || _D._msgsView !== _currentView)) {
+    /* Mark fetching — will be set false again once data arrives so re-entry is possible */
+    _D._msgsView = _currentView;
+    _D._msgsLoaded = true; /* prevent duplicate parallel fetches only */
+    (async function(){
+      try {
+        var view = _currentView;
+        var fetched = [];
+        if (view === 'sent') {
+          /* Sent folder: messages this doctor sent */
+          var _sRes = await API._fetchDirect(
+            '/messages?senderId=' + encodeURIComponent(_msgDoctorId) + '&limit=100'
+          ).catch(function(){ return null; });
+          fetched = (_sRes && (_sRes.data || _sRes.messages || [])) || [];
+        } else {
+          /* Inbox: single request passing BOTH recipientId and recipientRole so the
+             backend $or query returns messages addressed directly to this doctor AND
+             broadcast messages sent to role=DOCTOR (e.g. from receptionist).
+             Backend fix (messages_route.js) now handles recipientId+recipientRole as $or. */
+          var _byId = await API._fetchDirect(
+            '/messages?recipientId=' + encodeURIComponent(_msgDoctorId) + '&limit=100'
+          ).catch(function(){ return null; });
+          var _byRole = await API._fetchDirect(
+            '/messages?recipientRole=DOCTOR&limit=100'
+          ).catch(function(){ return null; });
+
+          var listById   = (_byId   && (_byId.data   || _byId.messages   || [])) || [];
+          var listByRole = (_byRole && (_byRole.data || _byRole.messages || [])) || [];
+
+          /* Merge and deduplicate by _id string */
+          var seen = {};
+          fetched = listById.concat(listByRole).filter(function(m){
+            var key = String(m._id || m.id || '');
+            if (!key || seen[key]) return false;
+            seen[key] = true;
+            return true;
+          });
+
+          /* Sort newest-first */
+          fetched.sort(function(a,b){
+            return new Date(b.sentAt || b.createdAt || 0) - new Date(a.sentAt || a.createdAt || 0);
+          });
+        }
+
+        /* Normalise API shape → internal doctor.js shape */
+        _D.messages = fetched.map(function(m){
+          var rawId = m._id || m.id;
+          return {
+            id:         String(rawId || ''),
+            _id:        String(rawId || ''),
+            senderId:   m.senderId,
+            from:       m.from || m.senderName || 'Staff',
+            senderName: m.from || m.senderName || 'Staff',
+            role:       m.fromRole || m.role || m.senderRole || 'Staff',
+            fromRole:   m.fromRole || m.senderRole || m.role || '',
+            senderRole: m.fromRole || m.senderRole || m.role || '',
+            subject:    m.subject || '(No subject)',
+            text:       m.body   || m.text || '',
+            body:       m.body   || m.text || '',
+            priority:   m.priority || 'Normal',
+            time:       m.time || (m.sentAt
+              ? new Date(m.sentAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'})
+              : ''),
+            sentAt:     m.sentAt || m.createdAt || '',
+            unread:     m.unread !== undefined ? !!m.unread : (m.readStatus === 'unread'),
+            readStatus: m.readStatus || (m.unread ? 'unread' : 'read'),
+          };
+        });
+
+        /* Allow next tab-switch to refetch fresh data */
+        _D._msgsLoaded = false;
+        _dRender();
+      } catch(_me){
+        console.error('[Doctor Messages] fetch error:', _me);
+        _D._msgsLoaded = false; /* allow retry */
+      }
+    })();
+  }
+  var unreadCount = msgs.filter(function(m){return m.unread||m.status==='unread';}).length;
+  var sentCount   = msgs.filter(function(m){
+    return m.senderId===_msgDoctorId || m.from==='Dr (You)';
+  }).length;
 
   /* State flags */
   window._msgView    = window._msgView    || 'inbox';   /* inbox | sent | important | compose */
@@ -4340,14 +4727,17 @@ function _dMessages(){
 
   /* Recipients list */
   var RECIPIENTS = [
-    {value:'Nurse Station',       label:'Nurse Station',         icon:'🏥'},
-    {value:'Reception',           label:'Reception',             icon:'🧑‍💼'},
-    {value:'Pharmacy',            label:'Pharmacy',              icon:'💊'},
-    {value:'Laboratory',          label:'Laboratory',            icon:'🔬'},
-    {value:'Radiology',           label:'Radiology',             icon:'🩻'},
-    {value:'Another Doctor',      label:'Another Doctor',        icon:'👨‍⚕️'},
-    {value:'Specific staff member',label:'Specific staff member',icon:'👤'},
+    {value:'Nurse Station',        label:'Nurse Station',         icon:'🏥', role:'NURSE_STATION'},
+    {value:'Reception',            label:'Reception',             icon:'🧑‍💼', role:'RECEPTIONIST'},
+    {value:'Pharmacy',             label:'Pharmacy',              icon:'💊', role:'PHARMACY'},
+    {value:'Laboratory',           label:'Laboratory',            icon:'🔬', role:'LAB'},
+    {value:'Radiology',            label:'Radiology',             icon:'🩻', role:'RADIOLOGY'},
+    {value:'Another Doctor',       label:'Another Doctor',        icon:'👨‍⚕️', role:'DOCTOR'},
+    {value:'Specific staff member',label:'Specific staff member', icon:'👤', role:'ADMIN'},
   ];
+  /* Map display value → canonical recipientRole for the backend enum */
+  var _dRoleMap = {};
+  RECIPIENTS.forEach(function(r){ _dRoleMap[r.value] = r.role; });
 
   /* Field helpers */
   function _msgFld(){
@@ -4398,7 +4788,7 @@ function _dMessages(){
         '<div style="display:flex;flex-direction:column;gap:2px">'+
           folders.map(function(f){
             var active = window._msgView===f.key;
-            return '<button onclick="window._msgView=\''+f.key+'\';window._msgThread=null;if(typeof _dRender===\'function\')_dRender()" '+
+            return '<button onclick="window._msgView=\''+f.key+'\';window._msgThread=null;if(_D)_D._msgsLoaded=false;if(typeof _dRender===\'function\')_dRender()" '+
               'style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border:none;border-radius:8px;background:'+(active?C.blueLt:'transparent')+';cursor:pointer;text-align:left;font-family:inherit;border:1.5px solid '+(active?C.teal:'transparent')+'">'+
               '<span style="font-size:15px">'+f.icon+'</span>'+
               '<div style="flex:1;min-width:0">'+
@@ -4486,57 +4876,97 @@ function _dMessages(){
       /* Message body */
       _msgCard('Message',
         _msgLabel('Message',true)+
-        '<textarea id="msg-body" rows="6" placeholder="Type your message here…" style="'+_msgFld()+';resize:vertical"></textarea>'+
-        '<div style="margin-top:8px;padding:10px 12px;background:#f8fafc;border:1px solid '+C.border+';border-radius:8px;font-size:11px;color:'+C.muted+';line-height:1.6">'+
-          '💡 This is a form prototype. It does not send a real hospital message.<br>'+
-          'In your system: the message is saved to MongoDB (sender, recipients, timestamp, priority, patient ref), '+
-          'the recipient is notified via Socket.IO, and delivery/read status is tracked in real time.'+
-        '</div>'
+        '<textarea id="msg-body" rows="6" placeholder="Type your message here…" style="'+_msgFld()+';resize:vertical"></textarea>'
+
       )+
 
       /* Actions */
       '<div style="display:flex;gap:12px;padding-bottom:24px">'+
-        '<button onclick="_dSendMessage()" style="flex:1;padding:13px 24px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">✉ Send Message</button>'+
+        '<button id="btn-send-msg" onclick="_dSendMessage()" style="flex:1;padding:13px 24px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">✉ Send Message</button>'+
         '<button onclick="window._msgView=\'inbox\';if(typeof _dRender===\'function\')_dRender()" style="padding:13px 24px;border:1.5px solid '+C.border+';border-radius:10px;background:#fff;color:'+C.muted+';font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
       '</div>'+
 
       '</div>'; /* end mainCompose */
 
     window._dSendMessage = async function(){
+      /* Submit guard */
+      var _smBtn = document.getElementById('btn-send-msg');
+      if (_smBtn && _smBtn.getAttribute('data-sending')) return;
+      if (_smBtn){ _smBtn.setAttribute('data-sending','1'); _smBtn.disabled=true; _smBtn.style.opacity='0.7'; _smBtn.textContent='Sending…'; }
+      function _smReset(){ if(_smBtn){ _smBtn.removeAttribute('data-sending'); _smBtn.disabled=false; _smBtn.style.opacity=''; _smBtn.textContent='Send Message'; } }
+      function _smToast(m,t){ try{ if(window.UI&&window.UI.showToast)window.UI.showToast(m,t); }catch(_){} }
+
       var g = function(id){ return (document.getElementById(id)||{value:''}).value.trim(); };
       var recpEl = document.querySelector('input[name="msg-recipient"]:checked');
       var prioEl = document.querySelector('input[name="msg-priority"]:checked');
-      var recip  = recpEl ? recpEl.value : '';
+      var recip    = recpEl ? recpEl.value : '';
       var specific = g('msg-specific-staff');
       var subject  = g('msg-subject');
       var patId    = g('msg-patient-id');
       var body     = g('msg-body');
       var priority = prioEl ? prioEl.value : 'Normal';
 
-      if(!subject){ if(window.UI&&UI.showToast)UI.showToast('Please enter a subject','err'); return; }
-      if(!body){    if(window.UI&&UI.showToast)UI.showToast('Please enter a message','err'); return; }
+      /* Validation */
+      if (!recip){ _smReset(); _smToast('Please select a recipient (Send To)','err'); return; }
+      if (!subject){ _smReset(); _smToast('Please enter a subject','err'); return; }
+      if (!body){ _smReset(); _smToast('Please enter a message','err'); return; }
+
+      /* Resolve sender */
+      var _smUser = _dGetUser();
+      var senderId   = _smUser._id || _smUser.id || null;
+      var senderName = _smUser.firstName
+        ? 'Dr '+((_smUser.firstName||'')+' '+(_smUser.lastName||'')).trim()
+        : (_smUser.name||'Doctor');
+      var senderRole = _smUser.role || 'Doctor';
+
+      if (!senderId){ _smReset(); _smToast('Could not identify your account — please refresh and try again.','err'); return; }
+
+      /* Patient context */
+      var pat = _D.consultPat||_D.pat360Data||_D.selectedPat||{};
 
       var payload = {
-        from:      docName,
-        to:        specific||recip,
-        recipient: recip,
-        staffMember: specific||'',
-        subject:   subject,
-        patientId: patId||null,
-        body:      body,
-        priority:  priority,
-        sentAt:    new Date().toISOString(),
-        read:      false,
+        senderId:      senderId,
+        senderName:    senderName,
+        senderRole:    (senderRole||'').toUpperCase().replace('DOCTOR/CLINICIAN','DOCTOR').replace('DOCTOR / CLINICIAN','DOCTOR') || 'DOCTOR',
+        recipientRole: _dRoleMap[recip] || recip.replace(/ /g,'_').toUpperCase(),
+        recipientName: specific || recip,
+        recipientStaffMember: specific||undefined,
+        subject:       subject,
+        body:          body,
+        priority:      priority,
+        patientId:     patId||(pat._id||pat.id||undefined),
+        patientName:   patId ? undefined : (pat.name||pat.fullName||pat.firstName||undefined),
+        sentAt:        new Date().toISOString(),
+        status:        'sent',
+        deliveryStatus:'delivered',
+        readStatus:    'unread',
       };
-      try {
-        await (window.API&&API._fetchDirect('/messages',{method:'POST',body:JSON.stringify(payload)})).catch(function(){});
-      } catch(_){}
 
-      /* Add to local sent list for demo */
-      _D.messages.unshift({id:Date.now(),from:'Dr (You)',role:recip,text:body,time:new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}),unread:false});
-      if(window.UI&&UI.showToast) UI.showToast('Message sent to '+(specific||recip),'ok');
-      window._msgView='sent';
-      _dRender();
+      try {
+        var _smRes = await API._fetchDirect('/messages',{method:'POST',body:JSON.stringify(payload)});
+        if (_smRes && (_smRes.error || _smRes.status === false || (_smRes.statusCode && _smRes.statusCode >= 400))){
+          _smReset();
+          _smToast((_smRes.message||_smRes.error||'Could not send message — please try again.'),'err');
+          return;
+        }
+        /* Notify via Socket.IO if available */
+        try{
+          if(window.socket&&window.socket.emit){
+            window.socket.emit('new-message',{recipientRole:recip,specificStaff:specific||null,messageId:(_smRes&&(_smRes._id||_smRes.id))||null,senderId:senderId});
+          }
+        }catch(_se){}
+        /* Force reload of messages on next render */
+        _D._msgsLoaded = false;
+        _D.messages = [];
+        _smReset();
+        _smToast('Message sent to '+(specific||recip),'ok');
+        window._msgView='sent';
+        window._msgThread=null;
+        _dRender();
+      } catch(smErr){
+        _smReset();
+        _smToast((smErr&&smErr.message)||'Could not send message — please try again.','err');
+      }
     };
 
     return _dHeader('Messages','Internal communication · Secure team messaging','')+
@@ -4550,18 +4980,28 @@ function _dMessages(){
   var folder     = window._msgView||'inbox';
   var folderMeta = folders.find(function(f){return f.key===folder;})||folders[0];
 
+  var _vmUser = _dGetUser();
+  var _vmDocId = _vmUser._id||_vmUser.id||null;
   var visibleMsgs = folder==='sent'
-    ? msgs.filter(function(m){return m.from==='Dr (You)';})
+    ? msgs.filter(function(m){return m.senderId===_vmDocId || m.from==='Dr (You)';})
     : folder==='important'
       ? msgs.filter(function(m){return m.important;})
-      : msgs.filter(function(m){return m.from!=='Dr (You)';});
+      : msgs.filter(function(m){return m.senderId!==_vmDocId && m.from!=='Dr (You)';});
 
   /* Thread detail */
   if(window._msgThread!==null){
-    var threadMsg = msgs.find(function(m){return m.id===window._msgThread;})||msgs[0];
-    /* Mark as read */
-    var mi = msgs.findIndex(function(m){return m.id===window._msgThread;});
-    if(mi>-1) msgs[mi].unread=false;
+    /* IDs may be MongoDB ObjectId strings — compare as strings */
+    var _tId = String(window._msgThread);
+    var threadMsg = msgs.find(function(m){ return String(m._id||m.id)===_tId; }) || msgs[0];
+    /* Mark as read via API */
+    var mi = msgs.findIndex(function(m){ return String(m._id||m.id)===_tId; });
+    if(mi>-1 && (msgs[mi].unread||msgs[mi].readStatus==='unread')){
+      msgs[mi].unread=false; msgs[mi].readStatus='read';
+      var _mrId = msgs[mi]._id||msgs[mi].id;
+      if(_mrId && window.API && API._fetchDirect){
+        API._fetchDirect('/messages/'+_mrId+'/read',{method:'PATCH'}).catch(function(){});
+      }
+    }
 
     var detailMain =
       '<div style="flex:1;min-width:0">'+
@@ -4613,20 +5053,27 @@ function _dMessages(){
     '<div style="background:#fff;border:1.5px solid '+C.border+';border-radius:12px;overflow:hidden;margin-bottom:24px">'+
       (visibleMsgs.length
         ? visibleMsgs.map(function(m,i){
-            var unread = m.unread && m.from!=='Dr (You)';
-            var prios  = {Normal:'',High:'🟠 ',Urgent:'🔴 '};
-            return '<div onclick="window._msgThread='+m.id+';if(typeof _dRender===\'function\')_dRender()" '+
+            var unread = m.unread !== false && (m.readStatus === 'unread' || m.unread) && m.from !== 'Dr (You)';
+            var prioIcon = m.priority === 'Urgent' ? '🔴 ' : m.priority === 'High' ? '🟠 ' : '';
+            var mSubject = m.subject || m.text.slice(0,50) || '(No subject)';
+            var mPreview = m.body || m.text || '';
+            var mFrom = m.from || m.senderName || 'Staff';
+            var mRole  = m.role || m.fromRole || m.senderRole || 'Staff';
+            /* Use string ID quoted in onclick so MongoDB ObjectIDs work */
+            var mId = String(m._id || m.id || '');
+            return '<div onclick="window._msgThread=\''+mId+'\';if(typeof _dRender===\'function\')_dRender()" '+
               'style="display:flex;align-items:flex-start;gap:12px;padding:14px 18px;border-bottom:1px solid '+C.border+';background:'+(unread?C.blueLt:'#fff')+';cursor:pointer" '+
               'onmouseenter="this.style.background=\''+C.blueLt+'\'" onmouseleave="this.style.background=\''+(unread?C.blueLt:'#fff')+'\'">'+
               '<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,'+C.teal+' 0%,#1A4A9B 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;font-weight:700">'+
-                m.from.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase()+
+                mFrom.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase()+
               '</div>'+
               '<div style="flex:1;min-width:0">'+
                 '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
-                  '<div style="font-size:14px;font-weight:'+(unread?'700':'500')+';color:'+C.text+'">'+m.from+' <span style="font-size:11px;color:'+C.muted+';font-weight:400">· '+m.role+'</span></div>'+
+                  '<div style="font-size:14px;font-weight:'+(unread?'700':'500')+';color:'+C.text+'">'+prioIcon+mFrom+' <span style="font-size:11px;color:'+C.muted+';font-weight:400">· '+mRole+'</span></div>'+
                   '<div style="font-size:11px;color:'+C.muted+';flex-shrink:0">'+m.time+'</div>'+
                 '</div>'+
-                '<div style="font-size:13px;color:'+C.muted+';margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+m.text.slice(0,80)+(m.text.length>80?'…':'')+'</div>'+
+                '<div style="font-size:13px;font-weight:'+(unread?'600':'400')+';color:'+C.text+';margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+mSubject+'</div>'+
+                '<div style="font-size:12px;color:'+C.muted+';margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+mPreview.slice(0,80)+(mPreview.length>80?'…':'')+'</div>'+
                 (unread?'<span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:10px;background:'+C.blueLt+';color:'+C.teal+';font-size:10px;font-weight:700">Unread</span>':'')+
               '</div>'+
             '</div>';
@@ -4647,27 +5094,10 @@ function _dMessages(){
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   NOTIFICATIONS
-══════════════════════════════════════════════════════════════════ */
-function _dNotifications(){
-  var notifs = _D.notifications;
-  return _dHeader('Notifications','Alerts for lab results, appointments, referrals')+
-    '<div style="flex:1;overflow:auto;padding:16px 20px">'+
-      _card(notifs.map(function(n,i){
-        return '<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 0;border-bottom:1px solid #f8fafc;background:'+(n.read?'#fff':C.blueLt);+'" onclick="_D.notifications['+i+'].read=true;_dRender()">'+
-          '<span style="font-size:18px;flex-shrink:0">'+n.icon+'</span>'+
-          '<div style="flex:1"><div style="font-size:13px;font-weight:'+(n.read?'400':'700')+';color:'+C.text+'">'+n.text+'</div></div>'+
-          '<div style="font-size:11px;color:'+C.muted+';flex-shrink:0">'+n.time+'</div>'+
-          (!n.read?'<span style="width:8px;height:8px;border-radius:50%;background:'+C.blue+';flex-shrink:0;margin-top:4px"></span>':'')+
-        '</div>';
-      }).join(''),'padding:0')+
-    '</div>';
-}
-
-/* ══════════════════════════════════════════════════════════════════
    MEDICAL CERTIFICATES
 ══════════════════════════════════════════════════════════════════ */
 function _dMedCerts(){
+  window._mcIssuing = false; /* reset on each render so button is never permanently locked */
   var today    = new Date().toISOString().slice(0,10);
   var todayFmt = new Date().toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
 
@@ -4684,7 +5114,7 @@ function _dMedCerts(){
   var pPhone = p.phone || p.contact || p.phoneNumber || p.contactNumber || p.mobile || p.cellphone || '';
 
   /* ── Doctor (logged-in user) ── */
-  var u       = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  var u       = _dGetUser();
   var docName = u.firstName||u.lastName
     ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim()
     : '';
@@ -4695,44 +5125,240 @@ function _dMedCerts(){
   var certNo = 'NIHMS-CERT-'+(today.replace(/-/g,''))+'-'+(Math.floor(1000+Math.random()*9000));
 
   /* Register globals before DOM is injected */
-  window._dIssueMedCert = function(){
-    var gv=function(id){var e=document.getElementById(id);return e?e.value.trim():'';};
-    var cert={certNo:certNo,issued:new Date().toISOString(),
-      patient:{name:pName,id:pId,dob:pDob,address:pAddr,phone:pPhone},
-      assessment:{examDate:gv('mc-exam-date'),onsetDate:gv('mc-illness-date'),practitioner:docName,facility:docFacility,diagnosis:gv('mc-diagnosis')},
-      certification:{from:gv('mc-leave-from'),to:gv('mc-leave-to'),fitReturn:gv('mc-fit-return'),note:gv('mc-cert-note')},
-      authorisation:{name:docName,hpcsa:docHpcsa,dateIssued:gv('mc-auth-date'),phone:docPhone}};
-    if(!cert.patient.name||!cert.certification.from||!cert.certification.to){
-      alert('Please select Absence From and Absence To dates before issuing.');return;
+  window._dIssueMedCert = async function(){
+    /* Duplicate-submit guard */
+    if (window._mcIssuing) return;
+    window._mcIssuing = true;
+
+    var gv = function(id){ var e=document.getElementById(id); return e?e.value.trim():''; };
+    function _mcToast(msg,type){
+      try{ if(window.UI&&window.UI.showToast){ window.UI.showToast(msg,type); return; } }catch(_){}
+      /* Fallback: visible banner */
+      var _tb=document.getElementById('mc-toast-banner');
+      if(!_tb){_tb=document.createElement('div');_tb.id='mc-toast-banner';
+        _tb.style.cssText='position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:99999;padding:10px 22px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:0 4px 14px rgba(0,0,0,.25);display:flex;align-items:center;gap:10px;max-width:480px;text-align:center';
+        document.body.appendChild(_tb);}
+      _tb.style.background=(type==='err')?'#c53030':'#065f46';
+      _tb.style.color='#fff';
+      _tb.textContent=msg;
+      _tb.style.display='flex';
+      clearTimeout(_tb._t);
+      _tb._t=setTimeout(function(){_tb.style.display='none';},5000);
     }
-    /* Validate: to date must not be before from date */
-    if(cert.certification.from&&cert.certification.to&&cert.certification.to<cert.certification.from){
-      alert('Absence To date cannot be before Absence From date.');return;
+
+    /* Patient guard */
+    if (!pName) {
+      _mcToast('No patient selected — cannot issue certificate','err');
+      window._mcIssuing = false; return;
     }
-    window._lastMedCert=cert;
-    /* Persist to localStorage so patient portal can read it */
-    var patStorageKey='nihms_med_certs_'+(p._id||p.id||pId||'unknown');
-    try{
-      var _existing=JSON.parse(localStorage.getItem(patStorageKey)||'[]');
+
+    /* Field validation with red highlights */
+    var _mcMissing = []; var _mcEls = [];
+    function _mcChk(id, label) {
+      var el = document.getElementById(id);
+      var val = el ? (el.value||'').trim() : '';
+      if (!val) {
+        _mcMissing.push(label);
+        if (el) {
+          el.style.border = '2px solid #e53e3e';
+          el.style.background = '#fff5f5';
+          function _clr(ev){ ev.target.style.border=''; ev.target.style.background=''; ev.target.removeEventListener('input',_clr); ev.target.removeEventListener('change',_clr); }
+          el.addEventListener('input', _clr);
+          el.addEventListener('change', _clr);
+          _mcEls.push(el);
+        }
+      }
+      return !!val;
+    }
+
+    _mcChk('mc-diagnosis',  'Diagnosis');
+    _mcChk('mc-exam-date',   'Date Examined');
+    _mcChk('mc-leave-from',  'Absence From');
+    _mcChk('mc-leave-to',    'Absence To');
+    _mcChk('mc-auth-date',   'Date Issued');
+
+    /* Date logic: Absence To must not precede Absence From */
+    var fromVal = gv('mc-leave-from');
+    var toVal   = gv('mc-leave-to');
+    if (fromVal && toVal && toVal < fromVal) {
+      _mcMissing.push('Absence To cannot be before Absence From');
+      var toEl2 = document.getElementById('mc-leave-to');
+      if (toEl2) { toEl2.style.border='2px solid #e53e3e'; toEl2.style.background='#fff5f5'; if(_mcEls.indexOf(toEl2)===-1) _mcEls.push(toEl2); }
+    }
+
+    if (_mcMissing.length) {
+      if (_mcEls.length) _mcEls[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      _mcToast('Please complete: '+_mcMissing.join(' | '),'err');
+      window._mcIssuing = false; return;
+    }
+
+    /* Build certificate object */
+    var nowIso = new Date().toISOString();
+    var cert = {
+      certNo:        certNo,
+      issued:        nowIso,
+      patient:       { name:pName, id:pId, dob:pDob, address:pAddr, phone:pPhone },
+      assessment:    { examDate:gv('mc-exam-date'), onsetDate:gv('mc-illness-date'), practitioner:docName, facility:docFacility, diagnosis:gv('mc-diagnosis') },
+      certification: { from:fromVal, to:toVal, fitReturn:gv('mc-fit-return')},
+      authorisation: { name:docName, hpcsa:docHpcsa, dateIssued:gv('mc-auth-date'), phone:docPhone },
+    };
+
+    /* Persist to API (linked to patient medical records) */
+    var u8 = _dGetUser();
+    var apiPayload = {
+      certNo:              cert.certNo,
+      patient:             p._id||p.id||'',
+      patientName:         pName,
+      patientIdNumber:     pId,
+      dateExamined:        cert.assessment.examDate,
+      dateOfOnset:         cert.assessment.onsetDate,
+      diagnosis:           cert.assessment.diagnosis,
+      absenceFrom:         cert.certification.from,
+      absenceTo:           cert.certification.to,
+      dateFitToReturn:     cert.certification.fitReturn,
+      additionalRemarks:   cert.certification.note,
+      dateIssued:          cert.authorisation.dateIssued,
+      issuedBy:            u8._id||u8.id||'',
+      issuedByName:        docName,
+      issuedByHpcsa:       docHpcsa,
+      facility:            docFacility,
+      consultationId:      (_D.workflow&&_D.workflow.consultationId)||'',
+      status:              'Issued',
+    };
+    /* Lock the Issue Certificate button while saving */
+    var _issueBtn = document.querySelector('button[onclick="_dIssueMedCert()"]');
+    if (_issueBtn) { _issueBtn.disabled = true; _issueBtn.textContent = 'Saving...'; }
+    function _resetIssueBtn(){ if(_issueBtn){ _issueBtn.disabled=false; _issueBtn.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Issue Certificate'; } }
+    /* Try to persist to backend — non-blocking: certificate is issued regardless */
+    if (window.API && typeof window.API._fetchDirect === 'function') {
+      try {
+        var _certRes = await API._fetchDirect('/medical-certificates',{method:'POST',body:JSON.stringify(apiPayload)});
+        if (_certRes && (_certRes.error || (_certRes.status && _certRes.status >= 400))) {
+          console.warn('[MedCert] Backend save returned error:', _certRes.message || _certRes.error);
+        }
+      } catch(err) {
+        console.warn('[MedCert] Backend save failed (non-blocking):', err && err.message);
+      }
+    }
+    /* Restore button to issued state */
+    if (_issueBtn) { _issueBtn.disabled = false; _issueBtn.textContent = '✓ Issued'; _issueBtn.style.background = '#065f46'; }
+
+    /* Persist to localStorage for patient portal */
+    var patStorageKey = 'nihms_med_certs_'+(p._id||p.id||pId||'unknown');
+    try {
+      var _existing = JSON.parse(localStorage.getItem(patStorageKey)||'[]');
       _existing.unshift(cert);
       localStorage.setItem(patStorageKey,JSON.stringify(_existing));
-    }catch(_e){}
-    var old=document.getElementById('mc-issue-banner');
-    if(old)old.remove();
-    var b=document.createElement('div');
-    b.id='mc-issue-banner';
-    b.style.cssText='position:fixed;bottom:16px;right:20px;background:#065f46;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;display:flex;align-items:center;gap:10px;box-shadow:0 4px 14px rgba(0,0,0,.25)';
-    b.innerHTML='✓ Certificate '+certNo+' issued &nbsp;<button onclick="this.parentElement.remove()" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:12px">×</button>';
-    document.body.appendChild(b);
-  };
+    } catch(_e) {}
 
+    window._lastMedCert = cert;
+
+    /* Remove any stale banner, show fresh one */
+    var old = document.getElementById('mc-issue-banner');
+    if (old) old.remove();
+    var b = document.createElement('div');
+    b.id = 'mc-issue-banner';
+    b.style.cssText = 'position:fixed;bottom:16px;right:20px;background:#065f46;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;display:flex;align-items:center;gap:10px;box-shadow:0 4px 14px rgba(0,0,0,.25)';
+    b.innerHTML = '✓ Certificate '+certNo+' issued &nbsp;<button onclick="this.parentElement.remove()" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:12px">×</button>';
+    document.body.appendChild(b);
+
+    window._mcIssuing = false;
+  }
   window._dPrintMedCert = function(){
-    var doc=document.getElementById('mc-preview-doc');
-    if(!doc){alert('Please complete the form first.');return;}
-    var w=window.open('','_blank','width=720,height=960');
-    w.document.write('<!DOCTYPE html><html><head><title>Medical Certificate - '+certNo+'</title>'+
-      '<style>body{margin:30px;font-family:Georgia,serif;font-size:12.5px;color:#1e293b}@media print{body{margin:15mm}}</style>'+
-      '</head><body>'+doc.outerHTML+'<script>window.onload=function(){window.print();}<\/script></body></html>');
+    /* Read live form values */
+    function fv(id){ var e=document.getElementById(id); return e?(e.value||'').trim():''; }
+    function fd(id){ /* format date */
+      var v=fv(id); if(!v) return '';
+      var d=new Date(v+'T00:00:00');
+      return isNaN(d)?v:d.toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
+    }
+    var examDate = fd('mc-exam-date');
+    var onset    = fd('mc-illness-date');
+    var diag     = fv('mc-diagnosis');
+    var fromDate = fd('mc-leave-from');
+    var toDate   = fd('mc-leave-to');
+    var fitRet   = fd('mc-fit-return');
+    var authDate = fd('mc-auth-date');
+    /* Read practitioner info from DOM or closure */
+    var _pEl = document.getElementById('mc-print-docname') || document.getElementById('mc-print-docname2');
+    var _fEl = document.getElementById('mc-print-facility');
+    var printDocName = (_pEl && _pEl.textContent.trim()) || (typeof docName!=='undefined'?docName:'');
+    var printFacility = (_fEl && _fEl.textContent.trim()) || (typeof docFacility!=='undefined'?docFacility:'Johannesburg CHC');
+
+    if (!diag) {
+      alert('Please complete the Diagnosis field before printing.');
+      return;
+    }
+
+    /* Capture signature if drawn */
+    var sigDataUrl = '';
+    var sigCanvas = document.getElementById('mc-sig-canvas');
+    if (sigCanvas) { try { sigDataUrl = sigCanvas.toDataURL('image/png'); } catch(_){} }
+
+    var html='<!DOCTYPE html><html><head><meta charset="utf-8">'+
+      '<title>Medical Certificate — '+certNo+'<\/title>'+
+      '<style>'+
+        'body{margin:30px;font-family:Georgia,serif;font-size:12.5px;color:#1e293b;line-height:1.6}'+
+        'h1{font-size:20px;text-align:center;margin:0 0 4px;letter-spacing:.01em}'+
+        '.sub{text-align:center;color:#64748b;font-size:11px;margin-bottom:4px}'+
+        '.cert-no{text-align:center;font-size:11px;color:#64748b;margin-bottom:28px;font-family:monospace}'+
+        'table{width:100%;border-collapse:collapse;margin-bottom:18px}'+
+        'td{padding:7px 10px;border:1px solid #cbd5e1;vertical-align:top}'+
+        'td:first-child{font-weight:600;width:38%;background:#f8fafc;color:#374151}'+
+        'h3{font-size:12.5px;font-weight:700;border-bottom:2px solid #1e293b;padding-bottom:4px;margin:22px 0 8px;text-transform:uppercase;letter-spacing:.05em}'+
+        '.sig-line{border-top:1px solid #333;width:240px;margin:44px 0 4px}'+
+        '.no-print{margin-top:24px;text-align:center}'+
+        '@media print{.no-print{display:none}body{margin:15mm}}'+
+      '<\/style><\/head><body>'+
+      '<h1>NIHMS Medical Certificate<\/h1>'+
+      '<div class="sub">National Integrated Healthcare Management System<\/div>'+
+      '<div class="sub">Medical Certificate for Absence from Work<\/div>'+
+      '<div class="cert-no">Certificate No: '+certNo+' &nbsp;|&nbsp; Issued: '+authDate+'<\/div>'+
+      '<h3>Section 1 — Patient Information<\/h3>'+
+      '<table>'+
+        '<tr><td>Full Name<\/td><td>'+pName+'<\/td><\/tr>'+
+        '<tr><td>ID \/ Passport<\/td><td>'+pId+'<\/td><\/tr>'+
+        '<tr><td>Date of Birth<\/td><td>'+(pDob?new Date(pDob+'T00:00:00').toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'}):'—')+'<\/td><\/tr>'+
+        '<tr><td>Residential Address<\/td><td>'+(pAddr||'—')+'<\/td><\/tr>'+
+        '<tr><td>Contact Number<\/td><td>'+(pPhone||'—')+'<\/td><\/tr>'+
+      '<\/table>'+
+      '<h3>Section 2 — Clinical Assessment<\/h3>'+
+      '<table>'+
+        '<tr><td>Date Examined<\/td><td>'+examDate+'<\/td><\/tr>'+
+        '<tr><td>Date of Onset<\/td><td>'+(onset||'—')+'<\/td><\/tr>'+
+        '<tr><td>Attending Practitioner<\/td><td>'+(printDocName||'—')+'<\/td><\/tr>'+
+        '<tr><td>Health Facility<\/td><td>'+(printFacility||'Johannesburg CHC')+'<\/td><\/tr>'+
+        '<tr><td>Diagnosis \/ Condition<\/td><td>'+diag+'<\/td><\/tr>'+
+      '<\/table>'+
+      '<h3>Section 3 — Certification of Absence<\/h3>'+
+      '<table>'+
+        '<tr><td>Absent From<\/td><td>'+fromDate+'<\/td><\/tr>'+
+        '<tr><td>Absent To (inclusive)<\/td><td>'+toDate+'<\/td><\/tr>'+
+        '<tr><td>Fit to Return<\/td><td>'+(fitRet||'—')+'<\/td><\/tr>'+
+      '<\/table>'+
+      '<h3>Section 4 — Authorisation<\/h3>'+
+      '<table>'+
+        '<tr><td>Practitioner Name<\/td><td>'+(printDocName||'—')+'<\/td><\/tr>'+
+        '<tr><td>Doctor Name<\/td><td>'+(printDocName||'—')+'<\/td><\/tr>'+
+        '<tr><td>Date Issued<\/td><td>'+authDate+'<\/td><\/tr>'+
+      '<\/table>'+
+      '<div style="margin-top:36px">'+
+        (sigDataUrl ? '<img src="'+sigDataUrl+'" style="height:64px;display:block;margin-bottom:4px" alt="Signature"\/>' : '<div class="sig-line"><\/div>')+
+        '<div style="font-size:11px;color:#64748b">'+(printDocName||'')+(printDocName?' — ':'')+' Authorised Signature<\/div>'+
+      '<\/div>'+
+      '<div class="no-print">'+
+        '<button onclick="window.print()" style="padding:10px 28px;background:#065f46;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-right:12px">🖨️ Print Certificate<\/button>'+
+        '<a id="mc-dl-link" download="Medical-Certificate-'+certNo+'.html" style="padding:10px 28px;background:#1e40af;color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block">⬇️ Download<\/a>'+
+      '<\/div>'+
+      '<script>window.onload=function(){'+
+        'var dl=document.getElementById(\"mc-dl-link\");'+
+        'if(dl){var blob=new Blob([document.documentElement.outerHTML],{type:\"text\/html\"});dl.href=URL.createObjectURL(blob);}'+
+      '};<\/script>'+
+    '<\/body><\/html>';
+
+    var w = window.open('','_blank','width=760,height=980');
+    if (!w) { alert('Popup blocked — please allow popups for this site to print \/ download certificates.'); return; }
+    w.document.write(html);
     w.document.close();
   };
 
@@ -4766,8 +5392,6 @@ function _dMedCerts(){
         '<div style="display:flex;flex-direction:column;gap:12px">'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Practitioner</div>'+
             '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+docName+'</div></div>'+
-          '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">HPCSA Reg. No.</div>'+
-            '<div style="font-size:13px;font-weight:700;color:'+(docHpcsa?C.text:C.muted)+';font-family:monospace">'+(docHpcsa||'Not on record')+'</div></div>'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Facility</div>'+
             '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+docFacility+'</div></div>'+
           '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:4px">Date</div>'+
@@ -4820,6 +5444,10 @@ function _dMedCerts(){
             _mcDateFld('mc-exam-date','Date Examined',today,true,true)+
             _mcDateFld('mc-illness-date','Date of Onset of Illness','',true,false)+
           '</div>'+
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+
+            '<div>'+_mcLabel('Attending Practitioner',false)+'<div id="mc-print-docname" style="font-size:14px;font-weight:700;color:'+C.text+'">'+docName+'</div></div>'+
+            '<div>'+_mcLabel('Health Facility',false)+'<div id="mc-print-facility" style="font-size:14px;font-weight:700;color:'+C.text+'">'+docFacility+'</div></div>'+
+          '</div>'+
           _mcTa('mc-diagnosis','Diagnosis (confidential — internal use only, does not appear on certificate)',2,false)
         )+
 
@@ -4831,8 +5459,7 @@ function _dMedCerts(){
             _mcDateFld('mc-leave-from','Absence From',today,false,true)+
             _mcDateFld('mc-leave-to','Absence To (inclusive)',today,false,true)+
             _mcDateFld('mc-fit-return','Date Fit to Return',today,false,false)+
-          '</div>'+
-          _mcTa('mc-cert-note','Additional Remarks (optional — appears on patient copy)',2,false)
+          '</div>'
         )+
 
         /* Practitioner Authorisation */
@@ -4840,8 +5467,8 @@ function _dMedCerts(){
           _mcTitle('Practitioner Authorisation')+
           '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+
             _mcDateFld('mc-auth-date','Date Issued',today,true,true)+
-            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:6px">Practice Contact No.</div>'+
-              '<div style="font-size:14px;font-weight:700;color:'+(docPhone?C.text:C.muted)+'">'+(docPhone||'Not on record')+'</div></div>'+
+            '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:6px">Doctor Name</div>'+
+              '<div id="mc-print-docname2" style="font-size:14px;font-weight:700;color:'+C.text+'">'+ docName+'</div></div>'+
           '</div>'+
           '<div style="border:1.5px dashed '+C.border+';border-radius:8px;padding:14px;text-align:center;background:#fafafa">'+
             '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:8px">Practitioner Signature</div>'+
@@ -4857,6 +5484,10 @@ function _dMedCerts(){
             'Issue Certificate'+
           '</button>'+
           '<button onclick="_dPrintMedCert()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Print / Download</button>'+
+          '<button onclick="_D.view=\'medical_notes\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>'+
+            'Back to Diagnosis &amp; Clinical Assessment'+
+          '</button>'+
           '<button onclick="_D.view=\'dashboard\';_dRender()" style="flex:1;padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">Cancel</button>'+
         '</div>'+
 
@@ -5059,7 +5690,7 @@ function _dAllCerts(){
   window._dAllCertsVisible = visible;
 
   return _dHeader('Certificate Registry',
-    'All medical certificates issued by '+(function(){var u=(window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};return u.firstName||u.lastName?'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim():'this practice';})())+
+    'All medical certificates issued by '+(function(){var u=_dGetUser();return u.firstName||u.lastName?'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim():'this practice';})())+
     '<div style="flex:1;overflow:auto;padding:16px 20px">'+
       kpiHtml+
       searchHtml+
@@ -5085,7 +5716,6 @@ window._dDocPrintCert = function(idx){
   var fromDate = (c.certification&&c.certification.from)||'';
   var toDate   = (c.certification&&c.certification.to)||'';
   var fitRet   = (c.certification&&c.certification.fitReturn)||'';
-  var certNote = (c.certification&&c.certification.note)||'';
   var docName  = (c.authorisation&&c.authorisation.name)||'';
   var hpcsa    = (c.authorisation&&c.authorisation.hpcsa)||'';
   var docPhone = (c.authorisation&&c.authorisation.phone)||'';
@@ -5117,10 +5747,9 @@ window._dDocPrintCert = function(idx){
     '<table><tr><td>Absent From</td><td>'+fromDate+'</td></tr>'+
     '<tr><td>Absent To (inclusive)</td><td>'+toDate+'</td></tr>'+
     '<tr><td>Fit to Return</td><td>'+fitRet+'</td></tr>'+
-    '<tr><td>Additional Notes</td><td>'+certNote+'</td></tr></table>'+
+    '</table>'+
     '<h3>Section 4 — Authorisation</h3>'+
     '<table><tr><td>Practitioner Name</td><td>'+docName+'</td></tr>'+
-    '<tr><td>HPCSA Registration No.</td><td>'+hpcsa+'</td></tr>'+
     '<tr><td>Practice Contact No.</td><td>'+docPhone+'</td></tr>'+
     '<tr><td>Date Issued</td><td>'+issued+'</td></tr></table>'+
     '<div style="margin-top:32px"><div class="sig-line"></div><div style="font-size:11px;color:#64748b">Authorised Signature</div></div>'+
@@ -5131,25 +5760,6 @@ window._dDocPrintCert = function(idx){
   w.document.write(html);
   w.document.close();
 };
-
-function _dTasks(){
-  var tasks = _D.tasks;
-  return _dHeader('Clinical Tasks','Pending lab reviews, referrals, prescriptions and actions')+
-    '<div style="flex:1;overflow:auto;padding:16px 20px">'+
-      _card(tasks.map(function(t,i){
-        var icon  = {critical:'🔴',warn:'🟠',info:'🟡',ok:'🟢'}[t.type]||'⚪';
-        var bgRow = t.done?'#f8fafc':(i%2===0?'#fff':'#fafafa');
-        return '<div style="display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #f8fafc;background:'+bgRow+';opacity:'+(t.done?.5:1)+'">'+
-          '<span style="font-size:16px">'+icon+'</span>'+
-          '<div style="flex:1">'+
-            '<div style="font-size:13px;font-weight:'+(t.done?'400':'700')+';color:'+C.text+';text-decoration:'+(t.done?'line-through':'none')+'">'+t.label+'</div>'+
-            '<div style="font-size:11px;color:'+C.muted+'">Patient: '+t.patient+'</div>'+
-          '</div>'+
-          (!t.done?_btn('Mark done','_dTaskDone(\''+t.id+'\')',C.green):'<span style="font-size:11px;color:'+C.green+'">✓ Done</span>')+
-        '</div>';
-      }).join(''),'padding:0')+
-    '</div>';
-}
 
 /* ══════════════════════════════════════════════════════════════════
    ACTION HANDLERS
@@ -5228,81 +5838,94 @@ window._dSaveConsult = async function() {
   /* ── Duplicate-click guard ── */
   var btn = document.getElementById('btn-save-consult');
   if (btn && btn.getAttribute('data-submitted')) return;
-  if (btn) {
-    btn.setAttribute('data-submitted','1');
-    btn.disabled = true;
-    btn.textContent = 'Saving…';
+  if (btn) { btn.setAttribute('data-submitted','1'); btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  function _btnReset() {
+    var b = document.getElementById('btn-save-consult') || btn;
+    if (!b) return;
+    b.removeAttribute('data-submitted'); b.disabled = false;
+    b.innerHTML = '✓ Save Consultation &amp; Continue to Diagnosis';
   }
-  function _btnReset(label) {
-    if (!btn) return;
-    btn.removeAttribute('data-submitted');
-    btn.disabled = false;
-    btn.innerHTML = label || '✓ Save Consultation &amp; Continue to Diagnosis';
+  function _toast(msg, type) {
+    try { if(window.UI&&UI.showToast){ UI.showToast(msg, type||'info'); return; } } catch(_) {}
+    try {
+      var old = document.getElementById('_d-toast-banner'); if(old) old.remove();
+      var bg = type==='ok'?'#0F6E56':type==='err'?'#c0392b':'#1A4A9B';
+      var t = document.createElement('div'); t.id='_d-toast-banner';
+      t.setAttribute('style','position:fixed;top:24px;right:24px;z-index:99999;background:'+bg+';color:#fff;padding:14px 22px;border-radius:10px;font-size:14px;font-weight:600;font-family:inherit;max-width:360px;box-shadow:0 4px 20px rgba(0,0,0,0.25);display:flex;align-items:center;gap:10px;');
+      t.innerHTML = (type==='ok'?'<span style="font-size:18px">✓</span> ':'<span style="font-size:18px">ℹ</span> ')+msg;
+      document.body.appendChild(t); setTimeout(function(){ if(t.parentNode)t.remove(); }, 4000);
+    } catch(_) { console.info('[consult]', msg); }
   }
 
+  /* ── Patient guard ── */
+  var _cPat   = _D.consultPat || _D.selectedPat || null;
+  var _cPatId = _D.consultPatId || (_cPat && (_cPat._id || _cPat.id)) || '';
+  if (!_cPatId) {
+    _toast('No patient selected — cannot save consultation', 'err');
+    _btnReset(); return;
+  }
+
+  /* ── Field-level validation with red highlights ── */
+  var _csMissing = []; var _csEls = [];
+  function _csChk(id, label) {
+    var el = document.getElementById(id);
+    var val = el ? (el.value||'').trim() : '';
+    if (!val) {
+      _csMissing.push(label);
+      if (el) {
+        el.style.border = '2px solid #e53e3e'; el.style.background = '#fff5f5';
+        function _clr(ev){ ev.target.style.border=''; ev.target.style.background=''; ev.target.removeEventListener('input',_clr); ev.target.removeEventListener('change',_clr); }
+        el.addEventListener('input', _clr); el.addEventListener('change', _clr);
+        _csEls.push(el);
+      }
+    }
+    return !!val;
+  }
+  _csChk('cs-date',      'Consultation Date');
+  _csChk('cs-type',      'Consultation Type');
+  _csChk('cs-clinician', 'Clinician');
+  _csChk('cs-complaint', 'Chief Complaint');
+
+  if (_csMissing.length) {
+    if (_csEls.length) _csEls[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    _toast('Please complete: ' + _csMissing.join(' | '), 'err');
+    _btnReset(); return;
+  }
+
+  /* ── Collect form values ── */
   var g = function(id){ return (document.getElementById(id)||{value:''}).value; };
   var outcomes = [];
   document.querySelectorAll('.cs-outcome:checked').forEach(function(cb){ outcomes.push(cb.value); });
 
-  /* ── Resolve stored doctor profile as fallback for empty fields ── */
-  var _su = (window.API && window.API.getStoredUser && window.API.getStoredUser()) || {};
-  var _suName = _su.firstName ? 'Dr ' + ((_su.firstName||'') + ' ' + (_su.lastName||'')).trim() : (_su.name || '');
-  var _suReg  = _su.hpcsaNumber || _su.hpcsa || _su.registrationNumber || _su.regNo || _su.licenseNumber || '';
-  var _suFac  = (typeof _su.facility==='string'?_su.facility:'') || (_su.facility&&_su.facility.name) || _su.facilityName || '';
+  var _su = {}; try { _su = _dGetUser(); } catch(_) {}
+  var _suName = _su.firstName ? ('Dr '+((_su.firstName||'')+' '+(_su.lastName||'')).trim()) : (_su.name||_su.fullName||'');
+  var _suReg  = _su.hpcsaNumber||_su.hpcsa||_su.registrationNumber||_su.regNo||'';
+  var _suFac  = (typeof _su.facility==='string'?_su.facility:'')||(_su.facility&&_su.facility.name)||_su.facilityName||'';
 
-  /* If form fields are blank, inject from stored user now (race between render and click) */
-  if (!g('cs-clinician') && _suName) { var _el1=document.getElementById('cs-clinician'); if(_el1) _el1.value=_suName; }
-  if (!g('cs-reg')       && _suReg)  { var _el2=document.getElementById('cs-reg');       if(_el2) _el2.value=_suReg;  }
-  if (!g('cs-facility')  && _suFac)  { var _el3=document.getElementById('cs-facility');  if(_el3) _el3.value=_suFac;  }
+  var _inj = function(id, val){ if(!val) return; var el=document.getElementById(id); if(el&&!el.value) el.value=val; };
+  _inj('cs-clinician', _suName); _inj('cs-reg', _suReg); _inj('cs-facility', _suFac);
 
-  /* ── Required field validation ── */
-  var clinician = g('cs-clinician') || _suName;
-  if (!clinician.trim()) {
-    if(window.UI&&UI.showToast) UI.showToast('Clinician name is required — please enter your name','err');
-    _btnReset(); return;
-  }
+  var clinician = g('cs-clinician') || _suName || 'Doctor';
+  var regNo     = (g('cs-reg') || _suReg || '').trim();
+  var _facRaw   = g('cs-facility') || _suFac || '';
+  var _isObjId  = /^[a-f\d]{24}$/i.test(_facRaw.trim());
 
-  var regNo = (g('cs-reg') || _suReg).trim();
-  if (!regNo) {
-    if(window.UI&&UI.showToast) UI.showToast('Professional registration number is required','err');
-    _btnReset(); return;
-  }
-  /* HPCSA numbers: 4–15 alphanumeric chars (e.g. MP0812345, 12345678) */
-  if (!/^[A-Za-z0-9]{4,15}$/.test(regNo.replace(/[\s\-]/g,''))) {
-    if(window.UI&&UI.showToast) UI.showToast('Enter a valid professional registration number (4–15 alphanumeric characters)','err');
-    _btnReset(); return;
-  }
-
-  var visitType = g('cs-type');
-  if (!visitType) {
-    if(window.UI&&UI.showToast) UI.showToast('Visit type is required','err');
-    _btnReset(); return;
-  }
-
-  var complaint = g('cs-complaint');
-  if (!complaint.trim()) {
-    if(window.UI&&UI.showToast) UI.showToast('Please enter the chief complaint','err');
-    _btnReset(); return;
-  }
-
-  /* ── Ensure workflow object exists ── */
   if (!_D.workflow) _D.workflow = { consultationId: null, diagnosisId: null };
 
-  /* ── Resolve patient ID ── */
-  var _cPat   = _D.consultPat || _D.selectedPat || null;
-  var _cPatId = _D.consultPatId
-    || (_cPat && (_cPat._id || _cPat.pid || _cPat.id))
-    || '';
+  /* ── Idempotency key: same patient + date + clinician = same submission ── */
+  var _idem = 'consult-' + _cPatId + '-' + g('cs-date') + '-' + clinician.replace(/\s+/g,'');
 
-  var data = {
+  var payload = {
     patient:          _cPatId,
     consultationDate: g('cs-date'),
     consultationTime: g('cs-time'),
-    visitType:        visitType,
+    visitType:        g('cs-type') || 'outpatient',
     clinician:        clinician,
     registrationNo:   regNo,
-    facility:         g('cs-facility') || _suFac,
-    chiefComplaint:   complaint,
+    facility:         _isObjId ? _facRaw.trim() : undefined,
+    facilityName:     _isObjId ? undefined : (_facRaw || undefined),
+    chiefComplaint:   g('cs-complaint'),
     onset:            g('cs-onset'),
     duration:         g('cs-duration'),
     severity:         g('cs-severity'),
@@ -5323,105 +5946,94 @@ window._dSaveConsult = async function() {
     systemExamination:  g('cs-systems'),
     clinicianNotes:     g('cs-notes'),
     outcomes:           outcomes,
-    consultedAt:        new Date().toISOString(),
+    idempotencyKey:     _idem,
   };
 
-  /* ── POST to backend ── */
-  var saveOk  = false;
+  /* ── POST to backend — do NOT fall back silently ── */
   var savedId = null;
   try {
     var res = await API._fetchDirect('/consultation-notes', {
-      method: 'POST',
-      body:   JSON.stringify(data),
+      method: 'POST', body: JSON.stringify(payload),
     });
-    /* Accept either { _id } or { data: { _id } } or { success, data } */
     var saved = (res && res.data) ? res.data : res;
     if (saved && (saved._id || saved.id)) {
       savedId = saved._id || saved.id;
-      saveOk  = true;
     } else if (res && res.success === false) {
       throw new Error(res.message || 'Server rejected the consultation record');
-    } else {
-      /* Route exists but returned an unexpected shape — treat as success */
-      saveOk = true;
     }
-  } catch (err) {
-    var msg = (err && err.message) || '';
-    /* Route not yet deployed / network down — save locally and proceed */
-    var isOffline = /route not found|not found|404|network|fetch|econnrefused/i.test(msg);
-    if (isOffline) {
-      /* Fall back to localStorage so the record survives a refresh */
-      try {
-        var localKey = 'nihms_consultations_' + (_cPatId || 'unknown');
-        var existing = JSON.parse(localStorage.getItem(localKey) || '[]');
-        var localRec = Object.assign({}, data, { _id: 'LOCAL-' + Date.now(), savedLocally: true });
-        existing.unshift(localRec);
-        localStorage.setItem(localKey, JSON.stringify(existing.slice(0, 50)));
-        savedId = localRec._id;
-      } catch(_) {}
-      saveOk = true;
-    } else {
-      /* Genuine server error — do NOT navigate, keep form intact */
-      if(window.UI&&UI.showToast) UI.showToast('Save failed — ' + (msg || 'server error. Please try again.'), 'err');
-      _btnReset();
-      return;
-    }
+  } catch (apiErr) {
+    var errMsg = (apiErr && apiErr.message) || 'Could not save consultation — please check your connection and try again.';
+    console.error('[_dSaveConsult] API error:', errMsg, apiErr);
+    _toast(errMsg, 'err');
+    _btnReset(); return;          /* STOP — do not navigate away on failure */
   }
 
-  if (!saveOk) {
-    if(window.UI&&UI.showToast) UI.showToast('Could not save consultation. Please try again.','err');
-    _btnReset();
-    return;
-  }
+  /* ── Store consultation ID in workflow so diagnosis can link to it ── */
+  if (savedId && _D.workflow) _D.workflow.consultationId = savedId;
 
-  /* ── Store consultation ID in workflow ── */
-  if (savedId) _D.workflow.consultationId = savedId;
-
-  /* ── Update Patient 360 in-memory data so the Consultations tab is current ── */
+  /* ── Update Patient 360 in-memory cache ── */
   var _consultSummary = {
-    _id:            savedId,
-    visitType:      data.visitType,
-    chiefComplaint: data.chiefComplaint,
-    clinicianNotes: data.clinicianNotes,
-    clinician:      data.clinician,
-    facility:       data.facility,
-    consultedAt:    data.consultedAt,
-    outcomes:       data.outcomes,
+    _id: savedId, visitType: payload.visitType,
+    chiefComplaint: payload.chiefComplaint, clinician: payload.clinician,
+    consultedAt: new Date().toISOString(), outcomes: payload.outcomes,
   };
   if (_cPat) {
-    /* Merge into consultPat / selectedPat / pat360Data — all three may be the same object */
-    [_cPat, _D.pat360Data].forEach(function(obj) {
+    [_cPat, _D.pat360Data].forEach(function(obj){
       if (!obj) return;
       if (!Array.isArray(obj.consultations)) obj.consultations = [];
-      obj.consultations.unshift(_consultSummary);
+      /* Only add if not already present (idempotency) */
+      if (!obj.consultations.some(function(c){ return c._id === savedId; })) {
+        obj.consultations.unshift(_consultSummary);
+      }
     });
   }
 
-  /* ── Mark queue item done ── */
-  if (_cPatId) {
-    var qp = (window._DOCTOR_QUEUE||[]).find(function(x){return x.id===_cPatId||x._id===_cPatId;});
-    if (qp) qp.status = 'done';
-  }
-  _dTaskDone('T4');
-
-  /* ── Success feedback ── */
-  if(window.UI&&UI.showToast) UI.showToast('Consultation saved — proceeding to Diagnosis','ok');
-
-  /* ── Preserve patient context and navigate to Diagnosis (medical_notes) ── */
   if (!_D.selectedPat && _cPat) _D.selectedPat = _cPat;
   if (!_D.consultPat  && _cPat) _D.consultPat  = _cPat;
+  try { _dTaskDone('T4'); } catch(_) {}
 
-  /* Bust caches so both views rebuild fresh with the current patient */
-  _dRenderBust('consult');
-  _dRenderBust('medical_notes');
+  /* ── Success overlay then navigate ── */
+  try {
+    var _overlay = document.createElement('div');
+    _overlay.id = '_consult-success-overlay';
+    _overlay.setAttribute('style','position:fixed;inset:0;z-index:99998;background:linear-gradient(135deg,#0a5c47 0%,#0F6E56 60%,#1A4A9B 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;animation:_dSlideIn .3s ease;');
+    _overlay.innerHTML =
+      '<div style="width:90px;height:90px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-size:44px;box-shadow:0 4px 24px rgba(0,0,0,0.2);">✓</div>'+
+      '<div style="color:#fff;font-size:26px;font-weight:800;font-family:inherit;">✔ Consultation Saved!</div>'+
+      '<div style="color:rgba(255,255,255,0.9);font-size:15px;font-family:inherit;">Redirecting to Diagnosis in 3 seconds…</div>'+
+      '<button onclick="window._doConsultNav&&window._doConsultNav()" style="margin-top:8px;padding:12px 32px;border-radius:8px;border:2px solid #fff;background:transparent;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">Continue Now →</button>';
+    if (!document.getElementById('_d-toast-anim')) {
+      var _s=document.createElement('style'); _s.id='_d-toast-anim';
+      _s.textContent='@keyframes _dSlideIn{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:none}}';
+      document.head.appendChild(_s);
+    }
+    document.body.appendChild(_overlay);
+  } catch(_) {}
 
-  /* Use _setView so the sidebar nav highlight updates to Medical Notes */
-  _setView('medical_notes');
-  /* btn is gone after _dRender re-paints the view, no reset needed */
+  window._doConsultNav = function() {
+    if (window._doConsultNav._fired) return;
+    window._doConsultNav._fired = true;
+    try { var ov=document.getElementById('_consult-success-overlay'); if(ov&&ov.parentNode)ov.parentNode.removeChild(ov); } catch(_) {}
+    try { _dRenderBust('consult'); }       catch(_) {}
+    try { _dRenderBust('medical_notes'); } catch(_) {}
+    try { _D.view='medical_notes'; _dRender(); } catch(e) {
+      try { _setView('medical_notes'); } catch(_) {}
+    }
+  };
+  setTimeout(window._doConsultNav, 3000);
 };
 
+/* ── Duplicate-submit guard ── */
+var _rxSubmitting = false;
+
 window._dSaveRx = async function() {
-  /* Collect all medication blocks */
+  /* Safe toast wrapper — UI may not be loaded yet */
+  function _toast(msg,type){try{if(window.UI&&window.UI.showToast)window.UI.showToast(msg,type);else console.warn('[Rx toast]',msg);}catch(_){}}
+
+  /* ── Prevent duplicate submissions ── */
+  if (_rxSubmitting) { _toast('Prescription is already being submitted — please wait','warn'); return; }
+
+  /* ── Collect all medication blocks ── */
   var medications = [];
   var medBlocks = document.querySelectorAll('[id^="rx-med-block-"]');
   medBlocks.forEach(function(block){
@@ -5437,13 +6049,8 @@ window._dSaveRx = async function() {
     var notes = (document.getElementById('rx-med-notes-'+n)||{value:''}).value.trim();
     if(name) medications.push({name:name,strength:str,dose:dose,route:route,frequency:freq,duration:dur,quantity:qty,unit:unit,specialInstructions:notes});
   });
-  if(!medications.length){ UI.showToast('Add at least one medication','err'); return; }
-  if(!medications[0].name){ UI.showToast('Medicine name is required','err'); return; }
 
-  var u        = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
-  var pat      = _D.consultPat || _D.selectedPat || {};
-  var patName  = ((pat.firstName||pat.name||'')+' '+(pat.lastName||'')).trim() || 'Unknown patient';
-  var docName  = u.firstName ? ('Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim()) : 'Doctor';
+  /* ── Collect repeat fields ── */
   var repeatEl   = document.querySelector('input[name="rx-repeat"]:checked');
   var isRepeat   = repeatEl ? repeatEl.value==='yes' : false;
   var repAllowed = isRepeat ? (parseInt((document.getElementById('rx-rep-allowed')||{value:'0'}).value,10)||0) : 0;
@@ -5452,163 +6059,269 @@ window._dSaveRx = async function() {
   var reviewDate = isRepeat ? ((document.getElementById('rx-review-date')||{value:''}).value||undefined)       : undefined;
   var expiryDate = isRepeat ? ((document.getElementById('rx-expiry-date')||{value:''}).value||undefined)       : undefined;
 
-  /* ── Repeat validation: if isRepeat, review date required ── */
-  if (isRepeat && !reviewDate) { UI.showToast('Next Review Date is required for repeat prescriptions','err'); return; }
-  if (isRepeat && repAllowed < 1) { UI.showToast('Number of Repeats Allowed must be at least 1','err'); return; }
-
-  /* ── Validate required prescription fields ── */
-  if (!medications[0].dose)     { UI.showToast('Dosage is required for first medication','err'); return; }
-  if (!medications[0].frequency){ UI.showToast('Frequency is required for first medication','err'); return; }
-  if (!medications[0].duration) { UI.showToast('Duration is required for first medication','err'); return; }
-  if (!medications[0].quantity) { UI.showToast('Quantity is required for first medication','err'); return; }
-
-  var docHpcsa = u.hpcsaNumber||u.hpcsa||u.registrationNumber||u.regNo||u.licenseNumber||'';
-  var rxRef    = 'RX-'+(Date.now()%900000+100000)+'-ZA';
-  var nowIso   = new Date().toISOString();
-
-  var rxData = {
-    prescriptionRef:     rxRef,
-    patient:             pat._id||pat.id||'',
-    patientName:         patName,
-    patientId:           pat.nationalId||pat.idNumber||pat.mrn||pat._id||pat.id||'',
-    patientDob:          pat.dateOfBirth||pat.dob||'',
-    medications:         medications,
-    patientInstructions: (document.getElementById('rx-patient-instr')||{value:''}).value.trim(),
-    dispensingPharmacy:  (document.getElementById('rx-pharmacy')||{value:''}).value,
-    clinicalNotes:       (document.getElementById('rx-clinical-notes')||{value:''}).value.trim(),
-    repeatPrescription:  isRepeat,
-    repeat: isRepeat ? {
-      allowed:    repAllowed,
-      used:       repUsed,
-      remaining:  repRem,
-      reviewDate: reviewDate,
-      expiryDate: expiryDate,
-    } : undefined,
-    prescribedBy:        u._id||u.id||'',
-    prescribedByName:    docName,
-    prescribedByReg:     docHpcsa,
-    facility:            (typeof u.facility==='string'?u.facility:'')
-                          ||(u.facility&&u.facility.name)||u.facilityName||u.primaryFacility||'',
-    prescribedAt:        nowIso,
-    submittedAt:         nowIso,
-    status:              'Submitted',
-    consultationId:      _D.workflow&&_D.workflow.consultationId||'',
-  };
-
-  var rxId = null;
-  try {
-    var rxRes = await API._fetchDirect('/prescriptions',{method:'POST',body:JSON.stringify(rxData)});
-    rxId = rxRes && rxRes.data && (rxRes.data._id||rxRes.data.id);
-    if (rxRes && rxRes._id) rxId = rxRes._id;
-  } catch(_){}
-
-  /* ── Push to pharmacy queue (cross-tab bridge) ── */
-  var queueEntry = {
-    id:            'ph-q-'+Date.now(),
-    ticket:        'P-'+String(Math.floor(Math.random()*900)+100),
-    patient:       patName,
-    patientId:     pat.nationalId||pat.mrn||pat._id||pat.id||'',
-    items:         medications.length,
-    waitedMin:     0,
-    state:         'waiting',
-    prescriptionRef: rxRef,
-    prescriptionId:  rxId||rxRef,
-    medications:   medications,
-    repeat:        rxData.repeat,
-    repeatPrescription: isRepeat,
-    prescribedByName:   docName,
-    prescribedByReg:    docHpcsa,
-    prescribedAt:       nowIso,
-    status:        'Submitted',
-  };
-
-  /* In-memory queue for same-session pharmacy tab */
-  if (!window._PHARMACY_QUEUE) window._PHARMACY_QUEUE = [];
-  var dupQ = window._PHARMACY_QUEUE.find(function(x){return x.prescriptionRef===rxRef;});
-  if (!dupQ) window._PHARMACY_QUEUE.push(queueEntry);
-
-  /* Cross-tab: BroadcastChannel */
-  try {
-    var _phBC = new BroadcastChannel('nihms_pharmacy_queue');
-    _phBC.postMessage({type:'new_prescription', entry: queueEntry});
-    setTimeout(function(){ _phBC.close(); }, 200);
-  } catch(_){}
-
-  /* Cross-tab: localStorage */
-  try {
-    var lsKey = 'NIHMS_PHARMACY_PRESCRIPTIONS';
-    var existing = JSON.parse(localStorage.getItem(lsKey)||'[]');
-    var dupLs = existing.find(function(x){return x.prescriptionRef===rxRef;});
-    if (!dupLs) { existing.push(queueEntry); localStorage.setItem(lsKey, JSON.stringify(existing)); }
-  } catch(_){}
-
-  /* ── Also push to _PH in-memory prescriptions if pharmacy module loaded ── */
-  try {
-    if (window._PH && window._PH.prescriptions) {
-      var dupPh = window._PH.prescriptions.find(function(x){return x.code===rxRef;});
-      if (!dupPh) {
-        window._PH.prescriptions.unshift({
-          code:        rxRef,
-          patientId:   pat.nationalId||pat.mrn||pat._id||pat.id||'',
-          patientName: patName,
-          doctor:      docName,
-          doctorReg:   docHpcsa,
-          facility:    rxData.facility,
-          issued:      nowIso.slice(0,10),
-          validUntil:  reviewDate||expiryDate||(new Date(Date.now()+30*86400000).toISOString().slice(0,10)),
-          status:      'Submitted',
-          submittedAt: nowIso,
-          repeatPrescription: isRepeat,
-          repeat:      rxData.repeat,
-          items:       medications.map(function(m){
-            return {
-              drug:     m.name+(m.strength?' '+m.strength:''),
-              dosage:   (m.dose||'')+' '+(m.frequency||''),
-              duration: m.duration||'',
-              quantity: m.quantity,
-              unit:     m.unit||'',
-              route:    m.route||'',
-              specialInstructions: m.specialInstructions||'',
-            };
-          }),
-          duplicateWarning: null,
-          interactions: [],
-        });
-      }
-      if (window._PH.queue) {
-        var dupPhQ = window._PH.queue.find(function(x){return x.prescriptionRef===rxRef;});
-        if (!dupPhQ) window._PH.queue.push(queueEntry);
+  /* ── Validate ALL required fields — highlight missing ones in red ── */
+  var missing = [];
+  var missingEls = [];
+  function _rxChkField(id, label) {
+    var el = document.getElementById(id);
+    var val = el ? (el.value || '').trim() : '';
+    if (!val) {
+      missing.push(label);
+      if (el) {
+        el.style.border = '2px solid #e53e3e';
+        el.style.background = '#fff5f5';
+        el.style.outline = 'none';
+        missingEls.push(el);
+        function _rxClearErr(e){ e.target.style.border=''; e.target.style.background=''; e.target.removeEventListener('input',_rxClearErr); e.target.removeEventListener('change',_rxClearErr); }
+        el.addEventListener('input', _rxClearErr);
+        el.addEventListener('change', _rxClearErr);
       }
     }
-  } catch(_){}
+    return !!val;
+  }
+  /* Check each medication block */
+  var _mCount = window._rxMedCount || 1;
+  for (var _mi = 1; _mi <= _mCount; _mi++) {
+    var _ms = _mCount > 1 ? ' (Med '+_mi+')' : '';
+    _rxChkField('rx-med-name-'+_mi, 'Medicine Name'+_ms);
+    _rxChkField('rx-med-str-'+_mi,  'Strength'+_ms);
+    _rxChkField('rx-med-dose-'+_mi, 'Dose'+_ms);
+    _rxChkField('rx-med-route-'+_mi,'Route of Administration'+_ms);
+    _rxChkField('rx-med-freq-'+_mi, 'Frequency'+_ms);
+    _rxChkField('rx-med-dur-'+_mi,  'Duration'+_ms);
+    _rxChkField('rx-med-qty-'+_mi,  'Quantity'+_ms);
+  }
+  if (isRepeat && repAllowed < 1) { missing.push('Repeats Allowed (≥ 1)'); var _raEl=document.getElementById('rx-rep-allowed'); if(_raEl){_raEl.style.border='2px solid #e53e3e';_raEl.style.background='#fff5f5';missingEls.push(_raEl);} }
+  if (isRepeat && !reviewDate)    { missing.push('Next Review Date'); var _rdEl=document.getElementById('rx-review-date'); if(_rdEl){_rdEl.style.border='2px solid #e53e3e';_rdEl.style.background='#fff5f5';missingEls.push(_rdEl);} }
 
-  /* ── Notify pharmacy via API ── */
-  var medSummary = medications.map(function(m){ return m.name+(m.strength?' '+m.strength:''); }).join(', ');
-  var notifPayload = {
-    targetRole:  'pharmacist',
-    type:        'prescription',
-    priority:    'high',
-    title:       'New prescription requires dispensing',
-    message:     docName+' has submitted a prescription for '+patName+'. Ref: '+rxRef+'. Medications: '+medSummary+'.',
-    patient:     pat._id||pat.id||'',
-    patientName: patName,
-    prescriptionId: rxId||rxRef,
-    prescriptionRef: rxRef,
-    issuedBy:    u._id||u.id||'',
-    issuedByName:docName,
-    issuedAt:    nowIso,
-  };
+  if (missing.length) {
+    if (missingEls.length) missingEls[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    _toast('Please complete: ' + missing.join(' | '), 'err');
+    return;
+  }
+
+  /* ── Lock against duplicate submissions ── */
+  _rxSubmitting = true;
+  var submitBtn = document.getElementById('rx-submit-btn');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.style.opacity = '0.6'; }
+
   try {
-    await API._fetchDirect('/notifications',{method:'POST',body:JSON.stringify(notifPayload)}).catch(function(){});
-  } catch(_){}
+    var u        = _dGetUser();
+    var pat      = _D.consultPat || _D.selectedPat || {};
+    var patName  = ((pat.firstName||pat.name||'')+' '+(pat.lastName||'')).trim() || 'Unknown patient';
+    var docName  = u.firstName ? ('Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim()) : 'Doctor';
+    var docHpcsa = u.hpcsaNumber||u.hpcsa||u.registrationNumber||u.regNo||u.licenseNumber||'';
+    var rxRef    = 'RX-'+(Date.now()%900000+100000)+'-ZA';
+    var nowIso   = new Date().toISOString();
+    var patMongoId = pat._id||pat.id||'';
+    if (!patMongoId) {
+      _toast('No patient selected. Please open a patient consult before prescribing.','err');
+      return;
+    }
 
-  /* Store prescription ref on workflow */
-  if (!_D.workflow) _D.workflow = {};
-  _D.workflow.prescriptionId  = rxId||rxRef;
-  _D.workflow.prescriptionRef = rxRef;
+    /* ── lines array: shape expected by patient.js _mrLoadRx() ── */
+    var lines = medications.map(function(m){
+      return {
+        medicationName: m.name+(m.strength?' '+m.strength:''),
+        dosage:         m.dose||'',
+        durationDays:   m.duration||'',
+        frequency:      m.frequency||'',
+        quantity:       m.quantity,
+        unit:           m.unit||'',
+        route:          m.route||'',
+        instructions:   m.specialInstructions||'',
+      };
+    });
 
-  UI.showToast('✅ Prescription '+rxRef+' submitted — patient added to pharmacy queue','ok');
-  window._rxMedCount = 1;
+    var rxData = {
+      prescriptionRef:     rxRef,
+      /* MongoDB patient link — used by patient.js API.prescriptions.list({patient:p._id}) */
+      patient:             patMongoId,
+      patientName:         patName,
+      patientId:           pat.nationalId||pat.idNumber||pat.mrn||patMongoId||'',
+      patientDob:          pat.dateOfBirth||pat.dob||'',
+      /* medications: doctor.js internal format */
+      medications:         medications,
+      /* lines: patient.js display format (medicationName, dosage, durationDays, instructions) */
+      lines:               lines,
+      patientInstructions: (document.getElementById('rx-patient-instr')||{value:''}).value.trim(),
+      dispensingPharmacy:  (document.getElementById('rx-pharmacy')||{value:''}).value,
+      clinicalNotes:       (document.getElementById('rx-clinical-notes')||{value:''}).value.trim(),
+      repeatPrescription:  isRepeat,
+      repeat: isRepeat ? {
+        allowed:    repAllowed,
+        used:       repUsed,
+        remaining:  repRem,
+        reviewDate: reviewDate,
+        expiryDate: expiryDate,
+      } : undefined,
+      /* prescribedBy: patient.js renders r.prescribedBy.firstName / .lastName */
+      prescribedBy:        u._id||u.id||'',
+      prescribedByObj:     { _id: u._id||u.id||'', firstName: u.firstName||'', lastName: u.lastName||'' },
+      prescribedByName:    docName,
+      prescribedByReg:     docHpcsa,
+      facility:            (typeof u.facility==='string'?u.facility:'')
+                            ||(u.facility&&u.facility.name)||u.facilityName||u.primaryFacility||'',
+      prescribedAt:        nowIso,
+      submittedAt:         nowIso,
+      createdAt:           nowIso,
+      status:              'pending',
+      consultationId:      _D.workflow&&_D.workflow.consultationId||'',
+    };
+
+    /* ── Save to database (throw on failure — no false success) ── */
+    var rxId = null;
+    try {
+      var rxRes = await API._fetchDirect('/prescriptions',{method:'POST',body:JSON.stringify(rxData)});
+      if (!rxRes || rxRes.success === false) {
+        var errMsg = (rxRes && rxRes.message) || 'Server rejected the prescription — please check all fields and try again.';
+        _toast(errMsg,'err');
+        return;
+      }
+      rxId = (rxRes && rxRes.data && (rxRes.data._id||rxRes.data.id)) || (rxRes && rxRes._id) || null;
+    } catch(apiErr){
+      var apiErrMsg = (apiErr && apiErr.message) || 'Could not save prescription — check your connection and try again.';
+      console.error('[_dSaveRx] API save failed:', apiErr);
+      _toast(apiErrMsg,'err');
+      return;
+    }
+
+    /* ── Push to pharmacy queue (cross-tab bridge) ── */
+    var queueEntry = {
+      id:               'ph-q-'+Date.now(),
+      ticket:           'P-'+String(Math.floor(Math.random()*900)+100),
+      patient:          patName,
+      patientId:        pat.nationalId||pat.mrn||patMongoId||'',
+      items:            medications.length,
+      waitedMin:        0,
+      state:            'waiting',
+      prescriptionRef:  rxRef,
+      prescriptionId:   rxId||rxRef,
+      medications:      medications,
+      lines:            lines,
+      repeat:           rxData.repeat,
+      repeatPrescription: isRepeat,
+      prescribedByName: docName,
+      prescribedByReg:  docHpcsa,
+      prescribedAt:     nowIso,
+      status:           'Submitted',
+    };
+
+    /* In-memory queue (same-session pharmacy tab) */
+    if (!window._PHARMACY_QUEUE) window._PHARMACY_QUEUE = [];
+    var dupQ = window._PHARMACY_QUEUE.find(function(x){return x.prescriptionRef===rxRef;});
+    if (!dupQ) window._PHARMACY_QUEUE.push(queueEntry);
+
+    /* Cross-tab: BroadcastChannel */
+    try {
+      var _phBC = new BroadcastChannel('nihms_pharmacy_queue');
+      _phBC.postMessage({type:'new_prescription', entry: queueEntry});
+      setTimeout(function(){ _phBC.close(); }, 200);
+    } catch(_){}
+
+    /* Cross-tab: localStorage pharmacy queue */
+    try {
+      var lsKey = 'NIHMS_PHARMACY_PRESCRIPTIONS';
+      var existing = JSON.parse(localStorage.getItem(lsKey)||'[]');
+      var dupLs = existing.find(function(x){return x.prescriptionRef===rxRef;});
+      if (!dupLs) { existing.push(queueEntry); localStorage.setItem(lsKey, JSON.stringify(existing)); }
+    } catch(_){}
+
+    /* ── Bridge to patient.js Medical Records (localStorage cache) ──
+       patient.js _mrLoadRx() calls API.prescriptions.list({patient:p._id}).
+       We also cache the record locally so it appears immediately even
+       before the server-side index refreshes.                            */
+    try {
+      var ptRxKey = 'NIHMS_PATIENT_PRESCRIPTIONS_'+patMongoId;
+      var ptRxCached = JSON.parse(localStorage.getItem(ptRxKey)||'[]');
+      var ptDup = ptRxCached.find(function(x){return x.prescriptionRef===rxRef||x._id===rxId;});
+      if (!ptDup) {
+        /* Shape matches what patient.js renders: lines, prescribedBy object, status, createdAt */
+        var ptRxEntry = {
+          _id:            rxId||rxRef,
+          prescriptionRef: rxRef,
+          patient:        patMongoId,
+          patientName:    patName,
+          lines:          lines,
+          prescribedBy:   { _id: u._id||u.id||'', firstName: u.firstName||'', lastName: u.lastName||'' },
+          prescribedByName: docName,
+          status:         'pending',
+          createdAt:      nowIso,
+          repeatPrescription: isRepeat,
+          repeat:         rxData.repeat,
+          facility:       rxData.facility,
+        };
+        ptRxCached.unshift(ptRxEntry);
+        /* Keep at most 100 records in local cache */
+        if (ptRxCached.length > 100) ptRxCached = ptRxCached.slice(0, 100);
+        localStorage.setItem(ptRxKey, JSON.stringify(ptRxCached));
+      }
+    } catch(_){}
+
+    /* ── Also push to _PH in-memory prescriptions if pharmacy module loaded ── */
+    try {
+      if (window._PH && window._PH.prescriptions) {
+        var dupPh = window._PH.prescriptions.find(function(x){return x.code===rxRef;});
+        if (!dupPh) {
+          window._PH.prescriptions.unshift({
+            code:        rxRef,
+            patientId:   pat.nationalId||pat.mrn||patMongoId||'',
+            patientName: patName,
+            doctor:      docName,
+            doctorReg:   docHpcsa,
+            facility:    rxData.facility,
+            issued:      nowIso.slice(0,10),
+            validUntil:  reviewDate||expiryDate||(new Date(Date.now()+30*86400000).toISOString().slice(0,10)),
+            status:      'pending',
+            submittedAt: nowIso,
+            repeatPrescription: isRepeat,
+            repeat:      rxData.repeat,
+            items:       lines,
+            duplicateWarning: null,
+            interactions: [],
+          });
+        }
+        if (window._PH.queue) {
+          var dupPhQ = window._PH.queue.find(function(x){return x.prescriptionRef===rxRef;});
+          if (!dupPhQ) window._PH.queue.push(queueEntry);
+        }
+      }
+    } catch(_){}
+
+    /* ── Notify pharmacy via API ── */
+    var medSummary = medications.map(function(m){ return m.name+(m.strength?' '+m.strength:''); }).join(', ');
+    var notifPayload = {
+      targetRole:      'pharmacist',
+      type:            'prescription',
+      priority:        'high',
+      title:           'New prescription requires dispensing',
+      message:         docName+' has submitted a prescription for '+patName+'. Ref: '+rxRef+'. Medications: '+medSummary+'.',
+      patient:         patMongoId,
+      patientName:     patName,
+      prescriptionId:  rxId||rxRef,
+      prescriptionRef: rxRef,
+      issuedBy:        u._id||u.id||'',
+      issuedByName:    docName,
+      issuedAt:        nowIso,
+    };
+    try {
+      await API._fetchDirect('/notifications',{method:'POST',body:JSON.stringify(notifPayload)}).catch(function(){});
+    } catch(_){}
+
+    /* ── Store prescription ref on workflow ── */
+    if (!_D.workflow) _D.workflow = {};
+    _D.workflow.prescriptionId  = rxId||rxRef;
+    _D.workflow.prescriptionRef = rxRef;
+
+    /* ── Success ── */
+    _toast('Prescription released successfully.','ok');
+    window._rxMedCount = 1;
+
+  } finally {
+    /* Always unlock — whether success or unexpected error */
+    _rxSubmitting = false;
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.style.opacity = ''; }
+  }
 };
 
 window._dSubmitLab = async function() {
@@ -5654,19 +6367,7 @@ window._dSubmitRadiology = async function() {
   UI.showToast((data.urgent?'URGENT ':'')+data.type+' request submitted','ok');
 };
 
-window._dSubmitReferral = async function() {
-  var data = {
-    patient:   (document.getElementById('ref-patient')||{value:''}).value,
-    specialty: (document.getElementById('ref-specialty')||{value:''}).value,
-    urgency:   (document.getElementById('ref-urgency')||{value:'Routine'}).value,
-    reason:    (document.getElementById('ref-reason')||{value:''}).value,
-    preferred: (document.getElementById('ref-preferred')||{value:''}).value,
-    referredAt:new Date().toISOString(),
-  };
-  if (!data.patient||!data.reason) { UI.showToast('Patient and reason are required','err'); return; }
-  try { await API._fetchDirect('/referrals',{method:'POST',body:JSON.stringify(data)}).catch(function(){}); } catch(_){}
-  UI.showToast('Referral to '+data.specialty+' submitted','ok');
-};
+/* _dSubmitReferral defined in _dReferrals() above */
 
 window._dSaveNote = async function() {
   var data = {
@@ -5731,16 +6432,25 @@ function _dBindEvents(){
   var si = document.getElementById('doc-pat-search');
   if (si) si.addEventListener('keydown',function(e){if(e.key==='Enter')window._dSearchPatients();});
 
-  /* Live clock — ticks every second while the dashboard is mounted */
-  if (window._docClockInterval) clearInterval(window._docClockInterval);
-  window._docClockInterval = setInterval(function(){
-    var tEl = document.getElementById('doc-greet-time');
-    var dEl = document.getElementById('doc-greet-date');
-    if (!tEl) { clearInterval(window._docClockInterval); return; }
-    var now = new Date();
-    tEl.textContent = now.toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-    if (dEl) dEl.innerHTML = now.toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+'  ·  Johannesburg CHC';
-  }, 30000);
+  /* Live clock — handled by _docClockTimer set in _dDashboard(); duplicate removed */
+
+  /* Prescription submit — use event delegation so it works even after
+     the form is re-rendered (e.g. after navigating away and back). */
+  document.removeEventListener('click', _dRxSubmitDelegate);
+  document.addEventListener('click', _dRxSubmitDelegate);
+}
+function _dRxSubmitDelegate(e){
+  var t = e.target;
+  if (!t) return;
+  /* Walk up to handle clicks on child elements (icon, span) inside the button */
+  while (t && t !== document.body) {
+    if (t.id === 'rx-submit-btn') {
+      e.preventDefault();
+      if (typeof window._dSaveRx === 'function') window._dSaveRx();
+      return;
+    }
+    t = t.parentElement;
+  }
 }
 
 /* ── Backwards compat for old Pages['queue'] etc ─────────────────── */
@@ -5798,293 +6508,28 @@ window._doctorAddMessage = function(msg) {
   var dup = _D.messages.find(function(m){ return m.id === msg.id; });
   if (dup) return;
   _D.messages.unshift({
-    id:       msg.id || Date.now(),
-    from:     msg.from || 'Reception',
-    role:     msg.fromRole || 'Receptionist',
-    text:     msg.text || msg.body || '',
-    time:     msg.time || new Date().toLocaleTimeString('en-ZA', {hour:'2-digit',minute:'2-digit'}),
-    unread:   true,
+    id:          msg.id || msg._id || Date.now(),
+    _id:         msg._id || msg.id || null,
+    from:        msg.from || msg.senderName || 'Reception',
+    senderName:  msg.senderName || msg.from || 'Reception',
+    senderRole:  msg.senderRole || msg.fromRole || 'RECEPTIONIST',
+    role:        msg.fromRole || msg.senderRole || 'Receptionist',
+    subject:     msg.subject || '(No subject)',
+    text:        msg.text || msg.body || '',
+    body:        msg.body || msg.text || '',
+    time:        msg.time || new Date().toLocaleTimeString('en-ZA', {hour:'2-digit',minute:'2-digit'}),
+    sentAt:      msg.sentAt || new Date().toISOString(),
+    unread:      true,
+    readStatus:  'unread',
   });
   /* Re-render if portal is open */
-  if (typeof _dRec === 'function') _dRec();
+  if (document.getElementById('doc-main')) {
+    _D._msgsLoaded = false; /* force fresh render so new message appears */
+    if (typeof _dRender === 'function') _dRender();
+  }
   /* Toast */
   if (window.UI && window.UI.showToast) {
     UI.showToast('📩 New message from ' + (msg.from || 'Reception'), 'ok');
   }
 };
 
-/* ══════════════════════════════════════════════════════════════════
-   PATIENT FILE — search by ID / passport / name, view full record
-══════════════════════════════════════════════════════════════════ */
-function _dPatientFile(){
-  var state = window._PF || { results:null, selected:null, loading:false, q:'' };
-  window._PF = state;
-
-  /* ── Search handler ── */
-  window._pfSearch = async function(){
-    var q = (document.getElementById('pf-search-input')||{value:''}).value.trim();
-    if(!q){ UI&&UI.showToast('Enter an ID, passport, or name to search','err'); return; }
-    window._PF.q = q;
-    window._PF.loading = true;
-    window._PF.selected = null;
-    var box = document.getElementById('pf-results-area');
-    if(box) box.innerHTML = '<div style="text-align:center;padding:32px;color:'+C.muted+'"><div style="font-size:24px;margin-bottom:8px">⏳</div>Searching…</div>';
-
-    try {
-      /* Try all three fields the backend may support */
-      var res = await API.patients.list({ search: q, limit: 20 });
-      var list = (res&&res.data) || (Array.isArray(res)?res:[]);
-      window._PF.results = list;
-      window._PF.loading = false;
-      _pfRenderResults(list, q);
-    } catch(e) {
-      window._PF.loading = false;
-      var box2 = document.getElementById('pf-results-area');
-      if(box2) box2.innerHTML = '<div style="padding:20px;color:var(--red);font-size:13px">⚠️ Search failed: '+(e.message||'network error')+'. Please try again.</div>';
-    }
-  };
-
-  /* ── Render search result list ── */
-  window._pfRenderResults = function(list, q){
-    var box = document.getElementById('pf-results-area');
-    if(!box) return;
-    if(!list||!list.length){
-      box.innerHTML =
-        '<div style="text-align:center;padding:48px 32px">'+
-          '<div style="font-size:40px;margin-bottom:12px">🔍</div>'+
-          '<div style="font-size:15px;font-weight:700;color:#dc2626;margin-bottom:6px">No patient found</div>'+
-          '<div style="font-size:13px;color:'+C.muted+';margin-bottom:4px">No record matches <strong>"'+q+'"</strong>.</div>'+
-          '<div style="font-size:12px;color:'+C.muted+'">Please check the ID number or passport and try again.<br>Make sure there are no spaces or extra characters.</div>'+
-        '</div>';
-      return;
-    }
-    box.innerHTML = '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:10px">'+list.length+' result'+(list.length===1?'':'s')+' for "'+q+'"</div>'+
-      list.map(function(p){
-        var name = (p.firstName||'')+(p.lastName?' '+p.lastName:'') || p.name || 'Unknown';
-        var dob  = p.dob ? new Date(p.dob).toLocaleDateString('en-ZA') : '—';
-        var age  = p.dob ? Math.floor((Date.now()-new Date(p.dob))/31557600000)+'y' : '';
-        var idNo = p.idNumber||p.nationalId||p.passportNumber||'—';
-        var gender = p.sex||p.gender||'';
-        return '<div onclick="_pfOpenFile(\''+p._id+'\')" style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:#fff;border:1px solid '+C.border+';border-radius:10px;margin-bottom:8px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow=\'0 2px 10px rgba(0,0,0,.08)\'" onmouseout="this.style.boxShadow=\'none\'">'+
-          '<div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#0F6E56,#1A4A9B);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;flex-shrink:0">'+
-            ((name[0]||'?').toUpperCase())+
-          '</div>'+
-          '<div style="flex:1;min-width:0">'+
-            '<div style="font-size:14px;font-weight:700;color:'+C.text+'">'+name+'</div>'+
-            '<div style="font-size:12px;color:'+C.muted+';margin-top:2px">'+
-              (idNo!=='—'?'ID/Passport: <strong>'+idNo+'</strong> &nbsp;·&nbsp; ':'')+
-              'DOB: '+dob+(age?' ('+age+')':'')+
-              (gender?' &nbsp;·&nbsp; '+gender:'')+
-              (p.mrn?' &nbsp;·&nbsp; MRN: '+p.mrn:'')+
-            '</div>'+
-          '</div>'+
-          '<div style="font-size:12px;color:'+C.blue+';font-weight:600">View file →</div>'+
-        '</div>';
-      }).join('');
-  };
-
-  /* ── Open individual patient file → navigate to Patient 360 ── */
-  window._pfOpenFile = async function(pid){
-    var box = document.getElementById('pf-results-area');
-    if(box) box.innerHTML = '<div style="text-align:center;padding:32px;color:'+C.muted+'"><div style="font-size:24px;margin-bottom:8px">⏳</div>Loading patient file…</div>';
-    try {
-      var res = await API.patients.get(pid);
-      var pat = res.data||res;
-      /* Switch to Patient 360 view with the loaded data */
-      _D.pat360Data = pat;
-      _D.p360Tab    = 'overview';
-      _D.view       = 'pat360';
-      if(typeof _dRender==='function') _dRender();
-    } catch(e){
-      if(box) box.innerHTML =
-        '<div style="text-align:center;padding:48px 32px">'+
-          '<div style="font-size:40px;margin-bottom:12px">❌</div>'+
-          '<div style="font-size:15px;font-weight:700;color:#dc2626;margin-bottom:6px">Patient file not found</div>'+
-          '<div style="font-size:13px;color:'+C.muted+';margin-bottom:20px">We could not load this patient\'s file. Please check the ID or passport number and try again.</div>'+
-          '<button onclick="window._PF.selected=null;_pfRenderResults(window._PF.results,window._PF.q)" style="padding:8px 20px;background:'+C.blue+';color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">← Back to results</button>'+
-        '</div>';
-    }
-  };
-
-  /* ── Render full patient file ── */
-  window._pfRenderFile = function(p){
-    var box = document.getElementById('pf-results-area');
-    if(!box) return;
-
-    var name   = (p.firstName||'')+(p.lastName?' '+p.lastName:'') || p.name || 'Unknown';
-    var dob    = p.dob ? new Date(p.dob).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'}) : '—';
-    var age    = p.dob ? Math.floor((Date.now()-new Date(p.dob))/31557600000) : '—';
-    var idNo   = p.idNumber||p.nationalId||'—';
-    var ppNo   = p.passportNumber||'—';
-    var mrn    = p.mrn||'—';
-    var gender = p.sex||p.gender||'—';
-    var blood  = p.bloodType||'—';
-    var phone  = p.phone||p.mobile||'—';
-    var email  = p.email||'—';
-    var addr   = p.address ? (p.address.street||'')+(p.address.city?', '+p.address.city:'')+(p.address.province?', '+p.address.province:'') : '—';
-    var allergies = (p.allergies||[]).join(', ')||'None recorded';
-    var meds   = (p.medications||p.currentMedications||[]);
-    var consults= (p.consultations||[]);
-    var labs   = (p.labResults||p.labs||[]);
-
-    function row(label, val){
-      return '<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #f0f4f8">'+
-        '<span style="min-width:130px;font-size:12px;font-weight:600;color:'+C.muted+'">'+label+'</span>'+
-        '<span style="font-size:13px;color:'+C.text+'">'+val+'</span>'+
-      '</div>';
-    }
-
-    box.innerHTML =
-      /* Back button */
-      '<button onclick="window._PF.selected=null;_pfRenderResults(window._PF.results,window._PF.q)" style="display:flex;align-items:center;gap:6px;margin-bottom:16px;border:none;background:transparent;cursor:pointer;font-size:13px;color:'+C.blue+';font-family:inherit;font-weight:600;padding:0">'+
-        '← Back to results'+
-      '</button>'+
-
-      /* Header banner */
-      '<div style="background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%);border-radius:14px;padding:20px 24px;margin-bottom:16px;display:flex;align-items:center;gap:18px;box-shadow:0 4px 14px rgba(15,110,86,.2)">'+
-        '<div style="width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,.22);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;flex-shrink:0">'+
-          (name[0]||'?').toUpperCase()+
-        '</div>'+
-        '<div style="flex:1">'+
-          '<div style="font-size:20px;font-weight:800;color:#fff">'+name+'</div>'+
-          '<div style="font-size:13px;color:rgba(255,255,255,.78);margin-top:3px">'+
-            'MRN: '+mrn+' &nbsp;·&nbsp; '+age+'y '+gender+' &nbsp;·&nbsp; Blood: '+blood+
-          '</div>'+
-        '</div>'+
-        '<button onclick="_setView(\'patients\');_D.pat360Id=\''+p._id+'\'" style="padding:9px 18px;border-radius:8px;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'+
-          '👥 Full 360° View'+
-        '</button>'+
-      '</div>'+
-
-      /* Two-column layout */
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
-
-        /* LEFT col */
-        '<div style="display:flex;flex-direction:column;gap:14px">'+
-
-          /* Identity */
-          _card(
-            '<div style="font-size:13px;font-weight:700;color:'+C.text+';margin-bottom:10px;display:flex;align-items:center;gap:7px"><span>🪪</span>Identity & Demographics</div>'+
-            row('Full name', name)+
-            row('Date of birth', dob+' (age '+age+')')+
-            row('Gender', gender)+
-            row('SA ID number', idNo)+
-            row('Passport number', ppNo)+
-            row('MRN', mrn)+
-            row('Blood type', blood)
-          )+
-
-          /* Contact */
-          _card(
-            '<div style="font-size:13px;font-weight:700;color:'+C.text+';margin-bottom:10px;display:flex;align-items:center;gap:7px"><span>📞</span>Contact Details</div>'+
-            row('Phone', phone)+
-            row('Email', email)+
-            row('Address', addr)
-          )+
-
-          /* Allergies */
-          _card(
-            '<div style="font-size:13px;font-weight:700;color:'+C.text+';margin-bottom:10px;display:flex;align-items:center;gap:7px"><span>⚠️</span>Allergies & Alerts</div>'+
-            '<div style="padding:10px 14px;background:'+(p.allergies&&p.allergies.length?'#FEF2F2':'#F0FDF4')+';border-radius:8px;font-size:13px;color:'+(p.allergies&&p.allergies.length?'#991B1B':'#166534')+'">'+
-              (p.allergies&&p.allergies.length?'⚠️ '+allergies:'✅ No known allergies')+
-            '</div>'
-          )+
-        '</div>'+
-
-        /* RIGHT col */
-        '<div style="display:flex;flex-direction:column;gap:14px">'+
-
-          /* Current medications */
-          _card(
-            '<div style="font-size:13px;font-weight:700;color:'+C.text+';margin-bottom:10px;display:flex;align-items:center;gap:7px"><span>💊</span>Current Medications</div>'+
-            (meds.length
-              ? meds.map(function(m){
-                  var n = m.name||m.medicationName||String(m);
-                  var d = m.dose||m.dosage||''; var f = m.frequency||'';
-                  return '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #f0f4f8">'+
-                    '<span style="margin-top:2px">💊</span>'+
-                    '<div><div style="font-size:13px;font-weight:600;color:'+C.text+'">'+n+'</div>'+
-                    (d||f?'<div style="font-size:11px;color:'+C.muted+'">'+[d,f].filter(Boolean).join(' · ')+'</div>':'')+
-                    '</div></div>';
-                }).join('')
-              : '<div style="font-size:13px;color:'+C.muted+';padding:8px 0">No current medications on record</div>')
-          )+
-
-          /* Recent consultations */
-          _card(
-            '<div style="font-size:13px;font-weight:700;color:'+C.text+';margin-bottom:10px;display:flex;align-items:center;gap:7px"><span>🩺</span>Recent Consultations</div>'+
-            (consults.length
-              ? consults.slice(0,5).map(function(c){
-                  var dt = c.date ? new Date(c.date).toLocaleDateString('en-ZA') : '—';
-                  return '<div style="padding:8px 0;border-bottom:1px solid #f0f4f8">'+
-                    '<div style="font-size:12px;color:'+C.muted+'">'+dt+'</div>'+
-                    '<div style="font-size:13px;color:'+C.text+'">'+( c.chiefComplaint||c.reason||c.notes||'Consultation' )+'</div>'+
-                  '</div>';
-                }).join('')
-              : '<div style="font-size:13px;color:'+C.muted+';padding:8px 0">No consultations on record</div>')
-          )+
-
-          /* Recent labs */
-          _card(
-            '<div style="font-size:13px;font-weight:700;color:'+C.text+';margin-bottom:10px;display:flex;align-items:center;gap:7px"><span>🧪</span>Recent Lab Results</div>'+
-            (labs.length
-              ? labs.slice(0,5).map(function(l){
-                  var flag = l.flag||l.status||'';
-                  var flagColor = flag==='HIGH'||flag==='CRITICAL'?'#DC2626':flag==='LOW'?'#D97706':'#0F6E56';
-                  return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f0f4f8">'+
-                    '<div style="flex:1;font-size:13px;color:'+C.text+'">'+l.name+'</div>'+
-                    '<div style="font-size:13px;font-weight:600">'+l.result+(l.unit?' '+l.unit:'')+'</div>'+
-                    (flag?'<span style="font-size:10px;font-weight:700;color:'+flagColor+';background:'+flagColor+'18;padding:2px 8px;border-radius:10px">'+flag+'</span>':'')+
-                  '</div>';
-                }).join('')
-              : '<div style="font-size:13px;color:'+C.muted+';padding:8px 0">No lab results on record</div>')
-          )+
-        '</div>'+
-      '</div>';
-  };
-
-  /* ── Keyboard: Enter triggers search ── */
-  setTimeout(function(){
-    if(typeof document==='undefined') return;
-    var inp = document.getElementById('pf-search-input');
-    if(inp) inp.addEventListener('keydown', function(e){ if(e.key==='Enter') window._pfSearch(); });
-  }, 100);
-
-  /* ── Initial render: show the file if already selected, else show search ── */
-  var initialContent = state.selected
-    ? '' /* will re-render below */
-    : state.results
-      ? '' /* will re-render below */
-      : '<div style="text-align:center;padding:48px 20px;color:'+C.muted+'">'+
-          '<div style="font-size:48px;margin-bottom:14px">🗂️</div>'+
-          '<div style="font-size:15px;font-weight:700;color:'+C.text+';margin-bottom:6px">Patient File Search</div>'+
-          '<div style="font-size:13px">Enter a patient\'s ID number, passport number, or full name above</div>'+
-        '</div>';
-
-  return '<div style="flex:1;overflow:auto;padding:20px">'+
-
-    /* Search bar */
-    '<div style="background:#fff;border:1px solid '+C.border+';border-radius:12px;padding:16px 20px;margin-bottom:16px;display:flex;gap:10px;align-items:center;box-shadow:0 1px 4px rgba(0,0,0,.06)">'+
-      '<div style="font-size:22px">🗂️</div>'+
-      '<div style="flex:1">'+
-        '<div style="font-size:14px;font-weight:700;color:'+C.text+';margin-bottom:2px">Find Patient File</div>'+
-        '<div style="font-size:12px;color:'+C.muted+'">Search by SA ID number, passport number, or patient name</div>'+
-      '</div>'+
-    '</div>'+
-
-    '<div style="display:flex;gap:10px;margin-bottom:16px">'+
-      '<div style="flex:1;position:relative">'+
-        '<span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:16px;pointer-events:none">🔍</span>'+
-        '<input id="pf-search-input" type="text" placeholder=""'+
-          ' value="'+(state.q||'')+'"'+
-          ' style="width:100%;padding:12px 14px 12px 42px;border:1.5px solid '+C.border+';border-radius:10px;font-size:14px;font-family:inherit;outline:none;background:#fff"'+
-          ' onfocus="this.style.borderColor=\''+C.blue+'\'" onblur="this.style.borderColor=\''+C.border+'\'">'+
-      '</div>'+
-      '<button onclick="_pfSearch()" style="padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0F6E56,#1A4A9B);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">'+
-        'Search'+
-      '</button>'+
-    '</div>'+
-
-    '<div id="pf-results-area">'+initialContent+'</div>'+
-  '</div>';
-}

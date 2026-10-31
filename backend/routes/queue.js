@@ -296,4 +296,75 @@ router.get('/stats', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/* ─────────────────────────────────────────
+   GET /api/v1/queue/today
+   Today's queue summary for the receptionist dashboard.
+   Does NOT require a facility param — returns totals across all facilities
+   (or filters by facility if provided).
+   Add this block BEFORE the module.exports line in routes/queue.js
+───────────────────────────────────────── */
+router.get('/today', async (req, res, next) => {
+  try {
+    const { facility } = req.query;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today.getTime() + 86400000);
+
+    const filter = {
+      scheduledAt: { $gte: today, $lt: tomorrow },
+    };
+    if (facility) filter.facility = facility;
+
+    const [total, waiting, inProgress, completed, cancelled, priority] = await Promise.all([
+      Appointment.countDocuments(filter),
+      Appointment.countDocuments({ ...filter, status: { $in: ['pending','confirmed'] } }),
+      Appointment.countDocuments({ ...filter, status: 'in_progress' }),
+      Appointment.countDocuments({ ...filter, status: 'completed' }),
+      Appointment.countDocuments({ ...filter, status: 'cancelled' }),
+      Appointment.countDocuments({ ...filter, priority: true }),
+    ]);
+
+    // Fetch the next few appointments for the receptionist panel
+    const upcoming = await Appointment.find({
+      ...filter,
+      status: { $in: ['pending','confirmed','triaged'] },
+    })
+      .populate('patient', 'firstName lastName nationalId mrn phone')
+      .populate('doctor',  'firstName lastName')
+      .sort({ scheduledAt: 1 })
+      .limit(20)
+      .lean();
+
+    const shaped = upcoming.map(a => ({
+      id:          a._id,
+      _id:         a._id,
+      ref:         a.queueToken || a.ref || '',
+      patientName: a.patient
+        ? `${a.patient.firstName} ${a.patient.lastName}`
+        : (a.patientName || 'Unknown'),
+      patientId:   a.patient?._id || a.patient,
+      nationalId:  a.patient?.nationalId || '',
+      doctor:      a.doctor
+        ? `Dr. ${a.doctor.firstName} ${a.doctor.lastName}`
+        : (a.doctorName || ''),
+      dept:        a.department || a.dept || '',
+      date:        a.scheduledAt ? new Date(a.scheduledAt).toISOString().slice(0,10) : '',
+      time:        a.scheduledAt
+        ? new Date(a.scheduledAt).toLocaleTimeString('en-ZA', { hour:'2-digit', minute:'2-digit' })
+        : (a.time || ''),
+      status:      a.status,
+      priority:    a.priority || false,
+      triageLevel: a.triageLevel || null,
+      token:       a.queueToken || '',
+      visitType:   a.visitType || 'consultation',
+    }));
+
+    res.json({
+      success: true,
+      data: shaped,
+      stats: { total, waiting, inProgress, completed, cancelled, priority },
+    });
+  } catch (err) { next(err); }
+});
 module.exports = router;

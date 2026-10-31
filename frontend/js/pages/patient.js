@@ -696,24 +696,58 @@ async function _mrLoadRx() {
   var wrap=document.getElementById('mr-rx-body'); if(!wrap) return;
   try {
     var p=await _getMyPatientRecord(); if(!p) return;
-    var res=await API.prescriptions.list({patient:p._id,limit:50});
-    var rxs=res.data||[];
+
+    /* ── Fetch from API ── */
+    var rxs=[];
+    try {
+      var res=await API.prescriptions.list({patient:p._id,limit:50});
+      rxs=res.data||[];
+    } catch(_apiErr){}
+
+    /* ── Merge localStorage cache written by doctor.js _dSaveRx() ──
+       Cache entries appear immediately (even before the server index refreshes).
+       API records take precedence: any cached entry whose _id or prescriptionRef
+       already exists in the API results is discarded.                          */
+    try {
+      var cacheKey='NIHMS_PATIENT_PRESCRIPTIONS_'+(p._id||p.id||'');
+      var cached=JSON.parse(localStorage.getItem(cacheKey)||'[]');
+      if(cached.length){
+        /* Build a set of identifiers already present in API results */
+        var seen={};
+        rxs.forEach(function(r){ if(r._id) seen[r._id]=true; if(r.prescriptionRef) seen[r.prescriptionRef]=true; });
+        /* Prepend cache entries not yet in the API results */
+        cached.forEach(function(c){
+          if(!seen[c._id] && !seen[c.prescriptionRef]) rxs.unshift(c);
+        });
+      }
+    } catch(_cErr){}
+
     if(!rxs.length){wrap.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-muted)"><i class="ti ti-pill" style="font-size:40px;opacity:.25;display:block;margin-bottom:12px"></i>No prescriptions on record</div>';return;}
     wrap.innerHTML=rxs.map(function(r){
+      var statusLabel=r.status||'pending';
+      var statusBadge=statusLabel==='dispensed'?'badge-green':statusLabel==='pending'?'badge-amber':'badge-gray';
+      var prescriberFirst=r.prescribedBy&&r.prescribedBy.firstName||r.prescribedByName||'\u2014';
+      var prescriberLast=r.prescribedBy&&r.prescribedBy.lastName||'';
+      var dateStr=r.createdAt?new Date(r.createdAt).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'}):'';
       return '<div class="card" style="margin-bottom:10px">'+
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'+
-          '<div><div style="font-weight:700;font-size:14px">'+(r.lines||[]).map(function(l){return l.medicationName;}).join(', ')+'</div>'+
-          '<div style="font-size:12px;color:var(--text-muted)">Dr. '+(r.prescribedBy&&r.prescribedBy.firstName||'\u2014')+' '+(r.prescribedBy&&r.prescribedBy.lastName||'')+' \u00b7 '+new Date(r.createdAt).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'})+'</div></div>'+
-          '<span class="badge '+(r.status==='dispensed'?'badge-green':r.status==='pending'?'badge-amber':'badge-gray')+'">'+r.status+'</span>'+
+          '<div><div style="font-weight:700;font-size:14px">'+(r.lines||[]).map(function(l){return l.medicationName||'Unknown';}).join(', ')+'</div>'+
+          '<div style="font-size:12px;color:var(--text-muted)">Dr. '+prescriberFirst+' '+prescriberLast+(dateStr?' \u00b7 '+dateStr:'')+'</div></div>'+
+          '<span class="badge '+statusBadge+'">'+statusLabel+'</span>'+
         '</div>'+
         '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">'+
         (r.lines||[]).map(function(l){
           return '<div style="padding:8px 10px;background:var(--bg-surface);border-radius:8px;font-size:12px">'+
-            '<div style="font-weight:600;margin-bottom:2px">'+l.medicationName+'</div>'+
-            '<div style="color:var(--text-muted)">'+(l.dosage||'\u2014')+(l.durationDays?' \u00b7 '+l.durationDays+'d':'')+
+            '<div style="font-weight:600;margin-bottom:2px">'+(l.medicationName||'\u2014')+'</div>'+
+            '<div style="color:var(--text-muted)">'+(l.dosage||'\u2014')+(l.durationDays?' \u00b7 '+l.durationDays+(typeof l.durationDays==='number'?'d':''): '')+
             '</div>'+(l.instructions?'<div style="color:var(--text-hint);margin-top:2px">'+l.instructions+'</div>':'')+
           '</div>';
-        }).join('')+'</div></div>';
+        }).join('')+'</div>'+
+        (r.dispensingPharmacy?'<div style="font-size:11px;color:var(--text-muted);margin-top:6px"><i class="ti ti-building-hospital" style="margin-right:4px"></i>Dispensing: '+r.dispensingPharmacy+'</div>':'')+
+        (r.patientInstructions?'<div style="font-size:11px;color:var(--text-muted);margin-top:4px"><i class="ti ti-info-circle" style="margin-right:4px"></i>'+r.patientInstructions+'</div>':'')+
+        (r.repeatPrescription?'<div style="font-size:11px;color:var(--green-dark);margin-top:4px;font-weight:600"><i class="ti ti-refresh" style="margin-right:4px"></i>Repeat prescription'+
+          (r.repeat&&r.repeat.remaining!==undefined?' \u00b7 '+r.repeat.remaining+' repeat(s) remaining':'')+'</div>':'')+
+        '</div>';
     }).join('');
   } catch(e){if(wrap) wrap.innerHTML='<div class="alert-box alert-danger"><i class="ti ti-alert-circle"></i>'+e.message+'</div>';}
 }

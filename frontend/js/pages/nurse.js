@@ -72,6 +72,9 @@ var _N = {
   msgCompose:   '',
 };
 
+/* Expose _N on window so inline onclick handlers can access it regardless of script-loading mode */
+window._N = _N;
+
 window._NURSE_REQUESTS = window._NURSE_REQUESTS || [];
 
 /* Immunisation state */
@@ -301,20 +304,56 @@ Pages['nurse_dashboard'] = function() {
         if (!dupById && !dupByPt) _N.requests.push(r);
       });
 
-      /* 4. Load messages from backend */
-      var mRes = await API._fetchDirect('/messages?role=nurse&limit=50', { method:'GET' }).catch(function(){return null;});
-      if (mRes && mRes.data && mRes.data.length) {
-        _N.messages = mRes.data.map(function(m) {
-          return {
-            id:      m._id || m.id,
-            from:    m.senderName || m.from || 'System',
-            role:    m.senderRole || m.role || 'System',
-            text:    m.body || m.text || m.message || '',
-            time:    m.createdAt ? new Date(m.createdAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}) : '—',
-            unread:  !m.read,
-          };
-        });
+      /* 4. Load messages from backend — dual fetch: by recipientId + by role */
+      var _nu0 = (window.API && window.API._currentUser) || window._currentUser
+        || (function(){ try{ return JSON.parse(sessionStorage.getItem('user')||localStorage.getItem('currentUser')||'null'); }catch(_){ return null; } })() || {};
+      var _nu0Id = _nu0._id || _nu0.id || null;
+      function _normMsg(m) {
+        var sr = (m.senderRole||m.fromRole||m.role||'').toUpperCase()
+                   .replace('NURSE_STATION','NURSE STATION').replace('DOCTOR/CLINICIAN','DOCTOR');
+        return {
+          id:         m._id || m.id,
+          _id:        m._id || m.id || null,
+          senderId:   m.senderId || null,
+          from:       m.senderName || m.from || 'Staff',
+          senderRole: sr,
+          fromRole:   sr,
+          role:       sr,
+          recipientId:   m.recipientId || null,
+          recipientRole: m.recipientRole || '',
+          subject:    m.subject || '(No subject)',
+          body:       m.body || m.text || m.message || '',
+          text:       m.body || m.text || m.message || '',
+          priority:   m.priority || 'Normal',
+          readStatus: m.readStatus || (m.unread ? 'unread' : 'read'),
+          unread:     m.readStatus === 'unread' || m.unread === true,
+          time:       m.sentAt ? new Date(m.sentAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'})
+                               : (m.createdAt ? new Date(m.createdAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}) : '—'),
+          sentAt:     m.sentAt || m.createdAt || null,
+          threadId:   m.threadId || null,
+        };
       }
+      var mFetches = [
+        API._fetchDirect('/messages?recipientRole=NURSE_STATION&limit=100', { method:'GET' }).catch(function(){return null;}),
+      ];
+      if (_nu0Id) {
+        mFetches.push(API._fetchDirect('/messages?recipientId='+_nu0Id+'&limit=100', { method:'GET' }).catch(function(){return null;}));
+      }
+      var mResults = await Promise.all(mFetches);
+      var mSeen = {};
+      var mAll = [];
+      mResults.forEach(function(mRes) {
+        var mArr = mRes && (Array.isArray(mRes.data) ? mRes.data : Array.isArray(mRes.messages) ? mRes.messages : Array.isArray(mRes) ? mRes : []);
+        mArr.forEach(function(m) {
+          var mid = String(m._id || m.id || '');
+          if (!mid || mSeen[mid]) return;
+          mSeen[mid] = true;
+          mAll.push(_normMsg(m));
+        });
+      });
+      /* sort newest first */
+      mAll.sort(function(a,b){ return new Date(b.sentAt||0) - new Date(a.sentAt||0); });
+      if (mAll.length) _N.messages = mAll;
 
     } catch(e) {
       console.warn('NIHMS nurse: could not load data from API', e);
@@ -346,6 +385,12 @@ function _nurseRender() {
   if(!styleEl){styleEl=document.createElement('style');styleEl.id='nihms-style';
   styleEl.textContent='*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}body{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif}';
   document.head.appendChild(styleEl);}
+
+  /* Reset messaging loaded flag when switching away from messaging so it re-fetches next visit */
+  if (_N._prevView === 'messaging' && _N.view !== 'messaging') {
+    _N._nMsgsLoaded = false;
+  }
+  _N._prevView = _N.view;
 
   var views = { overview:_nOverview, requests:_nRequests, queue:_nQueue, vitals:_nVitals,
                 'imm-queue':_nImmQueue, emergency:_nEmergency, messaging:_nMessaging,
@@ -954,54 +999,367 @@ function _nEmergency() {
 }
 
 /* ════════════════════════════════════════════════════════════════
-   VIEW 5 — MESSAGING
+   VIEW 5 — MESSAGING  (doctor.js-style)
 ════════════════════════════════════════════════════════════════ */
+
+/* Nurse colour tokens (mirrors doctor C.*) */
+var _NC = {
+  teal:   '#0F6E56',
+  border: '#e0e0e0',
+  text:   '#111111',
+  muted:  '#6b7280',
+  red:    '#dc2626',
+  blueLt: '#eff6ff',
+  green:  '#f0fdf4',
+};
+
+/* Nurse recipient list with backend role enum */
+var _N_RECIPIENTS = [
+  { value:'Doctor / Clinician',   label:'Doctor / Clinician',   icon:'👨‍⚕️', role:'DOCTOR'        },
+  { value:'Reception',            label:'Reception',             icon:'🧑‍💼', role:'RECEPTIONIST'  },
+  { value:'Pharmacy',             label:'Pharmacy',              icon:'💊', role:'PHARMACY'      },
+  { value:'Laboratory',           label:'Laboratory',            icon:'🔬', role:'LAB'           },
+  { value:'Radiology',            label:'Radiology',             icon:'🩻', role:'RADIOLOGY'     },
+  { value:'Administration',       label:'Administration',        icon:'🏥', role:'ADMIN'         },
+  { value:'Specific staff member',label:'Specific staff member', icon:'👤', role:'ADMIN'         },
+];
+var _nRoleMap = {};
+_N_RECIPIENTS.forEach(function(r){ _nRoleMap[r.value] = r.role; });
+
 function _nMessaging() {
-  var to = _N.msgTo || 'Doctor';
-  var threads = [
-    { role:'Receptionist', name:'Reception — Akua', icon:'📋', color:'#7c3aed', bg:'#f5f3ff' },
-    { role:'Doctor',       name:'Dr. Mensah',       icon:'👨‍⚕️', color:'#0F6E56', bg:'#eff6ff' },
-  ];
+  /* ── State defaults ── */
+  if (!window._nMsgView)   window._nMsgView   = 'inbox';
+  if (!window._nMsgThread) window._nMsgThread = null;
+  /* _N._nMsgsLoaded is set before fetch; cleared after data arrives */
 
-  var threadList = threads.map(function(th){
-    var unread = _N.messages.filter(function(m){ return m.role===th.role&&m.unread; }).length;
-    var active = to===th.role;
-    return '<button onclick="_N.msgTo=\''+th.role+'\';_nurseRender()" style="display:flex;align-items:center;gap:10px;width:100%;padding:10px 16px;border:none;border-bottom:1px solid #e0e0e0;background:'+(active?th.bg:'#fff')+';cursor:pointer;text-align:left;font-family:inherit">' +
-      '<span style="font-size:18px">'+th.icon+'</span>' +
-      '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:#111111">'+th.name+'</div><div style="font-size:11px;color:#6b7280">'+th.role+'</div></div>' +
-      (unread?'<span style="min-width:18px;height:18px;border-radius:50px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 3px">'+unread+'</span>':'') +
-    '</button>';
-  }).join('');
+  /* ── Get current user ── */
+  var _nu = (window.API && window.API._currentUser) || window._currentUser
+    || (function(){ try{ return JSON.parse(sessionStorage.getItem('user')||localStorage.getItem('currentUser')||'null'); }catch(_){ return null; } })() || {};
+  var nuId   = String(_nu._id || _nu.id || '');
+  var nuName = _nu.firstName
+    ? ((_nu.firstName||'')+' '+(_nu.lastName||'')).trim()
+    : (_nu.name || 'Nurse Station');
 
-  var roleColors = { Receptionist:'background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe', Doctor:'background:#eff6ff;color:#0B5443;border:1px solid #bfdbfe', Nurse:'background:#f0fdf4;color:#166534;border:1px solid #86efac' };
-  var msgs = _N.messages.filter(function(m){ return m.role===to||m.role==='Nurse'; });
-  var msgList = msgs.length
-    ? msgs.map(function(m){
-        var isNurse = m.role==='Nurse';
-        return '<div style="margin-bottom:12px;display:flex;flex-direction:column;align-items:'+(isNurse?'flex-end':'flex-start')+'">' +
-          '<div style="font-size:10px;color:#6b7280;margin-bottom:3px">'+(isNurse?'You':m.from)+' · '+m.time+'</div>' +
-          '<div style="max-width:72%;padding:9px 13px;border-radius:10px;font-size:13px;line-height:1.55;background:'+(isNurse?'#0F6E56':'#f1f5f9')+';color:'+(isNurse?'#fff':'#111111')+'">'+m.text+'</div>' +
-          (m.unread&&!isNurse?'<span style="font-size:10px;color:#0F6E56;margin-top:2px">Unread</span>':'') +
+  /* ── Fetch inbox if not already loading ── */
+  if (!_N._nMsgsLoaded) {
+    _N._nMsgsLoaded = true;
+    (async function() {
+      try {
+        var fetches = [
+          API._fetchDirect('/messages?recipientRole=NURSE_STATION&limit=100', {method:'GET'}).catch(function(){return null;}),
+        ];
+        if (nuId) {
+          fetches.push(API._fetchDirect('/messages?recipientId='+nuId+'&limit=100', {method:'GET'}).catch(function(){return null;}));
+        }
+        var results = await Promise.all(fetches);
+        var seen = {}, all = [];
+        results.forEach(function(res) {
+          /* FIX: guard against null (fetch returned null on error) */
+          var arr = (res && (Array.isArray(res.data) ? res.data : Array.isArray(res.messages) ? res.messages : Array.isArray(res) ? res : [])) || [];
+          arr.forEach(function(m) {
+            var mid = String(m._id || m.id || '');
+            if (!mid || seen[mid]) return;
+            seen[mid] = true;
+            var sr = (m.senderRole||m.fromRole||m.role||'').toUpperCase()
+                       .replace('DOCTOR/CLINICIAN','DOCTOR').replace('NURSE_STATION','NURSE STATION');
+            all.push({
+              id: m._id||m.id, _id: m._id||m.id||null,
+              senderId: m.senderId||null,
+              from: m.senderName||m.from||'Staff',
+              senderRole: sr, fromRole: sr, role: sr,
+              recipientId: m.recipientId||null, recipientRole: m.recipientRole||'',
+              subject: m.subject||'(No subject)',
+              body: m.body||m.text||m.message||'', text: m.body||m.text||m.message||'',
+              priority: m.priority||'Normal',
+              readStatus: m.readStatus||(m.unread?'unread':'read'),
+              unread: m.readStatus==='unread'||m.unread===true,
+              time: m.sentAt ? new Date(m.sentAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'})
+                             : (m.createdAt ? new Date(m.createdAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}) : '—'),
+              sentAt: m.sentAt||m.createdAt||null,
+              threadId: m.threadId||null,
+            });
+          });
+        });
+        all.sort(function(a,b){ return new Date(b.sentAt||0)-new Date(a.sentAt||0); });
+        _N.messages = all;
+        /* FIX: only re-render on success — prevents infinite loop on 429 */
+        _N._nMsgsLoaded = false; /* allow re-fetch on next tab switch */
+        _nurseRender();
+      } catch(e) {
+        console.warn('NIHMS nurse: messages fetch error', e);
+        /* FIX: on error, reset flag but do NOT call _nurseRender() —
+           calling it would immediately re-trigger the fetch, creating
+           an infinite loop when the server returns 429 */
+        _N._nMsgsLoaded = false;
+      }
+    })();
+  }
+
+  /* ── Classify messages ── */
+  var inbox = _N.messages.filter(function(m){
+    var sr = (m.senderRole||m.role||'').toUpperCase();
+    return sr !== 'NURSE' && sr !== 'NURSE_STATION';
+  });
+  var sent = _N.messages.filter(function(m){
+    var sr = (m.senderRole||m.role||'').toUpperCase();
+    return sr === 'NURSE' || sr === 'NURSE_STATION';
+  });
+  var important = _N.messages.filter(function(m){
+    return m.priority === 'High' || m.priority === 'Urgent';
+  });
+  var unreadCount = inbox.filter(function(m){ return m.unread; }).length;
+  var view = window._nMsgView || 'inbox';
+
+  /* ── Sidebar ── */
+  var sidebar =
+    '<div style="width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:12px">'+
+
+    /* Stats card */
+    '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;padding:18px 20px">'+
+      '<div style="font-size:13px;font-weight:700;color:'+_NC.text+';margin-bottom:12px">📊 Overview</div>'+
+      '<div style="display:flex;flex-direction:column;gap:8px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center">'+
+          '<span style="font-size:12px;color:'+_NC.muted+'">Unread</span>'+
+          '<span style="font-size:15px;font-weight:800;color:'+_NC.red+'">'+unreadCount+'</span>'+
+        '</div>'+
+        '<div style="display:flex;justify-content:space-between;align-items:center">'+
+          '<span style="font-size:12px;color:'+_NC.muted+'">Sent</span>'+
+          '<span style="font-size:15px;font-weight:800;color:'+_NC.teal+'">'+sent.length+'</span>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+
+    /* Folders card */
+    '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;overflow:hidden">'+
+      '<div style="padding:14px 18px;border-bottom:1px solid '+_NC.border+'">'+
+        '<div style="font-size:13px;font-weight:700;color:'+_NC.text+'">Folders</div>'+
+      '</div>'+
+      [
+        { id:'inbox',     icon:'📥', label:'Inbox',             count: inbox.length,     badge: unreadCount },
+        { id:'sent',      icon:'📤', label:'Sent Messages',     count: sent.length,      badge: 0 },
+        { id:'important', icon:'⭐', label:'Important',         count: important.length, badge: 0 },
+      ].map(function(f){
+        var active = view === f.id;
+        return '<button data-nmsgview="'+f.id+'" '+
+          'style="display:flex;align-items:center;gap:10px;width:100%;padding:12px 18px;border:none;border-bottom:1px solid '+_NC.border+';background:'+(active?_NC.blueLt:'#fff')+';color:'+(active?_NC.teal:_NC.text)+';font-size:13px;font-weight:'+(active?'700':'500')+';cursor:pointer;font-family:inherit;text-align:left">'+
+          '<span>'+f.icon+'</span>'+
+          '<span style="flex:1">'+f.label+'</span>'+
+          '<span style="font-size:11px;color:'+_NC.muted+'">'+f.count+'</span>'+
+          (f.badge ? '<span style="min-width:16px;height:16px;border-radius:50px;background:'+_NC.red+';color:#fff;font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 3px">'+f.badge+'</span>' : '')+
+        '</button>';
+      }).join('')+
+    '</div>'+
+
+    /* Compose button */
+    '<button data-nmsgview="compose" '+
+      'style="width:100%;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,'+_NC.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px">'+
+      '✉ Compose Message'+
+    '</button>'+
+    '</div>';
+
+  /* ── COMPOSE VIEW ── */
+  if (view === 'compose') {
+    var composeMain =
+      '<div style="flex:1;min-width:0">'+
+
+      /* Header */
+      '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">'+
+        '<div>'+
+          '<div style="font-size:18px;font-weight:800;color:'+_NC.text+'">✉ Compose Message</div>'+
+          '<div style="font-size:13px;color:'+_NC.muted+';margin-top:2px">Send a new internal message</div>'+
+        '</div>'+
+        '<button data-nmsgview="inbox" style="padding:8px 16px;border:1.5px solid '+_NC.border+';border-radius:8px;background:#fff;color:'+_NC.muted+';font-size:13px;cursor:pointer;font-family:inherit">✕ Cancel</button>'+
+      '</div>'+
+
+      /* Recipient card */
+      '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px">'+
+        '<div style="font-size:14px;font-weight:700;color:'+_NC.text+';margin-bottom:14px">👤 Recipient</div>'+
+        '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">'+
+        _N_RECIPIENTS.map(function(r){
+          var checked = (_N._nComposeRecip === r.value) || (!_N._nComposeRecip && r.value === 'Doctor / Clinician');
+          return '<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid '+(checked?_NC.teal:_NC.border)+';border-radius:10px;background:'+(checked?_NC.blueLt:'#fff')+';cursor:pointer;font-size:13px;color:'+_NC.text+'">'+
+            '<input type="radio" name="nRecip" value="'+r.value+'" '+(checked?'checked':'')+' data-nrecip="'+r.value+'" style="accent-color:'+_NC.teal+'">'+
+            '<span>'+r.icon+' '+r.label+'</span>'+
+          '</label>';
+        }).join('')+
+        '</div>'+
+      '</div>'+
+
+      /* Priority card */
+      '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px">'+
+        '<div style="font-size:14px;font-weight:700;color:'+_NC.text+';margin-bottom:14px">🔔 Priority</div>'+
+        '<div style="display:flex;gap:10px">'+
+        [
+          { val:'Normal', icon:'🔵', color:'#0F6E56', bg:'#eff6ff' },
+          { val:'High',   icon:'🟠', color:'#d97706', bg:'#fffbeb' },
+          { val:'Urgent', icon:'🔴', color:'#dc2626', bg:'#fef2f2' },
+        ].map(function(p){
+          var sel = (_N._nComposePriority||'Normal') === p.val;
+          return '<label style="display:flex;align-items:center;gap:8px;padding:10px 16px;border:1.5px solid '+(sel?p.color:_NC.border)+';border-radius:10px;background:'+(sel?p.bg:'#fff')+';cursor:pointer;font-size:13px;font-weight:'+(sel?'700':'500')+';color:'+(sel?p.color:_NC.text)+'">'+
+            '<input type="radio" name="nPrio" value="'+p.val+'" '+(sel?'checked':'')+' data-nprio="'+p.val+'" style="accent-color:'+p.color+'">'+
+            p.icon+' '+p.val+
+          '</label>';
+        }).join('')+
+        '</div>'+
+      '</div>'+
+
+      /* Subject + Patient */
+      '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px">'+
+        '<div style="font-size:14px;font-weight:700;color:'+_NC.text+';margin-bottom:14px">📝 Message Details</div>'+
+        '<div style="display:flex;flex-direction:column;gap:10px">'+
+          '<div>'+
+            '<label style="font-size:12px;font-weight:600;color:'+_NC.muted+';display:block;margin-bottom:4px">Subject *</label>'+
+            '<input id="n-compose-subject" type="text" placeholder="Enter message subject" value="'+(_N._nComposeSubject||'')+'" data-nfield="subject" '+
+              'style="width:100%;padding:10px 12px;border:1.5px solid '+_NC.border+';border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
+          '</div>'+
+          '<div>'+
+            '<label style="font-size:12px;font-weight:600;color:'+_NC.muted+';display:block;margin-bottom:4px">Patient Reference (optional)</label>'+
+            '<input id="n-compose-patient" type="text" placeholder="Patient name or ID" value="'+(_N._nComposePatient||'')+'" data-nfield="patient" '+
+              'style="width:100%;padding:10px 12px;border:1.5px solid '+_NC.border+';border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+
+      /* Message body */
+      '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px">'+
+        '<div style="font-size:14px;font-weight:700;color:'+_NC.text+';margin-bottom:14px">💬 Message</div>'+
+        '<textarea id="n-compose-body" rows="6" placeholder="Type your message…" data-nfield="body" '+
+          'style="width:100%;padding:10px 12px;border:1.5px solid '+_NC.border+';border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;outline:none">'+(_N._nComposeBody||'')+'</textarea>'+
+      '</div>'+
+
+      /* Send / Cancel */
+      '<div style="display:flex;gap:12px;justify-content:flex-end;margin-bottom:24px">'+
+        '<button data-nmsgview="inbox" style="padding:11px 24px;border:1.5px solid '+_NC.border+';border-radius:10px;background:#fff;color:'+_NC.muted+';font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+        '<button id="btn-n-send-msg" data-naction="send-msg" style="padding:11px 28px;border:none;border-radius:10px;background:linear-gradient(135deg,'+_NC.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">✉ Send Message</button>'+
+      '</div>'+
+
+      '</div>';
+
+    return _nHeader('Messages','Internal communication · Secure team messaging','') +
+      '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px;align-items:flex-start">'+
+        composeMain + sidebar +
+      '</div>';
+  }
+
+  /* ── THREAD DETAIL VIEW ── */
+  if (window._nMsgThread) {
+    var tid = String(window._nMsgThread);
+    var threadMsg = _N.messages.find(function(m){ return String(m._id||m.id||'') === tid; });
+    if (threadMsg) {
+      /* Mark as read */
+      if (threadMsg.unread) {
+        threadMsg.unread    = false;
+        threadMsg.readStatus = 'read';
+        API._fetchDirect('/messages/'+tid+'/read',{method:'PATCH'}).catch(function(){});
+      }
+      var prioColor = threadMsg.priority==='Urgent'?_NC.red:threadMsg.priority==='High'?'#d97706':_NC.teal;
+      var detailMain =
+        '<div style="flex:1;min-width:0">'+
+
+        '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">'+
+          '<button data-naction="back-thread" style="display:flex;align-items:center;gap:6px;padding:8px 14px;border:1.5px solid '+_NC.border+';border-radius:8px;background:#fff;color:'+_NC.muted+';font-size:13px;cursor:pointer;font-family:inherit">← Back</button>'+
+          '<span style="font-size:11px;padding:4px 10px;border-radius:20px;font-weight:700;background:'+(threadMsg.priority==='Urgent'?'#fef2f2':threadMsg.priority==='High'?'#fffbeb':'#eff6ff')+';color:'+prioColor+'">'+
+            (threadMsg.priority==='Urgent'?'🔴':threadMsg.priority==='High'?'🟠':'🔵')+' '+threadMsg.priority+
+          '</span>'+
+        '</div>'+
+
+        '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;padding:24px;margin-bottom:16px">'+
+          '<div style="font-size:18px;font-weight:800;color:'+_NC.text+';margin-bottom:16px">'+threadMsg.subject+'</div>'+
+          '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid '+_NC.border+'">'+
+            '<div style="width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,'+_NC.teal+' 0%,#1A4A9B 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700">'+
+              (threadMsg.from||'?').split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase()+
+            '</div>'+
+            '<div>'+
+              '<div style="font-size:14px;font-weight:700;color:'+_NC.text+'">'+threadMsg.from+'</div>'+
+              '<div style="font-size:12px;color:'+_NC.muted+'">'+threadMsg.senderRole+' · '+threadMsg.time+'</div>'+
+            '</div>'+
+          '</div>'+
+          '<div style="font-size:14px;line-height:1.7;color:'+_NC.text+';white-space:pre-wrap">'+threadMsg.body+'</div>'+
+        '</div>'+
+
+        /* Reply box */
+        '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;padding:18px 24px;margin-bottom:24px">'+
+          '<div style="font-size:14px;font-weight:700;color:'+_NC.text+';margin-bottom:12px">↩ Reply</div>'+
+          '<textarea id="n-reply-body" rows="4" placeholder="Type your reply…" style="width:100%;padding:10px 12px;border:1.5px solid '+_NC.border+';border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;outline:none"></textarea>'+
+          '<div style="display:flex;justify-content:flex-end;margin-top:10px">'+
+            '<button id="btn-n-reply-msg" data-naction="send-reply" data-nthreadid="'+tid+'" style="padding:10px 22px;border:none;border-radius:10px;background:linear-gradient(135deg,'+_NC.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">↩ Send Reply</button>'+
+          '</div>'+
+        '</div>'+
+
         '</div>';
-      }).join('')
-    : _N.loadingData
-      ? '<div style="text-align:center;padding:30px;color:#6b7280;font-size:13px">⏳ Loading messages…</div>'
-      : '<div style="text-align:center;padding:30px;color:#6b7280;font-size:13px">💬 No messages with this contact yet.</div>';
 
-  var compose = '<div style="padding:10px 14px;border-top:1px solid #e0e0e0;background:#fafafa;flex-shrink:0">' +
-    '<div style="display:flex;gap:8px">' +
-      '<textarea id="nurse-msg-compose" rows="2" placeholder="Message '+( to==='Doctor'?'Dr. Mensah':'Reception')+'…" style="flex:1;padding:8px 10px;border:1px solid #e0e0e0;border-radius:6px;font-size:13px;font-family:inherit;resize:none;outline:none">'+(_N.msgCompose||'')+'</textarea>' +
-      '<button onclick="_nurseSendMsg()" style="padding:8px 16px;border-radius:6px;border:none;background:#0F6E56;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;align-self:flex-end">Send</button>' +
-    '</div>' +
-  '</div>';
+      return _nHeader('Messages','Internal communication · Secure team messaging','') +
+        '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px;align-items:flex-start">'+
+          detailMain + sidebar +
+        '</div>';
+    }
+    /* Thread not found — fall through to list */
+    window._nMsgThread = null;
+  }
 
-  return _nHeader('Communication', _N.messages.filter(function(m){return m.unread;}).length+' unread messages') +
-    '<div style="flex:1;display:flex;min-height:0;overflow:hidden">' +
-      '<div style="width:200px;flex-shrink:0;border-right:1px solid #e0e0e0;background:#f4f5f0;overflow-y:auto">'+threadList+'</div>' +
-      '<div style="flex:1;display:flex;flex-direction:column;overflow:hidden;background:#fff">' +
-        '<div style="flex:1;overflow-y:auto;padding:16px">'+msgList+'</div>' +
-        compose +
-      '</div>' +
+  /* ── MESSAGE LIST VIEW ── */
+  var folderMeta = {
+    inbox:     { icon:'📥', label:'Inbox',          desc:'Messages addressed to Nurse Station' },
+    sent:      { icon:'📤', label:'Sent Messages',   desc:'Messages you have sent' },
+    important: { icon:'⭐', label:'Important',       desc:'High and Urgent priority messages' },
+  };
+  var meta       = folderMeta[view] || folderMeta.inbox;
+  var visibleMsgs = view==='inbox' ? inbox : view==='sent' ? sent : important;
+
+  var listMain =
+    '<div style="flex:1;min-width:0">'+
+
+    /* Folder header */
+    '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">'+
+      '<div>'+
+        '<div style="font-size:18px;font-weight:800;color:'+_NC.text+'">'+meta.icon+' '+meta.label+'</div>'+
+        '<div style="font-size:13px;color:'+_NC.muted+';margin-top:2px">'+meta.desc+'</div>'+
+      '</div>'+
+      '<button data-nmsgview="compose" '+
+        'style="display:flex;align-items:center;gap:8px;padding:10px 18px;border:none;border-radius:10px;background:linear-gradient(135deg,'+_NC.teal+' 0%,#1A4A9B 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'+
+        '✉ Compose Message'+
+      '</button>'+
+    '</div>'+
+
+    /* Message rows */
+    '<div style="background:#fff;border:1.5px solid '+_NC.border+';border-radius:12px;overflow:hidden;margin-bottom:24px">'+
+    (visibleMsgs.length
+      ? visibleMsgs.map(function(m){
+          var unread = m.unread !== false && m.readStatus === 'unread';
+          var prioIcon = m.priority==='Urgent' ? '🔴 ' : m.priority==='High' ? '🟠 ' : '';
+          var mSubject = m.subject || m.text.slice(0,50) || '(No subject)';
+          var mPreview = m.body || m.text || '';
+          var mFrom = m.from || m.senderName || 'Staff';
+          var mRole  = m.senderRole || m.role || 'Staff';
+          var mId    = String(m._id || m.id || '');
+          return '<div data-nmsgthread="'+mId+'" '+
+            'style="display:flex;align-items:flex-start;gap:12px;padding:14px 18px;border-bottom:1px solid '+_NC.border+';background:'+(unread?_NC.blueLt:'#fff')+';cursor:pointer" '+
+            'onmouseenter="this.style.background=\''+_NC.blueLt+'\'" onmouseleave="this.style.background=\''+(unread?_NC.blueLt:'#fff')+'\'">'+
+            '<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,'+_NC.teal+' 0%,#1A4A9B 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;font-weight:700">'+
+              mFrom.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase()+
+            '</div>'+
+            '<div style="flex:1;min-width:0">'+
+              '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
+                '<div style="font-size:14px;font-weight:'+(unread?'700':'500')+';color:'+_NC.text+'">'+prioIcon+mFrom+' <span style="font-size:11px;color:'+_NC.muted+';font-weight:400">· '+mRole+'</span></div>'+
+                '<div style="font-size:11px;color:'+_NC.muted+';flex-shrink:0">'+m.time+'</div>'+
+              '</div>'+
+              '<div style="font-size:13px;font-weight:'+(unread?'600':'400')+';color:'+_NC.text+';margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+mSubject+'</div>'+
+              '<div style="font-size:12px;color:'+_NC.muted+';margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+mPreview.slice(0,80)+(mPreview.length>80?'…':'')+'</div>'+
+              (unread?'<span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:10px;background:'+_NC.blueLt+';color:'+_NC.teal+';font-size:10px;font-weight:700">Unread</span>':'')+
+            '</div>'+
+          '</div>';
+        }).join('')
+      : '<div style="padding:40px;text-align:center;color:'+_NC.muted+'">'+
+          '<div style="font-size:32px;margin-bottom:8px">📭</div>'+
+          '<div style="font-size:14px;font-weight:600;color:'+_NC.text+'">No messages in '+meta.label+'</div>'+
+        '</div>'
+    )+
+    '</div>'+
+    '</div>';
+
+  return _nHeader('Messages','Internal communication · Secure team messaging','') +
+    '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px;align-items:flex-start">'+
+      listMain + sidebar +
     '</div>';
 }
 
@@ -1882,31 +2240,286 @@ window._nurseClassify = function(id, ec) {
 window._nurseNotifyTeam = function(id) {
   var p = _N.patients.find(function(x){ return x.id===id; });
   if (!p) return;
-  _N.messages.unshift({ id:Date.now(), from:'Nurse Triage', role:'Nurse',
-    text:'EMERGENCY: '+p.name+' requires immediate attention. Class: '+(p.emergencyClass||'Pending')+'. '+p.complaint,
-    time:_nowTime(), unread:false });
+  var msgText = 'EMERGENCY: '+p.name+' requires immediate attention. Class: '+(p.emergencyClass||'Pending')+'. '+p.complaint;
+  var localId = Date.now();
+  _N.messages.unshift({ id:localId, from:'Nurse Station', role:'Nurse', text:msgText, time:_nowTime(), unread:false });
   _nurseRender();
   UI.showToast('Team notified about '+p.name,'ok');
+  /* Fire-and-forget to API */
+  if (window.API && API._fetchDirect) {
+    var _nu = (window.API&&window.API._currentUser)||window._currentUser||{};
+    API._fetchDirect('/messages',{method:'POST',body:JSON.stringify({
+      senderName: _nu.name||'Nurse Station', senderRole: _nu.role||'NURSE',
+      recipientRole: 'Doctor',
+      subject: 'EMERGENCY ALERT — '+p.name,
+      body: msgText, priority: 'URGENT',
+      patientId: p.id||p.pid||undefined,
+      patientName: p.name||undefined,
+      sentAt: new Date().toISOString(), status:'sent', readStatus:'unread',
+    })}).catch(function(){});
+  }
 };
 
-/* Messaging */
-window._nurseSendMsg = function() {
-  var el = document.getElementById('nurse-msg-compose');
-  var text = el ? el.value.trim() : _N.msgCompose;
-  if (!text) return;
-  _N.messages.unshift({ id:Date.now(), from:'Nurse Triage', role:'Nurse', text:text, time:_nowTime(), unread:false });
-  _N.msgCompose = '';
-  _nurseRender();
-  UI.showToast('Message sent','ok');
+/* ─── Nurse send message (compose view) ─────────────────────────────── */
+window._nSendMessage = async function() {
+  var btn = document.getElementById('btn-n-send-msg');
+  if (btn && btn.getAttribute('data-sending')) return;
+  if (btn) { btn.setAttribute('data-sending','1'); btn.disabled=true; btn.textContent='Sending…'; btn.style.opacity='0.7'; }
+  function _rst(){ if(btn){ btn.removeAttribute('data-sending'); btn.disabled=false; btn.textContent='✉ Send Message'; btn.style.opacity=''; } }
+  function _toast(m,t){ try{ if(window.UI&&window.UI.showToast) window.UI.showToast(m,t); }catch(_){} }
+
+  /* Collect values from state (set by oninput handlers) and fallback to DOM */
+  var recip    = _N._nComposeRecip    || 'Doctor / Clinician';
+  var priority = _N._nComposePriority || 'Normal';
+  var subject  = (_N._nComposeSubject || (document.getElementById('n-compose-subject')||{}).value || '').trim();
+  var body     = (_N._nComposeBody    || (document.getElementById('n-compose-body')||{}).value    || '').trim();
+  var patient  = (_N._nComposePatient || (document.getElementById('n-compose-patient')||{}).value || '').trim();
+
+  if (!body)    { _rst(); _toast('Please enter a message body.','err'); return; }
+  if (!subject) { subject = 'Message from Nurse Station'; }
+  if (patient)  { body = '[Patient: '+patient+']\n'+body; }
+
+  /* Sender identity */
+  var _nu = (window.API && window.API._currentUser) || window._currentUser
+    || (function(){ try{ return JSON.parse(sessionStorage.getItem('user')||localStorage.getItem('currentUser')||'null'); }catch(_){ return null; } })() || {};
+  var senderId   = _nu._id || _nu.id || null;
+  var senderName = _nu.firstName ? ((_nu.firstName||'')+' '+(_nu.lastName||'')).trim() : (_nu.name || 'Nurse Station');
+  var senderRole = ((_nu.role||'NURSE_STATION').toUpperCase().replace('NURSE_STATION','NURSE_STATION'))||'NURSE_STATION';
+  /* Normalise to allowed enum */
+  if (senderRole === 'NURSE') senderRole = 'NURSE_STATION';
+
+  /* Map display label → backend recipientRole enum */
+  var toRole = _nRoleMap[recip] || recip.replace(/ /g,'_').toUpperCase();
+
+  var payload = {
+    senderId:      senderId || undefined,
+    senderName:    senderName,
+    senderRole:    senderRole,
+    recipientRole: toRole,
+    subject:       subject,
+    body:          body,
+    priority:      priority,
+    sentAt:        new Date().toISOString(),
+  };
+
+  try {
+    var res = await API._fetchDirect('/messages', { method:'POST', body: JSON.stringify(payload) });
+    if (!res || res.success === false || (res.statusCode && res.statusCode >= 400)) {
+      _rst();
+      _toast(res && (res.message||res.error) ? (res.message||res.error) : 'Could not send message — please try again.', 'err');
+      return;
+    }
+    var savedId = (res.data && (res.data._id||res.data.id)) || res._id || res.id || null;
+
+    /* Add to local sent list */
+    _N.messages.unshift({
+      id: savedId||Date.now(), _id: savedId||null,
+      from: senderName, senderRole: senderRole, role: senderRole,
+      subject: subject, body: body, text: body,
+      priority: priority, readStatus: 'read', unread: false,
+      time: _nowTime(), sentAt: payload.sentAt,
+    });
+
+    /* Push to recipient portal if open */
+    var inmem = { id: savedId, _id: savedId, from: senderName, senderName: senderName,
+                  senderRole: senderRole, subject: subject, body: body, text: body,
+                  priority: priority, time: _nowTime(), sentAt: payload.sentAt };
+    try{
+      if ((toRole==='DOCTOR'||toRole==='DOCTOR/CLINICIAN') && window._doctorAddMessage) window._doctorAddMessage(inmem);
+      if (toRole==='RECEPTIONIST' && window._receptionAddMessage) window._receptionAddMessage(inmem);
+    }catch(_be){}
+
+    /* Socket.IO real-time notify */
+    try{
+      if (window.socket && window.socket.emit) {
+        window.socket.emit('new-message', { recipientRole: toRole, messageId: savedId||null, senderId: senderId });
+      }
+    }catch(_se){}
+
+    /* Clear compose state */
+    _N._nComposeRecip = null; _N._nComposeSubject = ''; _N._nComposeBody = '';
+    _N._nComposePatient = ''; _N._nComposePriority = 'Normal';
+    window._nMsgView = 'sent';
+    _N._nMsgsLoaded = false;
+    _rst();
+    _nurseRender();
+    _toast('Message sent to '+recip, 'ok');
+  } catch(err) {
+    _rst();
+    _toast((err && err.message) || 'Could not send message — please try again.', 'err');
+  }
 };
+
+/* ─── Nurse send reply (thread detail view) ─────────────────────────── */
+window._nSendReply = async function(parentId) {
+  var btn = document.getElementById('btn-n-reply-msg');
+  if (btn && btn.getAttribute('data-sending')) return;
+  if (btn) { btn.setAttribute('data-sending','1'); btn.disabled=true; btn.textContent='Sending…'; btn.style.opacity='0.7'; }
+  function _rst(){ if(btn){ btn.removeAttribute('data-sending'); btn.disabled=false; btn.textContent='↩ Send Reply'; btn.style.opacity=''; } }
+  function _toast(m,t){ try{ if(window.UI&&window.UI.showToast) window.UI.showToast(m,t); }catch(_){} }
+
+  var bodyEl = document.getElementById('n-reply-body');
+  var body   = bodyEl ? bodyEl.value.trim() : '';
+  if (!body) { _rst(); _toast('Please enter a reply.','err'); return; }
+
+  /* Find original message to reply to */
+  var orig = _N.messages.find(function(m){ return String(m._id||m.id||'') === String(parentId||''); });
+  if (!orig) { _rst(); _toast('Could not find original message.','err'); return; }
+
+  var _nu = (window.API && window.API._currentUser) || window._currentUser
+    || (function(){ try{ return JSON.parse(sessionStorage.getItem('user')||localStorage.getItem('currentUser')||'null'); }catch(_){ return null; } })() || {};
+  var senderId   = _nu._id || _nu.id || null;
+  var senderName = _nu.firstName ? ((_nu.firstName||'')+' '+(_nu.lastName||'')).trim() : (_nu.name || 'Nurse Station');
+  var senderRole = ((_nu.role||'NURSE_STATION').toUpperCase())||'NURSE_STATION';
+  if (senderRole === 'NURSE') senderRole = 'NURSE_STATION';
+
+  /* Reply goes back to original sender */
+  var toRole = (orig.senderRole||orig.role||'RECEPTIONIST').toUpperCase();
+  var toId   = orig.senderId || null;
+
+  var payload = {
+    senderId:      senderId || undefined,
+    senderName:    senderName,
+    senderRole:    senderRole,
+    recipientRole: toRole,
+    recipientId:   toId || undefined,
+    recipientName: orig.from,
+    subject:       'Re: ' + (orig.subject||''),
+    body:          body,
+    priority:      orig.priority || 'Normal',
+    sentAt:        new Date().toISOString(),
+    threadId:      parentId,
+    replyTo:       parentId,
+  };
+
+  try {
+    var res = await API._fetchDirect('/messages', { method:'POST', body: JSON.stringify(payload) });
+    if (!res || res.success === false) {
+      _rst(); _toast('Could not send reply — please try again.', 'err'); return;
+    }
+    var savedId = (res.data && (res.data._id||res.data.id)) || res._id || res.id || null;
+    if (bodyEl) bodyEl.value = '';
+    /* Socket notify */
+    try{
+      if (window.socket && window.socket.emit) {
+        window.socket.emit('new-message', { recipientRole: toRole, messageId: savedId||null, senderId: senderId });
+      }
+    }catch(_se){}
+    _rst();
+    _toast('Reply sent to '+orig.from, 'ok');
+  } catch(err) {
+    _rst();
+    _toast((err && err.message) || 'Could not send reply.', 'err');
+  }
+};
+
+/* ─── Legacy send function (kept for bind-events compatibility) ──────── */
+window._nurseSendMsg = window._nSendMessage;
 
 /* ─── Bind events ────────────────────────────────────────────────────── */
+/* Shared named handlers — defined once, reused across re-renders so
+   removeEventListener can actually remove them before re-adding.        */
+function _nOnClick(e) {
+  /* Only handle clicks that originate inside the nurse messaging panel */
+  var main = document.getElementById('nurse-main');
+  if (!main || !main.contains(e.target)) return;
+
+  var el = e.target;
+  var content = document.getElementById('content');
+  while (el && el !== content) {
+    /* Folder / compose navigation — data-nmsgview */
+    if (el.dataset && el.dataset.nmsgview !== undefined) {
+      e.preventDefault();
+      var view = el.dataset.nmsgview;
+      window._nMsgView   = view;
+      window._nMsgThread = null;
+      if (view !== 'compose' && window._N) window._N._nMsgsLoaded = false;
+      if (typeof _nurseRender === 'function') _nurseRender();
+      return;
+    }
+    /* Message row — data-nmsgthread */
+    if (el.dataset && el.dataset.nmsgthread !== undefined) {
+      e.preventDefault();
+      window._nMsgThread = el.dataset.nmsgthread;
+      if (typeof _nurseRender === 'function') _nurseRender();
+      return;
+    }
+    /* Action buttons — data-naction */
+    if (el.dataset && el.dataset.naction !== undefined) {
+      e.preventDefault();
+      var act = el.dataset.naction;
+      if (act === 'send-msg') {
+        if (typeof window._nSendMessage === 'function') window._nSendMessage();
+      } else if (act === 'send-reply') {
+        var tid = el.dataset.nthreadid || window._nMsgThread;
+        if (tid && typeof window._nSendReply === 'function') window._nSendReply(tid);
+      } else if (act === 'back-thread') {
+        window._nMsgThread = null;
+        if (typeof _nurseRender === 'function') _nurseRender();
+      }
+      return;
+    }
+    el = el.parentElement;
+  }
+}
+function _nOnChange(e) {
+  var main = document.getElementById('nurse-main');
+  if (!main || !main.contains(e.target)) return;
+  var t = e.target;
+  if (!t || !t.dataset) return;
+  if ('nrecip' in t.dataset) {
+    if (window._N) window._N._nComposeRecip = t.value;
+    if (typeof _nurseRender === 'function') _nurseRender();
+  } else if ('nprio' in t.dataset) {
+    if (window._N) window._N._nComposePriority = t.value;
+    if (typeof _nurseRender === 'function') _nurseRender();
+  }
+}
+function _nOnInput(e) {
+  var main = document.getElementById('nurse-main');
+  if (!main || !main.contains(e.target)) return;
+  var t = e.target;
+  if (!t || !t.dataset || !window._N) return;
+  var f = t.dataset.nfield;
+  if (f === 'subject') window._N._nComposeSubject = t.value;
+  else if (f === 'patient') window._N._nComposePatient = t.value;
+  else if (f === 'body')    window._N._nComposeBody    = t.value;
+}
+function _nOnKeydown(e) {
+  var main = document.getElementById('nurse-main');
+  if (!main || !main.contains(e.target)) return;
+  if (!(e.key === 'Enter' && (e.ctrlKey || e.metaKey))) return;
+  var t = e.target;
+  if (!t) return;
+  if (t.id === 'n-compose-body' || (t.dataset && t.dataset.nfield === 'body')) {
+    e.preventDefault();
+    if (typeof window._nSendMessage === 'function') window._nSendMessage();
+  } else if (t.id === 'n-reply-body') {
+    e.preventDefault();
+    var tid2 = window._nMsgThread;
+    if (tid2 && typeof window._nSendReply === 'function') window._nSendReply(tid2);
+  }
+}
+
+/* ── _nurseBindEvents ────────────────────────────────────────────────────
+   Attach to #content (the permanent outer container that UI.renderContent
+   owns). #nurse-main is recreated from an HTML string on every navigation
+   (UI.renderContent does content.innerHTML = fn()), so listeners on it are
+   lost the moment the router replaces it. #content is never replaced — only
+   its innerHTML changes — so one set of delegated listeners here survives
+   every re-render.  We guard with _nContentBound so the attach happens only
+   once no matter how many times _nurseRender() is called.                  */
+var _nContentBound = false;
 function _nurseBindEvents() {
-  /* Enter to send message */
-  var mc = document.getElementById('nurse-msg-compose');
-  if (mc) mc.addEventListener('keydown', function(e){
-    if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); window._nurseSendMsg(); }
-  });
+  if (_nContentBound) return;
+  var content = document.getElementById('content');
+  if (!content) return;          // not mounted yet — will retry when content is ready
+
+  content.addEventListener('click',   _nOnClick);
+  content.addEventListener('change',  _nOnChange);
+  content.addEventListener('input',   _nOnInput);
+  content.addEventListener('keydown', _nOnKeydown);
+  _nContentBound = true;
 }
 
 /* ─── Public bridge ──────────────────────────────────────────────────── */
@@ -1966,6 +2579,17 @@ window._LAB_QUEUE    = window._LAB_QUEUE    || [];
 
 /* Allow nurse page to re-render externally */
 window._nurseRender = _nurseRender;
+
+/* Clean global for messaging folder/compose navigation — used by inline onclick handlers */
+window._nSetMsgView = function(view) {
+  window._nMsgView   = view;
+  window._nMsgThread = null;
+  if (view !== 'compose') {
+    /* force re-fetch when switching folders */
+    window._N._nMsgsLoaded = false;
+  }
+  if (typeof _nurseRender === 'function') _nurseRender();
+};
 
 /* ─── Cross-tab immunisation queue sync ──────────────────────────────
    Receptionist uses BroadcastChannel('nihms_nurse_queue') to push
@@ -3434,26 +4058,37 @@ window._nEscalateCC = function() {
   try{ API._fetchDirect('/notifications/sms',{method:'POST',body:JSON.stringify({to:'Pharmacy',message:'URGENT: Cold chain alert at Nurse Station. Fridge temp '+_N.immu.coldChain.currentTemp+'°C. Immediate action required.'})}).catch(function(){}); }catch(_){}
 };
 
-/* ── Message bridge: receptionist can push messages directly to this portal ── */
+/* ── Message bridge: other portals can push messages directly to this portal ── */
 window._nurseAddMessage = function(msg) {
   if (!_N.messages) _N.messages = [];
   /* Avoid duplicates */
-  var dup = _N.messages.find(function(m){ return m.id === msg.id; });
+  var mid = String(msg._id || msg.id || '');
+  var dup = mid && _N.messages.find(function(m){ return String(m._id||m.id||'') === mid; });
   if (dup) return;
+  var sr = (msg.senderRole || msg.fromRole || msg.role || 'RECEPTIONIST').toUpperCase()
+             .replace('DOCTOR/CLINICIAN','DOCTOR');
   _N.messages.unshift({
-    id:       msg.id || Date.now(),
-    from:     msg.from || 'Reception',
-    fromRole: msg.fromRole || 'RECEPTIONIST',
-    text:     msg.text || msg.body || '',
-    time:     msg.time || new Date().toLocaleTimeString('en-ZA', {hour:'2-digit',minute:'2-digit'}),
-    read:     false,
+    id:         msg._id || msg.id || Date.now(),
+    _id:        msg._id || msg.id || null,
+    senderId:   msg.senderId || null,
+    from:       msg.from || msg.senderName || 'Staff',
+    senderRole: sr, fromRole: sr, role: sr,
+    recipientRole: msg.recipientRole || 'NURSE_STATION',
+    subject:    msg.subject || '(No subject)',
+    body:       msg.body || msg.text || '',
+    text:       msg.body || msg.text || '',
+    priority:   msg.priority || 'Normal',
+    readStatus: 'unread',
+    unread:     true,
+    time:       msg.time || new Date().toLocaleTimeString('en-ZA', {hour:'2-digit',minute:'2-digit'}),
+    sentAt:     msg.sentAt || new Date().toISOString(),
+    threadId:   msg.threadId || null,
   });
-  /* Re-render if portal is open */
-  var renderFn = window._nRec || window._dRec || window._rRec;
-  if (typeof renderFn === 'function') renderFn();
+  /* Re-render if messaging view is active */
+  if (_N.view === 'messaging' && typeof _nurseRender === 'function') _nurseRender();
   /* Toast */
   if (window.UI && window.UI.showToast) {
-    UI.showToast('📩 New message from ' + (msg.from || 'Reception'), 'ok');
+    UI.showToast('📩 New message from ' + (msg.from || msg.senderName || 'Staff'), 'ok');
   }
 };
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3469,7 +4104,14 @@ function _nGoTo(view) {
   if (main) {
     _N.view = view;
     _nurseRender();
-    /* Return the existing shell outerHTML so UI.renderContent re-mounts it intact */
+    /* Return the existing shell outerHTML so UI.renderContent re-mounts it intact.
+       After UI.renderContent does content.innerHTML = <this string>, #nurse-main
+       will be a brand-new DOM node — schedule a re-bind on the next tick so the
+       listeners (which now live on #content) survive even if _nContentBound was
+       reset (e.g. content element was also replaced).                           */
+    setTimeout(function() {
+      if (!_nContentBound) _nurseBindEvents();
+    }, 0);
     var shell = main.closest('[style*="display:flex"]') || main.parentElement;
     return shell ? shell.outerHTML : main.outerHTML;
   }

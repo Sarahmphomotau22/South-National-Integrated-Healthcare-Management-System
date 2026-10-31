@@ -588,9 +588,15 @@ function _rRec() {
   document.head.appendChild(styleEl);}
   var el=document.getElementById('rec-body');
   if(!el) return;
-  /* Render persistent top bar on every page */
+  /* Render persistent top bar on every page except messaging */
   var topBar = document.getElementById('rec-top-bar');
-  if (topBar) topBar.innerHTML = _rTopBar();
+  if (topBar) {
+    if (_R.tab === 'messaging') {
+      topBar.innerHTML = '';
+    } else {
+      topBar.innerHTML = _rTopBar();
+    }
+  }
   var fns={overview:_rOverview,checkin:_rCheckin,book:_rBook,register:_rRegisterNew,'patient-file':_rPatientFile,appointments:_rAppointments,'apt-edit':_rAptEditPage,emergency:_rEmergency,messaging:_rMessaging,analytics:_rAnalytics};
   el.innerHTML=(fns[_R.tab]||_rOverview)();
   _rBind();
@@ -710,16 +716,23 @@ Pages['receptionist'] = function() {
       }
 
       /* 3. Messages */
-      var mRes = await API._fetchDirect('/messages?role=receptionist&limit=50',{method:'GET'}).catch(function(){return null;});
-      if (mRes && mRes.data && mRes.data.length) {
-        _R.messages = mRes.data.map(function(m){
+      var mRes = await API._fetchDirect('/messages?recipientRole=RECEPTIONIST&limit=50',{method:'GET'}).catch(function(){return null;});
+      var mArr2 = mRes && (Array.isArray(mRes.messages)?mRes.messages:Array.isArray(mRes.data)?mRes.data:Array.isArray(mRes)?mRes:null);
+      if (mArr2 && mArr2.length) {
+        _R.messages = mArr2.map(function(m){
           return {
-            id:   m._id||m.id,
-            from: m.senderName||m.from||'System',
-            to:   m.recipientRole||'Reception',
-            text: m.body||m.text||m.message||'',
-            time: m.createdAt ? new Date(m.createdAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}) : '—',
-            read: !!m.read,
+            id:       m._id||m.id,
+            _id:      m._id||m.id||null,
+            from:     m.senderName||m.from||'System',
+            fromRole: m.senderRole||m.role||'',
+            role:     m.senderRole||m.role||'',
+            subject:  m.subject||'',
+            to:       m.recipientRole||'Reception',
+            text:     m.body||m.text||m.message||'',
+            time:     m.createdAt ? new Date(m.createdAt).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}) : '—',
+            sentAt:   m.createdAt||m.sentAt||'',
+            read:     m.readStatus==='read'||!!m.read,
+            unread:   m.readStatus==='unread'||!m.read,
           };
         });
       }
@@ -2148,7 +2161,7 @@ function _rMessaging() {
     red:'#dc2626',  bg:'#f4f5f0',
   };
 
-  /* ── State: inbox | sent | important | compose | thread ── */
+  /* ── State: inbox | sent | important | compose | thread | vax | delay ── */
   window._rMsgView   = window._rMsgView   || 'inbox';
   window._rMsgThread = window._rMsgThread || null;
 
@@ -2156,14 +2169,50 @@ function _rMessaging() {
 
   /* ── Recipients (receptionist-appropriate roles) ── */
   var RECIPIENTS = [
-    {value:'Nurse Station',    label:'Nurse Station',       icon:'🩺'},
-    {value:'Doctor',           label:'Doctor / Clinician',  icon:'👨‍⚕️'},
-    {value:'Pharmacy',         label:'Pharmacy',            icon:'💊'},
-    {value:'Laboratory',       label:'Laboratory',          icon:'🔬'},
-    {value:'Radiology',        label:'Radiology',           icon:'🩻'},
-    {value:'Administration',   label:'Administration',      icon:'🏥'},
-    {value:'Patient',          label:'Patient (SMS/Email)', icon:'👤'},
+    {value:'Nurse Station',    label:'Nurse Station',       icon:'🩺', role:'NURSE_STATION'},
+    {value:'Doctor',           label:'Doctor / Clinician',  icon:'👨‍⚕️', role:'DOCTOR'},
+    {value:'Pharmacy',         label:'Pharmacy',            icon:'💊', role:'PHARMACY'},
+    {value:'Laboratory',       label:'Laboratory',          icon:'🔬', role:'LAB'},
+    {value:'Radiology',        label:'Radiology',           icon:'🩻', role:'RADIOLOGY'},
+    {value:'Administration',   label:'Administration',      icon:'🏥', role:'ADMIN'},
+    {value:'Patient',          label:'Patient (SMS/Email)', icon:'👤', role:'PATIENT'},
   ];
+  /* Map display value → canonical recipientRole for the backend enum */
+  var _rRoleMap = {};
+  RECIPIENTS.forEach(function(r){ _rRoleMap[r.value] = r.role; });
+
+  /* ── Load doctor list for the picker (once per session) ── */
+  if (!_R._doctorsList) {
+    _R._doctorsList = [];
+    (async function(){
+      try {
+        var dr = await API._fetchDirect('/users/doctors',{method:'GET'}).catch(function(){return null;});
+        var list = (dr && (dr.data||dr.users||dr)) || [];
+        if (Array.isArray(list) && list.length) {
+          _R._doctorsList = list.map(function(d){
+            return {
+              _id:  d._id || d.id,
+              name: d.firstName ? 'Dr '+((d.firstName||'')+' '+(d.lastName||'')).trim() : (d.name||d.email||'Unknown Doctor'),
+            };
+          });
+          _rRec(); /* re-render to populate the dropdown */
+        }
+      } catch(_){}
+    })();
+  }
+
+  /* Script injected after render: show/hide doctor picker based on selected recipient */
+  setTimeout(function(){
+    var radios = document.querySelectorAll('input[name="rmsg-recipient"]');
+    var pickerWrap = document.getElementById('rmsg-doctor-picker-wrap');
+    function _togglePicker(){
+      var selected = document.querySelector('input[name="rmsg-recipient"]:checked');
+      var isDoctor = selected && (selected.value==='Doctor');
+      if (pickerWrap) pickerWrap.style.display = isDoctor ? '' : 'none';
+    }
+    radios.forEach(function(r){ r.addEventListener('change', _togglePicker); });
+    _togglePicker(); /* run immediately */
+  }, 0);
 
   var msgs = _R.messages || [];
   var u    = (window.API && window.API.getStoredUser && window.API.getStoredUser()) || {};
@@ -2186,10 +2235,23 @@ function _rMessaging() {
     '</div>';
   }
 
+  /* ── Sent = messages this user sent (from RECEPTIONIST role, not received) ── */
+  var u2 = (window.API && window.API.getStoredUser && window.API.getStoredUser()) || {};
+  var myId = u2._id || u2.id || '';
+  var sentMsgs = msgs.filter(function(m){
+    return m.from === 'Reception (You)' ||
+           m.fromRole === 'RECEPTIONIST' ||
+           (myId && (m.senderId === myId));
+  });
+  var importantMsgs = msgs.filter(function(m){
+    return m.important || m.priority === 'High' || m.priority === 'Urgent';
+  });
+  sentCount = sentMsgs.length;
+
   var folders = [
     {key:'inbox',     label:'Inbox',     icon:'📥', desc:'Received messages',  badge:unreadCount},
     {key:'sent',      label:'Sent',      icon:'📤', desc:'Messages you sent',   badge:sentCount},
-    {key:'important', label:'Important', icon:'⭐', desc:'Flagged messages',    badge:0},
+    {key:'important', label:'Important', icon:'⭐', desc:'High/Urgent priority', badge:importantMsgs.length},
   ];
 
   /* ── Sidebar ── */
@@ -2236,8 +2298,8 @@ function _rMessaging() {
       /* Quick actions */
       '<div style="background:#fff;border:1.5px solid '+RC.border+';border-radius:12px;padding:16px">'+
         '<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:'+RC.muted+';margin-bottom:10px">Quick Actions</div>'+
-        '<button onclick="_rSendVaxReminders()" style="width:100%;padding:9px 12px;border-radius:8px;border:1.5px solid '+RC.border+';background:#fff;color:'+RC.teal+';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left;margin-bottom:6px">💉 Vaccination Reminders</button>'+
-        '<button onclick="window._rShowDelayForm=true;_rMsgRender()" style="width:100%;padding:9px 12px;border-radius:8px;border:1.5px solid '+RC.border+';background:#fff;color:#b45309;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left">🕐 Notify Patients of Delay</button>'+
+        '<button onclick="window._rMsgView=\'vax\';window._rMsgThread=null;_rMsgRender()" style="width:100%;padding:9px 12px;border-radius:8px;border:1.5px solid '+RC.border+';background:'+(window._rMsgView==='vax'?'#e1f5ee':'#fff')+';color:'+RC.teal+';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left;margin-bottom:6px">💉 Vaccination Reminders</button>'+
+        '<button onclick="window._rMsgView=\'delay\';window._rMsgThread=null;_rMsgRender()" style="width:100%;padding:9px 12px;border-radius:8px;border:1.5px solid '+RC.border+';background:'+(window._rMsgView==='delay'?'#fffbeb':'#fff')+';color:#b45309;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left">🕐 Notify Patients of Delay</button>'+
       '</div>'+
 
     '</div>'; /* end sidebar */
@@ -2271,9 +2333,19 @@ function _rMessaging() {
             '</label>';
           }).join('')+
         '</div>'+
+        '<div style="margin-top:12px" id="rmsg-doctor-picker-wrap">'+
+          _mLabel('Specific Doctor (required when Doctor is selected)',false)+
+          '<select id="rmsg-doctor-select" style="'+_mFld()+';background:#fff">'+
+            '<option value="">— select a doctor —</option>'+
+            ((_R._doctorsList||[]).map(function(d){
+              return '<option value="'+d._id+'|'+d.name+'">'+d.name+'</option>';
+            })).join('')+
+          '</select>'+
+          '<div style="font-size:11px;color:'+RC.muted+';margin-top:4px">Only shown when sending to a Doctor. If the list is empty, doctors will load shortly.</div>'+
+        '</div>'+
         '<div style="margin-top:12px">'+
-          _mLabel('Specific Staff Member (optional)',false)+
-          '<input id="rmsg-specific" type="text" placeholder="e.g. Sr. Dlamini, Dr. Khumalo" style="'+_mFld()+'">'+
+          _mLabel('Other Specific Staff Member (optional)',false)+
+          '<input id="rmsg-specific" type="text" placeholder="e.g. Sr. Dlamini (for non-doctor recipients)" style="'+_mFld()+'">'+
         '</div>'
       )+
 
@@ -2314,7 +2386,7 @@ function _rMessaging() {
       )+
 
       '<div style="display:flex;gap:12px;padding-bottom:24px">'+
-        '<button onclick="_rSendMsg()" style="flex:1;padding:13px 24px;border:none;border-radius:10px;background:linear-gradient(135deg,'+RC.teal+' 0%,'+RC.navy+' 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">✉ Send Message</button>'+
+        '<button id="btn-r-send-msg" onclick="_rSendMsg()" style="flex:1;padding:13px 24px;border:none;border-radius:10px;background:linear-gradient(135deg,'+RC.teal+' 0%,'+RC.navy+' 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">✉ Send Message</button>'+
         '<button onclick="window._rMsgView=\'inbox\';_rMsgRender()" style="padding:13px 24px;border:1.5px solid '+RC.border+';border-radius:10px;background:#fff;color:'+RC.muted+';font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
       '</div>'+
 
@@ -2335,25 +2407,42 @@ function _rMessaging() {
   if (window._rMsgThread !== null) {
     var threadMsg = msgs.find(function(m){ return m.id === window._rMsgThread; }) || msgs[0];
     var mi = msgs.findIndex(function(m){ return m.id === window._rMsgThread; });
-    if (mi > -1) msgs[mi].unread = false;
+    if (mi > -1) {
+      msgs[mi].unread = false;
+      /* Mark read via API */
+      var _trId = msgs[mi]._id || msgs[mi].id;
+      if (_trId && window.API && API._fetchDirect) {
+        API._fetchDirect('/messages/'+_trId+'/read',{method:'PATCH'}).catch(function(){});
+      }
+    }
+    /* Store thread context for _rSendReply() */
+    window._rCurrentThread = threadMsg;
 
+    var _tPriority = threadMsg.priority || 'Normal';
+    var _tPrioColor = _tPriority==='Urgent'?'#dc2626':_tPriority==='High'?'#d97706':'#6b7280';
+    var _tSubject = threadMsg.subject || threadMsg.text.slice(0,60) || '(No subject)';
+    var _tBody = threadMsg.body || threadMsg.text || '';
     var detailMain =
       '<div style="flex:1;min-width:0">'+
         '<div style="background:#fff;border:1.5px solid '+RC.border+';border-radius:12px;padding:20px 24px;margin-bottom:16px">'+
-          '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px">'+
-            '<div>'+
-              '<div style="font-size:17px;font-weight:800;color:'+RC.text+'">'+threadMsg.text.slice(0,60)+(threadMsg.text.length>60?'…':'')+'</div>'+
-              '<div style="font-size:12px;color:'+RC.muted+';margin-top:4px">From: <strong>'+threadMsg.from+'</strong>'+(threadMsg.role?' · <strong>'+threadMsg.role+'</strong>':'')+' · '+threadMsg.time+'</div>'+
+          '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">'+
+            '<div style="flex:1;min-width:0">'+
+              '<div style="font-size:18px;font-weight:800;color:'+RC.text+';line-height:1.3;margin-bottom:6px">'+_tSubject+'</div>'+
+              '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
+                '<span style="font-size:12px;color:'+RC.muted+'">From: <strong>'+threadMsg.from+'</strong>'+(threadMsg.role?' · '+threadMsg.role:'')+'</span>'+
+                '<span style="font-size:11px;color:'+RC.muted+'">'+threadMsg.time+'</span>'+
+                '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:'+_tPrioColor+'18;color:'+_tPrioColor+'">'+_tPriority+'</span>'+
+              '</div>'+
             '</div>'+
-            '<button onclick="window._rMsgThread=null;_rMsgRender()" style="padding:7px 14px;border:1.5px solid '+RC.border+';border-radius:8px;background:#fff;font-size:12px;font-weight:600;color:'+RC.muted+';cursor:pointer;font-family:inherit">← Back</button>'+
+            '<button onclick="window._rMsgThread=null;_rMsgRender()" style="margin-left:12px;padding:7px 14px;border:1.5px solid '+RC.border+';border-radius:8px;background:#fff;font-size:12px;font-weight:600;color:'+RC.muted+';cursor:pointer;font-family:inherit;flex-shrink:0">← Back</button>'+
           '</div>'+
-          '<div style="background:#f8fafc;border-radius:10px;padding:16px;font-size:14px;color:'+RC.text+';line-height:1.7">'+threadMsg.text+'</div>'+
+          '<div style="background:#f8fafc;border-radius:10px;padding:16px;font-size:14px;color:'+RC.text+';line-height:1.7;white-space:pre-wrap">'+_tBody+'</div>'+
         '</div>'+
         '<div style="background:#fff;border:1.5px solid '+RC.border+';border-radius:12px;padding:20px 24px;margin-bottom:24px">'+
           '<div style="font-size:14px;font-weight:700;color:'+RC.text+';margin-bottom:12px">Reply</div>'+
           '<textarea id="rmsg-reply-body" rows="4" placeholder="Type your reply…" style="width:100%;padding:10px 12px;border:1.5px solid '+RC.border+';border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box"></textarea>'+
           '<div style="display:flex;gap:10px;margin-top:12px">'+
-            '<button onclick="var b=(document.getElementById(\'rmsg-reply-body\')||{value:\'\'}).value.trim();if(b){_R.messages.unshift({id:Date.now(),from:\'Reception (You)\',role:\''+(threadMsg.role||'')+'\',text:b,time:new Date().toLocaleTimeString(\'en-ZA\',{hour:\'2-digit\',minute:\'2-digit\'}),unread:false});window._rMsgThread=null;_rMsgRender();}else{if(window.UI&&UI.showToast)UI.showToast(\'Enter a reply\',\'err\');}" '+
+            '<button id="btn-r-send-reply" onclick="_rSendReply()" '+
               'style="flex:1;padding:11px 20px;border:none;border-radius:10px;background:linear-gradient(135deg,'+RC.teal+' 0%,'+RC.navy+' 100%);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Send Reply</button>'+
             '<button onclick="window._rMsgThread=null;_rMsgRender()" style="padding:11px 20px;border:1.5px solid '+RC.border+';border-radius:10px;background:#fff;color:'+RC.muted+';font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
           '</div>'+
@@ -2371,40 +2460,131 @@ function _rMessaging() {
     '</div>';
   }
 
+  /* ── VAX REMINDER VIEW ── */
+  if (window._rMsgView === 'vax') {
+    var vaxMain =
+      '<div style="flex:1;min-width:0">'+
+        '<div style="background:#fff;border:1.5px solid '+RC.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">'+
+          '<div>'+
+            '<div style="font-size:18px;font-weight:800;color:'+RC.text+'">💉 Vaccination Reminders</div>'+
+            '<div style="font-size:13px;color:'+RC.muted+';margin-top:2px">Send appointment reminders to patients via SMS &amp; email</div>'+
+          '</div>'+
+          '<button onclick="window._rMsgView=\'inbox\';_rMsgRender()" style="padding:7px 16px;border:1.5px solid '+RC.border+';border-radius:8px;background:#fff;font-size:12px;font-weight:600;color:'+RC.muted+';cursor:pointer;font-family:inherit">← Back</button>'+
+        '</div>'+
+        '<div style="background:#fff;border:1.5px solid '+RC.border+';border-radius:12px;padding:20px 24px;margin-bottom:16px">'+
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">'+
+            '<div>'+
+              '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+RC.muted+';margin-bottom:6px">Reminder Window</label>'+
+              '<select id="vax-remind-days" style="width:100%;padding:10px 12px;border:1.5px solid '+RC.border+';border-radius:8px;font-size:14px;font-family:inherit;color:'+RC.text+';background:#fff;outline:none">'+
+                '<option value="1">Tomorrow (1 day)</option>'+
+                '<option value="3">Next 3 days</option>'+
+                '<option value="7" selected>Next 7 days</option>'+
+                '<option value="14">Next 14 days</option>'+
+                '<option value="30">Next 30 days</option>'+
+              '</select>'+
+            '</div>'+
+            '<div>'+
+              '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+RC.muted+';margin-bottom:6px">Department</label>'+
+              '<select id="vax-remind-type" style="width:100%;padding:10px 12px;border:1.5px solid '+RC.border+';border-radius:8px;font-size:14px;font-family:inherit;color:'+RC.text+';background:#fff;outline:none">'+
+                '<option value="all">All Departments</option>'+
+                '<option value="Immunisation" selected>Immunisation</option>'+
+                (DEPARTMENTS||[]).filter(function(d){return d.name!=='Immunisation';}).map(function(d){return '<option value="'+d.name+'">'+d.name+'</option>';}).join('')+
+              '</select>'+
+            '</div>'+
+          '</div>'+
+          '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px 14px;font-size:13px;color:#166534;margin-bottom:16px">'+
+            '📋 Reminders are sent to all patients with appointments in the selected window for the selected department, using their registered phone number and email address.'+
+          '</div>'+
+          '<div style="display:flex;gap:10px">'+
+            '<button id="btn-vax-send" onclick="_rSendVaxReminders()" style="padding:12px 24px;border:none;border-radius:10px;background:linear-gradient(135deg,'+RC.teal+' 0%,'+RC.navy+' 100%);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">💉 Send Reminders</button>'+
+            '<button onclick="window._rMsgView=\'inbox\';_rMsgRender()" style="padding:12px 20px;border:1.5px solid '+RC.border+';border-radius:10px;background:#fff;color:'+RC.muted+';font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+
+    return '<div style="display:flex;flex-direction:column;height:100%">'+
+      '<div style="padding:20px 24px 0;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%)">'+
+        '<div style="font-size:22px;font-weight:800;color:#fff;margin-bottom:2px">Messages</div>'+
+        '<div style="font-size:13px;color:rgba(255,255,255,.75);padding-bottom:16px">Internal communication · Secure team messaging</div>'+
+      '</div>'+
+      '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px;align-items:flex-start">'+
+        vaxMain + sidebar +
+      '</div>'+
+    '</div>';
+  }
+
+  /* ── DELAY NOTIFICATION VIEW ── */
+  if (window._rMsgView === 'delay') {
+    var delayMain =
+      '<div style="flex:1;min-width:0">'+
+        '<div style="background:#fff;border:1.5px solid '+RC.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">'+
+          '<div>'+
+            '<div style="font-size:18px;font-weight:800;color:'+RC.text+'">🕐 Notify Patients of Delay</div>'+
+            '<div style="font-size:13px;color:'+RC.muted+';margin-top:2px">Send delay notices via SMS &amp; email to affected patients</div>'+
+          '</div>'+
+          '<button onclick="window._rMsgView=\'inbox\';_rMsgRender()" style="padding:7px 16px;border:1.5px solid '+RC.border+';border-radius:8px;background:#fff;font-size:12px;font-weight:600;color:'+RC.muted+';cursor:pointer;font-family:inherit">← Back</button>'+
+        '</div>'+
+        '<div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:12px;padding:20px 24px;margin-bottom:16px">'+
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'+
+            '<div>'+
+              '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#92400e;margin-bottom:6px">Department</label>'+
+              '<select id="delay-dept" style="width:100%;padding:10px 12px;border:1.5px solid #fcd34d;border-radius:8px;font-size:14px;font-family:inherit;color:#111111;background:#fff;outline:none">'+
+                '<option value="all">All Departments</option>'+
+                (DEPARTMENTS||[]).map(function(d){return '<option value="'+d.name+'">'+d.name+'</option>';}).join('')+
+              '</select>'+
+            '</div>'+
+            '<div>'+
+              '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#92400e;margin-bottom:6px">Estimated Delay</label>'+
+              '<select id="delay-dur" style="width:100%;padding:10px 12px;border:1.5px solid #fcd34d;border-radius:8px;font-size:14px;font-family:inherit;color:#111111;background:#fff;outline:none">'+
+                '<option value="15">15 minutes</option>'+
+                '<option value="30" selected>30 minutes</option>'+
+                '<option value="45">45 minutes</option>'+
+                '<option value="60">1 hour</option>'+
+                '<option value="90">90 minutes</option>'+
+              '</select>'+
+            '</div>'+
+          '</div>'+
+          '<div style="margin-bottom:14px">'+
+            '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#92400e;margin-bottom:6px">Reason <span style="font-weight:400;color:#b45309">(optional)</span></label>'+
+            '<input id="delay-reason" type="text" placeholder="e.g. Doctor running behind schedule, equipment issue…" style="width:100%;padding:10px 12px;border:1.5px solid #fcd34d;border-radius:8px;font-size:14px;font-family:inherit;color:#111111;background:#fff;outline:none;box-sizing:border-box">'+
+          '</div>'+
+          '<div style="background:#fef3c7;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;margin-bottom:16px">'+
+            '⚠ This will send an SMS and email to every patient with a today\'s appointment in the selected department.'+
+          '</div>'+
+          '<div style="display:flex;gap:10px">'+
+            '<button id="btn-delay-send" onclick="_rSendDelay()" style="padding:12px 24px;border:none;border-radius:10px;background:#d97706;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">🕐 Send Delay Notice</button>'+
+            '<button onclick="window._rMsgView=\'inbox\';_rMsgRender()" style="padding:12px 20px;border:1.5px solid '+RC.border+';border-radius:10px;background:#fff;color:'+RC.muted+';font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+
+    return '<div style="display:flex;flex-direction:column;height:100%">'+
+      '<div style="padding:20px 24px 0;background:linear-gradient(135deg,#0F6E56 0%,#1A4A9B 100%)">'+
+        '<div style="font-size:22px;font-weight:800;color:#fff;margin-bottom:2px">Messages</div>'+
+        '<div style="font-size:13px;color:rgba(255,255,255,.75);padding-bottom:16px">Internal communication · Secure team messaging</div>'+
+      '</div>'+
+      '<div style="flex:1;overflow:auto;padding:16px 20px;display:flex;gap:16px;align-items:flex-start">'+
+        delayMain + sidebar +
+      '</div>'+
+    '</div>';
+  }
+
   /* ── INBOX / SENT / IMPORTANT LIST VIEW ── */
   var folder     = window._rMsgView || 'inbox';
   var folderMeta = folders.find(function(f){ return f.key===folder; }) || folders[0];
 
   var visibleMsgs = folder==='sent'
-    ? msgs.filter(function(m){ return m.from==='Reception (You)'; })
+    ? sentMsgs
     : folder==='important'
-      ? msgs.filter(function(m){ return m.important; })
-      : msgs.filter(function(m){ return m.from!=='Reception (You)'; });
-
-  /* Delay notification inline form (triggered from sidebar quick action) */
-  var delayFormHtml = '';
-  if (window._rShowDelayForm) {
-    window._rShowDelayForm = false;
-    delayFormHtml =
-      '<div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:12px;padding:18px 22px;margin-bottom:16px">'+
-        '<div style="font-size:14px;font-weight:700;color:#b45309;margin-bottom:12px">🕐 Notify Patients of Delay</div>'+
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'+
-          _sel('delay-dept','Department',[{v:'all',label:'All departments'}].concat(DEPARTMENTS.map(function(d){return {v:d.name,label:d.name};})),'all')+
-          _sel('delay-dur','Duration',[{v:'15',label:'15 minutes'},{v:'30',label:'30 minutes'},{v:'45',label:'45 minutes'},{v:'60',label:'1 hour'}],'30')+
-        '</div>'+
-        _inp('delay-reason','Reason (optional)','e.g. Doctor running late','','text')+
-        '<div style="display:flex;gap:8px;margin-top:10px">'+
-          '<button onclick="_rSendDelay()" style="padding:9px 18px;border-radius:8px;border:none;background:#d97706;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">'+_svgIcon('clock')+' Send Notification</button>'+
-          '<button onclick="window._rShowDelayForm=false;_rMsgRender()" style="padding:9px 18px;border-radius:8px;border:1.5px solid #e0e0e0;background:#fff;color:#555555;font-size:13px;cursor:pointer;font-family:inherit">Cancel</button>'+
-        '</div>'+
-      '</div>';
-  }
+      ? importantMsgs
+      : msgs.filter(function(m){
+          return m.fromRole !== 'RECEPTIONIST' && m.from !== 'Reception (You)';
+        });
 
   var listMain =
     '<div style="flex:1;min-width:0">'+
-    delayFormHtml+
 
-    '<div style="background:#fff;border:1.5px solid '+RC.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">'+
+    '<div style="background:#fff;border:1.5px solid '+RC.border+';border-radius:12px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">'+
       '<div>'+
         '<div style="font-size:18px;font-weight:800;color:'+RC.text+'">'+folderMeta.icon+' '+folderMeta.label+'</div>'+
         '<div style="font-size:13px;color:'+RC.muted+';margin-top:2px">'+folderMeta.desc+'</div>'+
@@ -2418,26 +2598,38 @@ function _rMessaging() {
     '<div style="background:#fff;border:1.5px solid '+RC.border+';border-radius:12px;overflow:hidden;margin-bottom:24px">'+
       (visibleMsgs.length
         ? visibleMsgs.map(function(m){
-            var unread = m.unread && m.from !== 'Reception (You)';
-            return '<div onclick="window._rMsgThread='+m.id+';_rMsgRender()" '+
+            var unread = !!(m.unread && m.fromRole !== 'RECEPTIONIST' && m.from !== 'Reception (You)');
+            var mPrio  = m.priority || 'Normal';
+            var pColor = mPrio==='Urgent'?'#dc2626':mPrio==='High'?'#d97706':'';
+            var mSubject = m.subject || m.text.slice(0,50) || '(No subject)';
+            var mPreview = m.body || m.text || '';
+            var initials = (m.from||'?').split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase();
+            return '<div onclick="window._rMsgThread=\''+m.id+'\';_rMsgRender()" '+
               'style="display:flex;align-items:flex-start;gap:12px;padding:14px 18px;border-bottom:1px solid '+RC.border+';background:'+(unread?RC.tealLt:'#fff')+';cursor:pointer" '+
               'onmouseenter="this.style.background=\''+RC.tealLt+'\'" onmouseleave="this.style.background=\''+(unread?RC.tealLt:'#fff')+'\'">'+
-              '<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,'+RC.teal+' 0%,'+RC.navy+' 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;font-weight:700">'+
-                m.from.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase()+
-              '</div>'+
+              '<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,'+RC.teal+' 0%,'+RC.navy+' 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;font-weight:700">'+initials+'</div>'+
               '<div style="flex:1;min-width:0">'+
-                '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
-                  '<div style="font-size:14px;font-weight:'+(unread?'700':'500')+';color:'+RC.text+'">'+m.from+(m.role?' <span style="font-size:11px;color:'+RC.muted+';font-weight:400">· '+m.role+'</span>':'')+'</div>'+
-                  '<div style="font-size:11px;color:'+RC.muted+';flex-shrink:0">'+m.time+'</div>'+
+                '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px">'+
+                  '<div style="font-size:14px;font-weight:'+(unread?'700':'500')+';color:'+RC.text+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+
+                    m.from+(m.role?' <span style="font-size:11px;color:'+RC.muted+';font-weight:400">· '+m.role+'</span>':'')+
+                  '</div>'+
+                  '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">'+
+                    (pColor?'<span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:20px;background:'+pColor+'18;color:'+pColor+'">'+mPrio+'</span>':'')+
+                    '<span style="font-size:11px;color:'+RC.muted+'">'+m.time+'</span>'+
+                  '</div>'+
                 '</div>'+
-                '<div style="font-size:13px;color:'+RC.muted+';margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+m.text.slice(0,80)+(m.text.length>80?'…':'')+'</div>'+
+                '<div style="font-size:13px;font-weight:'+(unread?'600':'400')+';color:'+RC.text+';margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+mSubject+'</div>'+
+                '<div style="font-size:12px;color:'+RC.muted+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+mPreview.slice(0,80)+(mPreview.length>80?'…':'')+'</div>'+
                 (unread?'<span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:10px;background:'+RC.tealLt+';color:'+RC.teal+';font-size:10px;font-weight:700">Unread</span>':'')+
+                (folder==='sent'&&m.readStatus?'<span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:10px;background:#f0f4f8;color:'+RC.muted+';font-size:10px;font-weight:600">'+m.readStatus+'</span>':'')+
               '</div>'+
             '</div>';
           }).join('')
         : '<div style="padding:40px;text-align:center;color:'+RC.muted+'">'+
             '<div style="font-size:32px;margin-bottom:8px">📭</div>'+
             '<div style="font-size:14px;font-weight:600;color:'+RC.text+'">No messages in '+folderMeta.label+'</div>'+
+            (folder==='sent'?'<div style="font-size:12px;color:'+RC.muted+';margin-top:4px">Messages you send will appear here.</div>':'')+
+            (folder==='important'?'<div style="font-size:12px;color:'+RC.muted+';margin-top:4px">High and Urgent priority messages appear here.</div>':'')+
           '</div>'
       )+
     '</div>'+
@@ -4113,15 +4305,32 @@ window._rSendMsg = async function() {
   var patId    = g('rmsg-patient-id');
   var body     = g('rmsg-body');
   var priority = prioEl ? prioEl.value : 'Normal';
-  var to       = specific || recip;
+
+  /* ── Resolve doctor picker: extract ID + name from the combined option value ── */
+  var doctorPickerVal = g('rmsg-doctor-select'); /* "mongoId|Dr Name" or "" */
+  var resolvedDoctorId   = '';
+  var resolvedDoctorName = '';
+  if (doctorPickerVal && doctorPickerVal.indexOf('|') > -1) {
+    var parts = doctorPickerVal.split('|');
+    resolvedDoctorId   = parts[0];
+    resolvedDoctorName = parts.slice(1).join('|');
+  }
+
+  /* When Doctor is selected, the picker is required */
+  if (recip === 'Doctor' && !resolvedDoctorId) {
+    if(window.UI&&UI.showToast) UI.showToast('Please select a specific doctor from the dropdown','err');
+    return;
+  }
+
+  var to = (recip === 'Doctor' && resolvedDoctorName) ? resolvedDoctorName : (specific || recip);
 
   if (!subject) { if(window.UI&&UI.showToast) UI.showToast('Please enter a subject','err'); return; }
   if (!body)    { if(window.UI&&UI.showToast) UI.showToast('Please enter a message','err'); return; }
   if (!recip)   { if(window.UI&&UI.showToast) UI.showToast('Please select a recipient','err'); return; }
 
   /* ── Disable button to prevent double-send ── */
-  var sendBtn = document.querySelector('[onclick="_rSendMsg()"]');
-  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending…'; }
+  var sendBtn = document.getElementById('btn-r-send-msg') || document.querySelector('[onclick="_rSendMsg()"]');
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.setAttribute('data-sending','1'); sendBtn.textContent = 'Sending…'; }
 
   /* ── Record time sent ── */
   var t0 = Date.now();
@@ -4136,7 +4345,7 @@ window._rSendMsg = async function() {
     fromRole:     'RECEPTIONIST',
     role:         recip,
     to:           to,
-    toRole:       recip === 'All Clinical Staff' ? 'ALL' : recip.replace(/ /g,'_').toUpperCase(),
+    toRole:       _rRoleMap[recip] || recip.replace(/ /g,'_').toUpperCase(),
     text:         (subject ? '['+subject+'] ' : '') + body,
     subject:      subject,
     time:         _fmtTime(),
@@ -4152,21 +4361,30 @@ window._rSendMsg = async function() {
 
   /* ── 2. Post to /messages API (persists across portals) ── */
   var saved = false;
+  var savedMsgId = null;
   try {
+    var apiPayload = {
+      senderRole:    'RECEPTIONIST',
+      senderName:    senderName,
+      recipientRole: msgRecord.toRole,
+      recipientName: to,
+      subject:       subject,
+      body:          body,
+      priority:      priority,
+    };
+    /* Attach specific doctor ID so inbox query by recipientId works */
+    if (resolvedDoctorId) {
+      apiPayload.recipientId = resolvedDoctorId;
+    }
+    if (patId) apiPayload.patientId = patId;
+
     var res = await API._fetchDirect('/messages', {
       method: 'POST',
-      body: JSON.stringify({
-        senderRole:    'RECEPTIONIST',
-        senderName:    senderName,
-        recipientRole: msgRecord.toRole,
-        recipientName: to,
-        subject:       subject,
-        body:          body,
-        priority:      priority,
-        patientId:     patId || null,
-      })
+      body: JSON.stringify(apiPayload)
     }).catch(function(){ return null; });
-    saved = !!(res && (res._id || res.data));
+    var savedDoc = res && (res.data || res);
+    saved = !!(savedDoc && (savedDoc._id || savedDoc.id));
+    savedMsgId = savedDoc && (savedDoc._id || savedDoc.id || null);
   } catch(_) {}
 
   /* ── 3. Push to in-memory nurse/doctor/pharmacy portals if open ── */
@@ -4187,6 +4405,14 @@ window._rSendMsg = async function() {
   /* Doctor portal bridge */
   if ((recip === 'Doctor' || recip === 'All Clinical Staff') && window._doctorAddMessage) {
     window._doctorAddMessage(inmemPush);
+  }
+  /* Socket.IO real-time notification to doctor */
+  if ((recip === 'Doctor' || recip === 'All Clinical Staff') && window.socket && window.socket.emit) {
+    window.socket.emit('new-message', {
+      recipientRole: 'DOCTOR',
+      recipientId:   resolvedDoctorId || null,
+      messageId:     savedMsgId || null,
+    });
   }
   /* Pharmacy portal bridge */
   if ((recip === 'Pharmacy' || recip === 'All Clinical Staff') && window._pharmacyAddMessage) {
@@ -4249,13 +4475,80 @@ window._rSendMsg = async function() {
   _rRec();
 };
 
-window._rSendDelay = function() {
-  var dept=(document.getElementById('delay-dept')||{value:'all'}).value;
-  var dur=(document.getElementById('delay-dur')||{value:'30'}).value;
-  var reason=(document.getElementById('delay-reason')||{value:''}).value.trim();
-  var text=dur+'-minute delay expected'+(dept!=='all'?' in '+dept:'')+'.'+( reason?' Reason: '+reason:'')+ ' We apologise for the inconvenience.';
-  _R.messages.unshift({id:Date.now(),from:'Reception — Delay Notice',to:dept==='all'?'All patients':'Patients in '+dept,text:text,time:_fmtTime(),read:true});
-  _rRec(); UI.showToast('Delay notification sent','ok');
+/* ── Thread Reply — API-backed ── */
+window._rSendReply = async function() {
+  var _rrBtn = document.getElementById('btn-r-send-reply');
+  if (_rrBtn && _rrBtn.getAttribute('data-sending')) return;
+  if (_rrBtn) { _rrBtn.setAttribute('data-sending','1'); _rrBtn.disabled=true; _rrBtn.style.opacity='0.7'; _rrBtn.textContent='Sending…'; }
+  function _rrReset(){ if(_rrBtn){ _rrBtn.removeAttribute('data-sending'); _rrBtn.disabled=false; _rrBtn.style.opacity=''; _rrBtn.textContent='Send Reply'; } }
+  function _rrToast(m,t){ try{ if(window.UI&&UI.showToast)UI.showToast(m,t); }catch(_){} }
+
+  var bodyEl = document.getElementById('rmsg-reply-body');
+  var body   = bodyEl ? bodyEl.value.trim() : '';
+  if (!body) { _rrReset(); _rrToast('Enter a reply','err'); return; }
+
+  var thread = window._rCurrentThread || {};
+  var recipientRole = (thread.role||thread.fromRole||thread.senderRole||'').replace(/ /g,'_').toUpperCase() || 'DOCTOR';
+  var subject = 'Re: ' + (thread.subject || thread.text || '').slice(0,60);
+
+  var u = (window.API && window.API.getStoredUser && window.API.getStoredUser())
+       || (function(){ try{ return JSON.parse(sessionStorage.getItem('user')||localStorage.getItem('currentUser')||'null'); }catch(_){ return null; } })()
+       || {};
+  var senderName = u.firstName ? ((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'Reception');
+
+  /* Optimistic local push */
+  var localId = Date.now();
+  if (!_R.messages) _R.messages = [];
+  _R.messages.unshift({
+    id: localId, from:'Reception (You)', fromRole:'RECEPTIONIST',
+    role: thread.role||recipientRole, subject: subject,
+    text: body, time: _fmtTime(), sentAt: new Date().toISOString(),
+    unread: false,
+  });
+  if (bodyEl) bodyEl.value = '';
+
+  try {
+    var res = await API._fetchDirect('/messages',{method:'POST',body:JSON.stringify({
+      senderRole: 'RECEPTIONIST',
+      senderName: senderName,
+      recipientRole: recipientRole,
+      recipientId: thread.senderId || thread.from || undefined,
+      subject: subject,
+      body: body,
+      priority: 'Normal',
+      sentAt: new Date().toISOString(),
+      status: 'sent', readStatus: 'unread',
+    })});
+    var savedId = res && (res._id||res.id);
+    if (savedId) {
+      var mi2 = _R.messages.findIndex(function(m){ return m.id===localId; });
+      if (mi2>-1) { _R.messages[mi2].id=savedId; _R.messages[mi2]._id=savedId; }
+    }
+    /* Push to recipient portal bridge */
+    var inmem = { id: savedId||localId, from: senderName+' (Reception)', senderName: senderName,
+      senderRole:'RECEPTIONIST', subject:subject, body:body, text:body, time:_fmtTime(), read:false };
+    try{
+      if ((recipientRole==='DOCTOR'||recipientRole==='DOCTOR/CLINICIAN') && window._doctorAddMessage) window._doctorAddMessage(inmem);
+      if ((recipientRole==='NURSE'||recipientRole==='NURSE_STATION') && window._nurseAddMessage) window._nurseAddMessage(inmem);
+      if (recipientRole==='PHARMACY' && window._pharmacyAddMessage) window._pharmacyAddMessage(inmem);
+    }catch(_be){}
+    /* Socket notify */
+    try{
+      if(window.socket&&window.socket.emit){
+        window.socket.emit('new-message',{recipientRole:recipientRole,messageId:savedId||null});
+      }
+    }catch(_se){}
+    _rrReset();
+    window._rMsgThread = null;
+    window._rCurrentThread = null;
+    _rMsgRender();
+    _rrToast('Reply sent','ok');
+  } catch(rrErr) {
+    /* Roll back */
+    _R.messages = _R.messages.filter(function(m){ return m.id!==localId; });
+    _rrReset();
+    _rrToast((rrErr&&rrErr.message)||'Could not send reply — please try again.','err');
+  }
 };
 
 /* Bind events */
@@ -4306,6 +4599,8 @@ function _rBind() {
 /* Expose */
 window._rTab=_rTab;
 window._rRec=_rRec;
+/* Messaging nav helper — must be global because inline onclick="" handlers call it */
+window._rMsgRender = function(){ _R.tab='messaging'; _rRec(); };
 
 /* Reset check-in to fresh search — called by "Check In Another Patient" button */
 window._rResetCheckin = function() {
@@ -4404,15 +4699,23 @@ window._rSendDelay = async function() {
   var dept=(document.getElementById('delay-dept')||{value:'all'}).value;
   var dur=(document.getElementById('delay-dur')||{value:'30'}).value;
   var reason=(document.getElementById('delay-reason')||{value:''}).value.trim();
+
+  if (!dur) { if(window.UI&&UI.showToast) UI.showToast('Please select an estimated delay','err'); return; }
+
+  var sendBtn = document.getElementById('btn-delay-send');
+  if (sendBtn) { sendBtn.disabled=true; sendBtn.setAttribute('data-sending','1'); sendBtn.textContent='Sending…'; }
+
   var text=dur+'-minute delay expected'+(dept!=='all'?' in '+dept:'')+'.'+( reason?' Reason: '+reason:'')+ ' We apologise for the inconvenience.';
 
   /* Post to notice board */
+  if (!_R.messages) _R.messages = [];
   _R.messages.unshift({id:Date.now(),from:'Reception — Delay Notice',to:dept==='all'?'All patients':'Patients in '+dept,text:text,time:_fmtTime(),read:true});
 
   /* Send to affected patients via SMS + email */
-  var affected = _R.appointments.filter(function(a){
+  var todayStr = new Date().toISOString().slice(0,10);
+  var affected = (_R.appointments||[]).filter(function(a){
     return (dept==='all'||a.dept===dept) && a.status!=='cancelled' &&
-           (a.date===new Date().toISOString().slice(0,10));
+           (a.date===todayStr);
   });
 
   var sent=0;
@@ -4426,18 +4729,23 @@ window._rSendDelay = async function() {
     }catch(_){}
   }
 
-  _rRec();
-  UI.showToast('Delay notice sent to '+sent+' patient'+(sent!==1?'s':'')+' via SMS & email','ok');
+  window._rMsgView = 'inbox';
+  _rMsgRender();
+  if(window.UI&&UI.showToast) UI.showToast('Delay notice sent to '+sent+' patient'+(sent!==1?'s':'')+' via SMS & email','ok');
 };
 
 window._rSendVaxReminders = async function() {
   var days  = parseInt((document.getElementById('vax-remind-days')||{value:'7'}).value)||7;
   var dept  = (document.getElementById('vax-remind-type')||{value:'Immunisation'}).value;
+
+  var sendBtn2 = document.getElementById('btn-vax-send');
+  if (sendBtn2) { sendBtn2.disabled=true; sendBtn2.setAttribute('data-sending','1'); sendBtn2.textContent='Sending…'; }
+
   var cutoff= new Date(); cutoff.setDate(cutoff.getDate()+days);
   var cutStr= cutoff.toISOString().slice(0,10);
   var today = new Date().toISOString().slice(0,10);
 
-  var targets = _R.appointments.filter(function(a){
+  var targets = (_R.appointments||[]).filter(function(a){
     return a.status!=='cancelled' &&
            (dept==='all'||a.dept===dept) &&
            (a.date||'') > today &&
@@ -4460,7 +4768,38 @@ window._rSendVaxReminders = async function() {
       }
     } catch(_){}
   }
+  if (!_R.messages) _R.messages = [];
   _R.messages.unshift({id:Date.now(),from:'Reception — Vaccination Reminder',to:dept,text:'Sent reminders for '+targets.length+' upcoming '+(dept==='all'?'':''+dept+' ')+'appointments.',time:_fmtTime(),read:true});
-  _rRec();
-  UI.showToast('Vaccination reminders sent to '+sent+' patient'+(sent!==1?'s':'')+' via SMS & email','ok');
+  window._rMsgView = 'inbox';
+  _rMsgRender();
+  if(window.UI&&UI.showToast) UI.showToast('Vaccination reminders sent to '+sent+' patient'+(sent!==1?'s':'')+' via SMS & email','ok');
+};
+
+/* ── Incoming message bridge: nurse/doctor can push to receptionist portal ── */
+window._receptionAddMessage = function(msg) {
+  if (!_R.messages) _R.messages = [];
+  /* Avoid duplicates */
+  var dup = _R.messages.find(function(m){ return m.id === (msg.id||msg._id); });
+  if (dup) return;
+  _R.messages.unshift({
+    id:         msg.id || msg._id || Date.now(),
+    _id:        msg._id || msg.id || null,
+    from:       msg.senderName || msg.from || 'Staff',
+    fromRole:   msg.senderRole || msg.fromRole || 'STAFF',
+    role:       msg.senderRole || msg.fromRole || 'STAFF',
+    subject:    msg.subject || '(No subject)',
+    text:       msg.body || msg.text || '',
+    time:       msg.time || new Date().toLocaleTimeString('en-ZA', {hour:'2-digit',minute:'2-digit'}),
+    sentAt:     msg.sentAt || new Date().toISOString(),
+    unread:     true,
+    read:       false,
+  });
+  /* Re-render if portal is open */
+  if (document.getElementById('reception-main') || document.querySelector('[data-page="receptionist"]')) {
+    if (typeof _rRec === 'function') _rRec();
+  }
+  /* Toast notification */
+  if (window.UI && window.UI.showToast) {
+    UI.showToast('📩 New message from ' + (msg.senderName||msg.from||'Staff'), 'ok');
+  }
 };
