@@ -1547,14 +1547,19 @@ var _BK_ALL_SLOTS_SAT = [
   '11:00','11:30','12:00','12:30','13:00'
 ];
 function _bkGetSlots(dateStr) {
-  var d = new Date(dateStr + 'T00:00:00');
+  /* Normalise dateStr to YYYY-MM-DD regardless of separator (handles 2026/11/04 or 2026-11-04) */
+  var normDate = dateStr.replace(/\//g, '-');
+  var d = new Date(normDate + 'T00:00:00');
   var day = d.getDay();
   if (day === 0) return [];
   var all = day === 6 ? _BK_ALL_SLOTS_SAT : _BK_ALL_SLOTS_WEEKDAY;
-  var todayStr = new Date().toISOString().slice(0,10);
-  if (dateStr !== todayStr) return all.slice();
-  /* Today: filter out slots within 30 minutes */
+  /* Build today string in local time (not UTC) to avoid midnight-offset mismatch */
   var now = new Date();
+  var todayStr = now.getFullYear() + '-' +
+    String(now.getMonth() + 1).padStart(2, '0') + '-' +
+    String(now.getDate()).padStart(2, '0');
+  if (normDate !== todayStr) return all.slice();
+  /* Today: filter out slots within 30 minutes of current local time */
   var cutoff = now.getHours() * 60 + now.getMinutes() + 30;
   return all.filter(function(s) {
     var parts = s.split(':');
@@ -1768,8 +1773,9 @@ window._bkRefreshSlots = async function() {
   if (!wrap || !grid) return;
   if (!dateStr) { wrap.style.display = 'none'; return; }
 
-  /* Check for Sunday */
-  var dayOfWeek = new Date(dateStr + 'T00:00:00').getDay();
+  /* Check for Sunday — normalise separator first */
+  var normDateStr = dateStr.replace(/\//g, '-');
+  var dayOfWeek = new Date(normDateStr + 'T00:00:00').getDay();
   if (dayOfWeek === 0) {
     wrap.style.display = 'block';
     grid.innerHTML = '';
@@ -1840,13 +1846,15 @@ window._bkRefreshSlots = async function() {
 
   if (none) none.style.display = 'none';
 
-  /* Render all slots: available (green), booked/past (grey disabled) */
-  var allDisplay = _BK_ALL_SLOTS_WEEKDAY;
-  if (dayOfWeek === 6) allDisplay = _BK_ALL_SLOTS_SAT;
-
-  /* For today, also grey out past slots that _bkGetSlots already removed */
+  /* For today, _bkGetSlots already filtered out past slots.
+     allSlots contains only future (or all-day) slots.
+     We render ONLY those slots — past ones are completely hidden.
+     Booked slots within allSlots are shown greyed (still in the future, just taken). */
   var availSet = {};
   available.forEach(function(s){ availSet[s] = true; });
+
+  /* allDisplay = only non-past slots (past ones hidden entirely for today) */
+  var allDisplay = allSlots;
 
   grid.innerHTML = allDisplay.map(function(t) {
     var isAvail = !!availSet[t];
@@ -1867,20 +1875,25 @@ window._bkRefreshSlots = async function() {
         'onmouseover="this.style.borderColor=\'#0F6E56\';this.style.background=\'#f0fdfa\'" '+
         'onmouseout="this.style.borderColor=\'#e0e0e0\';this.style.background=\'#fff\'">'+label+'</button>';
     } else {
-      /* Taken or past — show greyed out, not clickable */
-      var title = isTaken ? 'Already booked' : 'Past — not available';
-      return '<button disabled title="'+title+'" style="'+
-        'padding:10px 4px;border-radius:8px;font-size:12px;font-weight:400;cursor:not-allowed;'+
-        'border:1.5px solid #f0f0f0;background:#fafafa;color:#ccc;font-family:inherit;'+
-        'text-decoration:line-through">'+label+'</button>';
+      /* Taken (booked by someone else) — show with a subtle "Booked" label */
+      return '<button disabled title="Already booked" style="'+
+        'padding:6px 4px 4px;border-radius:8px;font-size:11px;font-weight:400;cursor:not-allowed;'+
+        'border:1.5px solid #f0f0f0;background:#fafafa;color:#bbb;font-family:inherit;'+
+        'display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.2">'+
+        '<span>'+label+'</span>'+
+        '<span style="font-size:9px;color:#ccc;letter-spacing:.4px;text-transform:uppercase">Booked</span>'+
+        '</button>';
     }
   }).join('');
 
   /* Summary line */
-  var avCount = available.length;
-  var summary = document.getElementById('bk-slot-summary');
+  var avCount  = available.length;
+  var totCount = allDisplay.length;
+  var summary  = document.getElementById('bk-slot-summary');
   if (summary) {
-    summary.textContent = avCount + ' of ' + allDisplay.length + ' slots available';
+    var bookedCount = booked.filter(function(b){ return allSlots.indexOf(b) !== -1; }).length;
+    var bookedNote  = bookedCount > 0 ? ' · ' + bookedCount + ' booked' : '';
+    summary.textContent = avCount + ' of ' + totCount + ' slots available' + bookedNote;
     summary.style.color = avCount === 0 ? '#E24B4A' : avCount <= 4 ? '#7A5C10' : '#0F6E56';
   }
 };
@@ -1921,13 +1934,39 @@ window._bkLoadSidePanel = async function() {
         return new Date(a.scheduledAt||a.date||0) - new Date(b.scheduledAt||b.date||0);
       });
     if (!apts.length) { list.innerHTML = '<div style="color:#aaa;text-align:center;padding:12px 0;font-size:12px">No upcoming appointments</div>'; return; }
-    var DEPT_COLS = {'General Consultation':'#0F6E56','Telemedicine':'#1A4A9B','Lab / Blood Draw':'#7B5EA7','Immunisation':'#E07A10','Mental Health':'#185FA5','Chronic Care Follow-Up':'#1D9E75'};
+    /* Reverse map: backend enum slug → human-readable display label */
+    var _visitTypeDisplayMap = {
+      'general_consultation': 'General Consultation',
+      'telemedicine':         'Telemedicine',
+      'lab':                  'Lab / Blood Draw',
+      'immunisation':         'Immunisation',
+      'mental_health':        'Mental Health',
+      'chronic_care':         'Chronic Care Follow-Up',
+      'maternal_child':       'Maternal & Child Health',
+      'pharmacy_pickup':      'Pharmacy Pickup',
+      'specialist_referral':  'Specialist Referral',
+      'wellness':             'Wellness & Preventive Care'
+    };
+    var DEPT_COLS = {
+      'General Consultation':'#0F6E56',
+      'Telemedicine':'#1A4A9B',
+      'Lab / Blood Draw':'#7B5EA7',
+      'Immunisation':'#E07A10',
+      'Mental Health':'#185FA5',
+      'Chronic Care Follow-Up':'#1D9E75',
+      'Maternal & Child Health':'#B45309',
+      'Pharmacy Pickup':'#6D28D9',
+      'Specialist Referral':'#0369A1',
+      'Wellness & Preventive Care':'#0F766E'
+    };
     list.innerHTML = apts.slice(0,5).map(function(a) {
       var rawDt = a.scheduledAt || a.date || '';
       var d = rawDt ? new Date(rawDt) : null;
       var dstr = d && !isNaN(d) ? d.toLocaleDateString('en-ZA',{day:'numeric',month:'short'}) : '—';
       var tstr = d && !isNaN(d) ? d.toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',hour12:false}) : (a.time||'');
-      var dept = a.visitType || a.department || 'Appointment';
+      /* Resolve display label: try reverse-mapping slug, then use department field, then raw value */
+      var rawType = a.visitType || a.department || 'Appointment';
+      var dept = _visitTypeDisplayMap[rawType] || a.department || rawType;
       var col  = DEPT_COLS[dept] || '#0F6E56';
       return '<div style="padding:8px 10px;border-radius:8px;background:#f4f5f0;margin-bottom:8px;border-left:3px solid '+col+'">'+
         '<div style="font-weight:600;font-size:12px;color:#111">'+dept+'</div>'+
@@ -1943,6 +1982,20 @@ window._bkSubmit = async function() {
   var facility  = (window._BKC && window._BKC.facilityId)   || '';
   var facName   = (window._BKC && window._BKC.facilityName)  || '';
   var dept      = (document.getElementById('bk-visit-type')||{value:'General Consultation'}).value;
+  /* Map display label → backend visitType enum value (backend uses lowercase slugs) */
+  var _visitTypeMap = {
+    'General Consultation':  'general_consultation',
+    'Telemedicine':          'telemedicine',
+    'Lab / Blood Draw':      'lab',
+    'Immunisation':          'immunisation',
+    'Mental Health':         'mental_health',
+    'Chronic Care Follow-Up':'chronic_care',
+    'Maternal & Child Health':'maternal_child',
+    'Pharmacy Pickup':       'pharmacy_pickup',
+    'Specialist Referral':   'specialist_referral',
+    'Wellness & Preventive Care':'wellness'
+  };
+  var visitTypeEnum = _visitTypeMap[dept] || dept.toLowerCase().replace(/[^a-z0-9]+/g,'_');
   /* Sync date from DOM input in case _bkDateChange was never triggered */
   var _dateInputEl = document.getElementById('bk-slot-date');
   if (_dateInputEl && _dateInputEl.value && !window._BKC.selectedDate) {
@@ -1984,7 +2037,7 @@ window._bkSubmit = async function() {
     await API.appointments.create({
       patient:     p._id,
       facility:    facility,
-      visitType:   dept,
+      visitType:   visitTypeEnum,
       department:  dept,
       scheduledAt: scheduledAt,
       facilityName: facName
