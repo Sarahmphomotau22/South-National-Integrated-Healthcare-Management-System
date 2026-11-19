@@ -1740,7 +1740,8 @@ var _BK_ALL_SLOTS_WEEKDAY = [
 ];
 var _BK_ALL_SLOTS_SAT = [
   '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
-  '11:00','11:30','12:00','12:30','13:00'
+  '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
+  '15:00','15:30','16:00','16:30','17:00'
 ];
 function _bkGetSlots(dateStr) {
   /* Normalise dateStr to YYYY-MM-DD regardless of separator (handles 2026/11/04 or 2026-11-04) */
@@ -1835,7 +1836,7 @@ Pages['book'] = () => {
 <div class="page-title">Book a visit</div>
 <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#EEF7FF;border-left:4px solid #4A9BD4;border-radius:10px;margin-bottom:16px;font-size:13px;color:#1A4A9B">
   <i class="ti ti-clock" style="font-size:16px;flex-shrink:0"></i>
-  <span>Clinic hours: <strong>Mon–Fri 07:00–17:00</strong> &middot; <strong>Sat 07:00–13:00</strong> &middot; Same-day bookings need <strong>30 min notice</strong>.</span>
+  <span>Clinic hours: <strong>Mon–Fri 07:00–17:00</strong> &middot; <strong>Sat 07:00–17:00</strong> &middot; Same-day bookings need <strong>30 min notice</strong>.</span>
 </div>
 <div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">
 

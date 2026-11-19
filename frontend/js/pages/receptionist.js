@@ -348,7 +348,8 @@ var _REC_ALL_SLOTS_WEEKDAY = [
 ];
 var _REC_ALL_SLOTS_SAT = [
   '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
-  '11:00','11:30','12:00','12:30','13:00'
+  '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
+  '15:00','15:30','16:00','16:30','17:00'
 ];
 
 /* Returns the full slot list for a date (all slots, not filtered for past).
@@ -1130,8 +1131,8 @@ function _rCheckin() {
     var isSaturday = selDate && new Date(selDate+'T00:00:00').getDay()===6;
 
     var hintText = selDate
-      ? (isSaturday ? 'Saturday · Clinic 07:00–13:00' : isSunday ? 'Closed — please choose another day' : 'Weekday · Clinic 07:00–17:00')
-      : 'Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Sun closed';
+      ? (isSaturday ? 'Saturday · Clinic 07:00–17:00' : isSunday ? 'Closed — please choose another day' : 'Weekday · Clinic 07:00–17:00')
+      : 'Mon–Fri 07:00–17:00 · Sat 07:00–17:00 · Sun closed';
 
     var slotHtml =
       '<div style="background:#fff;border-radius:14px;border:1px solid #e0e0e0;padding:22px">' +
@@ -1642,7 +1643,7 @@ function _rBook() {
     var todayIso = new Date().toISOString().slice(0,10);
     var isSun = selDate && new Date(selDate+'T00:00:00').getDay()===0;
     var isSat = selDate && new Date(selDate+'T00:00:00').getDay()===6;
-    var hintText = selDate ? (isSat?'Saturday · 07:00–13:00':isSun?'Closed':'Weekday · 07:00–17:00') : 'Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Sun closed';
+    var hintText = selDate ? (isSat?'Saturday · 07:00–17:00':isSun?'Closed':'Weekday · 07:00–17:00') : 'Mon–Fri 07:00–17:00 · Sat 07:00–17:00 · Sun closed';
 
     return '<div style="padding:28px 32px">' + back +
       '<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">' +
@@ -3946,7 +3947,7 @@ window._rCheckinIssue = async function() {
           '✓ Checked in at ' + checkedAt + ' · Token valid for today only' +
         '</div>' +
         '<div style="background:#fffbeb;border-radius:10px;padding:12px 16px;font-size:12px;color:#92400e">' +
-          '🏥 Johannesburg CHC · Mon–Fri 07:00–17:00 · Sat 07:00–13:00 · Emergency: <strong>10177</strong>' +
+          '🏥 Johannesburg CHC · Mon–Fri 07:00–17:00 · Sat 07:00–17:00 · Emergency: <strong>10177</strong>' +
         '</div>' +
       '</div>' +
     '</div>';

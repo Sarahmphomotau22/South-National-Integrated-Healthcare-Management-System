@@ -106,7 +106,7 @@ function _todayStr(){ return new Date().toLocaleDateString('en-ZA',{weekday:'lon
 /* ─── Shell ────────────────────────────────────────────────────────── */
 Pages['doc_dashboard'] = function(){
   _D.view = 'dashboard';
-  setTimeout(_dRender, 80);
+  requestAnimationFrame(_dRender);
 
   /* Accept patients from nurse queue */
   window._DOCTOR_QUEUE = window._DOCTOR_QUEUE || [];
@@ -177,8 +177,8 @@ Pages['doc_dashboard'] = function(){
     '<main id="doc-main" style="flex:1;min-width:0;overflow:hidden;display:flex;flex-direction:column;background:'+C.bg+'">'+
       '<div style="padding:24px;display:flex;flex-direction:column;gap:14px;animation:_dPulse 1.2s ease-in-out infinite">'+
         '<div style="height:80px;background:#e2e8f0;border-radius:14px"></div>'+
-        '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">'+
-          '<div style="height:80px;background:#e2e8f0;border-radius:12px"></div>'.repeat(4)+
+        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">'+
+          '<div style="height:80px;background:#e2e8f0;border-radius:12px"></div>'.repeat(3)+
         '</div>'+
         '<div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">'+
           '<div style="height:220px;background:#e2e8f0;border-radius:12px"></div>'+
@@ -212,7 +212,7 @@ function _dPage(view) {
       window._DOCTOR_QUEUE.push(pt);
       if(document.getElementById('doc-main')) _dRender();
     };
-    setTimeout(_dRender, 40);
+    requestAnimationFrame(_dRender);
     return '<div style="display:flex;height:calc(100vh - 120px);overflow:hidden">'+
       '<main id="doc-main" style="flex:1;min-width:0;overflow:hidden;display:flex;flex-direction:column;background:'+C.bg+'"></main>'+
     '</div>';
@@ -241,7 +241,7 @@ function _dRenderBust(view){ if(view) delete _dCache[view]; else _dCache={}; }
 
 /* Views that must always re-render (live data changes every visit) */
 /* consult and medical_notes are patient-context-dependent — never serve stale cache */
-var _dNoCache = { dashboard:1, patients:1, doc_appointments:1, messages:1, consult:1, medical_notes:1, pat360:1, prescriptions:1 };
+var _dNoCache = { dashboard:1, patients:1, doc_appointments:1, messages:1, consult:1, medical_notes:1, pat360:1, prescriptions:1, lab:1, lab_results:1, radiology:1, telemedicine:1, med_certs:1, doc_all_certs:1 };
 
 /* ─── Cached current user — resolved once per render cycle ────────── */
 /* Prefer window.NIHMS_USER (set by the NIHMS shell for the logged-in  */
@@ -373,18 +373,12 @@ function _dDashboard(){
     ? window._dAptData.length
     : _D.todaySchedule.length;
 
-  /* Pending lab results — count unread lab/result notifications until async resolves */
-  var labCount = _D.notifications.filter(function(n){
-    return !n.read && (n.text.toLowerCase().indexOf('lab')>-1 || n.text.toLowerCase().indexOf('result')>-1);
-  }).length;
-
   var kpis = [
     {id:'kpi-apt', label:"Today's Appointments", value:aptCount,  color:C.teal,   icon:'📅'},
     {id:'kpi-wait',label:'Waiting Patients',      value:waiting.length, color:C.amber, icon:'⏳'},
-    {id:'kpi-lab', label:'Pending Lab Results',   value:labCount, color:C.purple, icon:'🧪'},
   ];
 
-  var kpiHtml = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">'+
+  var kpiHtml = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">'+
     kpis.map(function(k){
       return _card('<div style="display:flex;align-items:center;gap:12px">'+
         '<div style="font-size:24px">'+k.icon+'</div>'+
@@ -394,7 +388,7 @@ function _dDashboard(){
     }).join('')+
   '</div>';
 
-  /* ── Async refresh: deferred 400 ms so paint happens before network ── */
+  /* ── Async refresh: deferred 200 ms so paint happens before network ── */
   /* Guard: skip if user has navigated away from dashboard before timer fires */
   setTimeout(async function(){
     if (_D.view !== 'dashboard') return;
@@ -417,14 +411,8 @@ function _dDashboard(){
       });
       var aptEl = document.getElementById('kpi-apt');
       if(aptEl) aptEl.textContent = window._dAptData.length;
-
-      /* Fetch pending lab orders for this doctor */
-      var labRes   = await window.API._fetchDirect('/labs?doctor='+did+'&status=pending&limit=100');
-      var labItems = (labRes&&labRes.data)||(Array.isArray(labRes)?labRes:[]);
-      var labEl    = document.getElementById('kpi-lab');
-      if(labEl) labEl.textContent = labItems.length;
-    } catch(e){ /* silently ignore — tiles keep their initial values */ }
-  }, 400);
+    } catch(e){ /* silently ignore — tile keeps its initial value */ }
+  }, 200);
 
   /* Waiting patients from nurse queue */
   var queueHtml = waiting.length
@@ -472,10 +460,9 @@ function _dDashboard(){
   /* Trigger async load after host API is ready — guard: skip if user navigated away */
   setTimeout(function(){
     if(_D.view==='dashboard') {
-      if(window._dDashTeleLoad)  window._dDashTeleLoad();
-      if(window._dDashSchedLoad) window._dDashSchedLoad();
+      if(window._dDashTeleLoad) window._dDashTeleLoad();
     }
-  }, 450);
+  }, 250);
 
   /* Greeting banner */
   var _greetHour = new Date().getHours();
@@ -520,19 +507,6 @@ function _dDashboard(){
           '</div>'+
         '</div>'+schedHtml)+
       '</div>'+
-
-      /* Today's Schedule panel */
-      _card('<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'+
-        '<div style="display:flex;align-items:center;gap:8px">'+
-          '<span style="font-size:16px">📅</span>'+
-          '<div style="font-size:14px;font-weight:700;color:'+C.text+'">Today\'s Schedule</div>'+
-          '<span id="dash-sched-count" style="font-size:11px;color:'+C.muted+';background:#f1f5f9;padding:1px 7px;border-radius:20px"></span>'+
-        '</div>'+
-        '<button onclick="_D.view=\'appointments\';_dRender()" style="font-size:12px;color:'+C.teal+';border:none;background:transparent;cursor:pointer;font-family:inherit">View all →</button>'+
-      '</div>'+
-      '<div id="dash-sched-list" style="padding:16px;text-align:center;color:'+C.muted+';font-size:12px">'+
-        '<span style="font-size:20px">📅</span><br>Loading…'+
-      '</div>')+
 
     '</div>';
 }
@@ -976,15 +950,15 @@ function _dAppointments(){
   var _aptNow = Date.now();
   if (window._dAptDataTs && (_aptNow - window._dAptDataTs < 60000) && window._dAptRows) {
     /* Data is fresh — re-render with cached data immediately */
-    setTimeout(function(){
+    requestAnimationFrame(function(){
       var calArea = document.getElementById('doc-apt-cal');
       if (calArea && window._dAptRows) {
         /* trigger re-render with cached rows already in _dAptData */
         _dRenderBust('doc_appointments');
       }
-    }, 0);
+    });
   }
-  setTimeout(async function(){
+  requestAnimationFrame(async function(){
     if (window._dAptDataTs && (Date.now() - window._dAptDataTs < 60000) && window._dAptRows) return;
     var calArea   = document.getElementById('doc-apt-cal');
     var tableArea = document.getElementById('doc-apt-table');
@@ -3582,6 +3556,9 @@ function _dMedicalNotes(){
   var ICD10_MAP = {};
   ICD10_LIST.forEach(function(x){ ICD10_MAP[x.d]=x.c; });
 
+  /* ── Saved state shorthand ── */
+  var _ds = _D.workflow.diagnosis;
+
   /* ── ICD-10 auto-fill handler ── */
   window._mnDiagChange = function(diagId, icdId){
     var diagEl = document.getElementById(diagId);
@@ -3589,6 +3566,39 @@ function _dMedicalNotes(){
     if(!diagEl||!icdEl) return;
     var code = ICD10_MAP[diagEl.value]||'';
     icdEl.value = code;
+    /* persist immediately */
+    _D.workflow.diagnosis.primary = diagEl.value;
+    _D.workflow.diagnosis.icd10   = code;
+  };
+
+  /* ── Auto-save: collect all form values → _D.workflow.diagnosis ── */
+  window._dSaveDiagForm = function(){
+    var g = function(id){ var el=document.getElementById(id); return el?el.value:''; };
+    _D.workflow.diagnosis.primary     = g('mn-primary-diag');
+    _D.workflow.diagnosis.icd10       = g('mn-primary-icd');
+    _D.workflow.diagnosis.status      = g('mn-primary-status');
+    _D.workflow.diagnosis.assessment  = g('mn-assessment');
+    _D.workflow.diagnosis.findings    = g('mn-findings');
+    _D.workflow.diagnosis.differentials = g('mn-differential');
+    _D.workflow.diagnosis.addNotes    = g('mn-add-notes');
+    /* Risk radio */
+    var rEl = document.querySelector('input[name="mn-risk"]:checked');
+    if(rEl) _D.workflow.diagnosis.risk = rEl.value;
+    /* Basis checkboxes */
+    _D.workflow.diagnosis.basis = Array.prototype.slice.call(
+      document.querySelectorAll('.mn-basis:checked')
+    ).map(function(el){return el.value;});
+    /* Extra diagnoses */
+    var extras = [];
+    var n = window._mnDiagCount||1;
+    for(var i=2;i<=n;i++){
+      extras.push({
+        diag:  g('mn-extra-diag-'+i),
+        icd:   g('mn-extra-icd-'+i),
+        status:g('mn-extra-status-'+i)
+      });
+    }
+    _D.workflow.diagnosis.secondary = extras;
   };
 
   /* ── "Add Another Diagnosis" handler ── */
@@ -3909,8 +3919,16 @@ function _dMedicalNotes(){
   function _mnI(label,val,mono){ return '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:'+C.muted+';margin-bottom:4px">'+label+'</div><div style="font-size:14px;font-weight:700;color:'+C.text+';'+(mono?'font-family:monospace':'')+'">'+val+'</div></div>'; }
   function _mnL(t,req){ return '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+C.muted+';margin-bottom:6px">'+t+(req?' <span style="color:#ef4444">*</span>':'')+'</div>'; }
   function _mnF(){ return 'width:100%;padding:9px 12px;border:1.5px solid '+C.border+';border-radius:8px;font-size:13px;font-family:inherit;color:'+C.text+';background:#fff;box-sizing:border-box;outline:none'; }
+  /* Map field id → saved value key in _D.workflow.diagnosis */
+  var _mnSaved = {
+    'mn-assessment':  _ds.assessment    || '',
+    'mn-findings':    _ds.findings      || '',
+    'mn-differential':_ds.differentials || '',
+    'mn-add-notes':   _ds.addNotes      || ''
+  };
   function _mnTx(id,label,rows,req,ph){
-    return '<div>'+_mnL(label,req)+'<textarea id="'+id+'" rows="'+(rows||3)+'" placeholder="'+(ph||'')+'" style="'+_mnF()+';resize:vertical"></textarea></div>';
+    var saved = _mnSaved[id] !== undefined ? _mnSaved[id] : '';
+    return '<div>'+_mnL(label,req)+'<textarea id="'+id+'" rows="'+(rows||3)+'" placeholder="'+(ph||'')+'" style="'+_mnF()+';resize:vertical">'+saved.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</textarea></div>';
   }
 
   /* ── Sidebar ── */
@@ -3939,25 +3957,26 @@ function _dMedicalNotes(){
     '</div>';
 
   /* ── Diagnosis dropdown (searchable) ── */
+  var _dsSavedPrimary = _ds.primary  || '';
+  var _dsSavedIcd     = _ds.icd10    || '';
+  var _dsSavedStatus  = _ds.status   || '';
   var diagSelect =
     '<div style="display:grid;grid-template-columns:1.6fr 0.8fr 0.9fr;gap:10px">'+
       '<div>'+_mnL('Diagnosis',true)+
         '<select id="mn-primary-diag" onchange="_mnDiagChange(\'mn-primary-diag\',\'mn-primary-icd\')" style="'+_mnF()+'">'+
           '<option value="">Select or type diagnosis…</option>'+
-          ICD10_LIST.map(function(x){return'<option>'+x.d+'</option>';}).join('')+
+          ICD10_LIST.map(function(x){return'<option'+(x.d===_dsSavedPrimary?' selected':'')+'>'+x.d+'</option>';}).join('')+
         '</select>'+
       '</div>'+
       '<div>'+_mnL('ICD-10 Code',true)+
-        '<input id="mn-primary-icd" placeholder="Auto-filled" style="'+_mnF()+'">'+
+        '<input id="mn-primary-icd" placeholder="Auto-filled" value="'+_dsSavedIcd+'" style="'+_mnF()+'">'+
       '</div>'+
       '<div>'+_mnL('Diagnosis Status',true)+
         '<select id="mn-primary-status" style="'+_mnF()+'">'+
           '<option value="">-- Select Status --</option>'+
-          '<option value="Provisional">Provisional</option>'+
-          '<option value="Confirmed">Confirmed</option>'+
-          '<option value="Differential">Differential</option>'+
-          '<option value="Resolved">Resolved</option>'+
-          '<option value="Chronic">Chronic</option>'+
+          ['Provisional','Confirmed','Differential','Resolved','Chronic'].map(function(o){
+            return '<option value="'+o+'"'+( o===_dsSavedStatus?' selected':'')+'>'+o+'</option>';
+          }).join('')+
         '</select>'+
       '</div>'+
     '</div>';
@@ -4012,8 +4031,10 @@ function _dMedicalNotes(){
               {val:'High Risk',            sub:'Urgent clinical review required',          col:C.amber},
               {val:'Emergency',            sub:'Immediate emergency assessment',           col:C.red}
             ].map(function(opt,i){
+              var _riskSaved = _ds.risk || 'Stable';
+              var _riskChecked = (opt.val === _riskSaved) ? ' checked' : ((_riskSaved===''&&i===0)?' checked':'');
               return '<label style="display:flex;align-items:center;gap:12px;padding:12px 16px;border:1.5px solid '+C.border+';border-radius:8px;cursor:pointer;background:#fff">'+
-                '<input type="radio" name="mn-risk" value="'+opt.val+'"'+(i===0?' checked':'')+' style="accent-color:'+opt.col+';width:16px;height:16px">'+
+                '<input type="radio" name="mn-risk" value="'+opt.val+'"'+_riskChecked+' style="accent-color:'+opt.col+';width:16px;height:16px">'+
                 '<div>'+
                   '<div style="font-size:13px;font-weight:700;color:'+C.text+'">'+opt.val+'</div>'+
                   '<div style="font-size:11px;color:'+C.muted+'">'+opt.sub+'</div>'+
@@ -4029,8 +4050,10 @@ function _dMedicalNotes(){
           '<div style="font-size:12px;color:'+C.muted+';margin-bottom:12px">Select all evidence sources used to support the diagnosis.</div>'+
           '<div style="display:flex;flex-wrap:wrap;gap:10px">'+
             ['Clinical Assessment','Laboratory Results','Imaging Results','Previous Medical Records','Specialist Assessment','Other'].map(function(b){
+              var _basisSaved = _ds.basis || [];
+              var _basisChk = (_basisSaved.indexOf(b) > -1) ? ' checked' : '';
               return '<label style="display:flex;align-items:center;gap:8px;padding:9px 14px;border:1.5px solid '+C.border+';border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:'+C.text+';background:#fff">'+
-                '<input type="checkbox" class="mn-basis" value="'+b+'" style="width:15px;height:15px;accent-color:'+C.teal+'">'+b+
+                '<input type="checkbox" class="mn-basis" value="'+b+'"'+_basisChk+' style="width:15px;height:15px;accent-color:'+C.teal+'">'+b+
               '</label>';
             }).join('')+
           '</div>'
@@ -4048,12 +4071,12 @@ function _dMedicalNotes(){
           '<div style="font-size:12px;color:'+C.muted+';margin-bottom:14px">Save the diagnosis, then continue with the required clinical orders.</div>'+
           '<div style="display:flex;flex-wrap:wrap;gap:10px">'+
             [
-              {label:'🧪 Order Lab',           onclick:"_D.labNewOrder=true;_D.view='lab';_dRender()"},
-              {label:'🩻 Radiology',           onclick:"_D.view='radiology';_dRender()"},
-              {label:'💊 Prescription',        onclick:"_D.view='prescriptions';_dRender()"},
-              {label:'🔄 Referral',            onclick:"_D.view='referrals';_dRender()"},
-              {label:'📅 Follow-up',           onclick:"_D.view='follow_up';_dRender()"},
-              {label:'📋 Issue Med Certificate',onclick:"_D.view='med_certs';_dRender()"}
+              {label:'🧪 Order Lab',           onclick:"_dSaveDiagForm&&_dSaveDiagForm();_D.labNewOrder=true;_D.view='lab';_dRender()"},
+              {label:'🩻 Radiology',           onclick:"_dSaveDiagForm&&_dSaveDiagForm();_D.view='radiology';_dRender()"},
+              {label:'💊 Prescription',        onclick:"_dSaveDiagForm&&_dSaveDiagForm();_D.view='prescriptions';_dRender()"},
+              {label:'🔄 Referral',            onclick:"_dSaveDiagForm&&_dSaveDiagForm();_D.view='referrals';_dRender()"},
+              {label:'📅 Follow-up',           onclick:"_dSaveDiagForm&&_dSaveDiagForm();_D.view='follow_up';_dRender()"},
+              {label:'📋 Issue Med Certificate',onclick:"_dSaveDiagForm&&_dSaveDiagForm();_D.view='med_certs';_dRender()"}
             ].map(function(a){
               return '<button onclick="'+a.onclick+'" '+
                 'style="padding:9px 16px;border-radius:8px;border:1.5px solid '+C.border+';background:#fff;font-size:13px;font-weight:700;color:'+C.text+';cursor:pointer;font-family:inherit">'+
@@ -4078,6 +4101,31 @@ function _dMedicalNotes(){
       '</div>'+
       mnSidebar+
     '</div>';
+
+  /* ── Wire auto-save listeners after render ── */
+  requestAnimationFrame(function(){
+    var ids = ['mn-primary-diag','mn-primary-icd','mn-primary-status',
+               'mn-assessment','mn-findings','mn-differential','mn-add-notes'];
+    ids.forEach(function(id){
+      var el = document.getElementById(id);
+      if(el) el.addEventListener('input', window._dSaveDiagForm);
+      if(el) el.addEventListener('change', window._dSaveDiagForm);
+    });
+    /* Risk radios */
+    document.querySelectorAll('input[name="mn-risk"]').forEach(function(el){
+      el.addEventListener('change', window._dSaveDiagForm);
+    });
+    /* Basis checkboxes */
+    document.querySelectorAll('.mn-basis').forEach(function(el){
+      el.addEventListener('change', window._dSaveDiagForm);
+    });
+    /* Extra diagnosis fields (dynamically added) — delegate from container */
+    var container = document.getElementById('mn-extra-diag-container');
+    if(container){
+      container.addEventListener('input', window._dSaveDiagForm);
+      container.addEventListener('change', window._dSaveDiagForm);
+    }
+  });
 }
 
 
@@ -4433,7 +4481,7 @@ function _dFollowUp(){
 
 function _dTelemedicine(){
   /* Render shell; sessions load async */
-  setTimeout(_dLoadTeleSessions, 0);
+  requestAnimationFrame(_dLoadTeleSessions);
   return _dHeader('Telemedicine','Virtual consultations and remote patient care',
     _btn('↻ Refresh','_dLoadTeleSessions()',C.blue))+
     '<div style="flex:1;overflow:auto;padding:16px 20px">'+
@@ -4546,46 +4594,24 @@ window._dLoadTeleSessions = async function(){
   }
 };
 
-/* ── Join a telemedicine session — calls backend, opens Jitsi via External API ── */
+/* ── Join a telemedicine session — calls backend, embeds Jitsi iframe ── */
 window._dJoinTeleSession = async function(appointmentId){
-  /* Show loading state on the clicked button */
+  /* Find the clicked button and show loading state */
   var btns = document.querySelectorAll('#tele-session-list button');
-  btns.forEach(function(b){
-    if(b.getAttribute('onclick') && b.getAttribute('onclick').includes(appointmentId)){
-      b.disabled = true; b.textContent = 'Joining…';
-    }
-  });
+  btns.forEach(function(b){ if(b.onclick && b.getAttribute('onclick') && b.getAttribute('onclick').includes(appointmentId)){ b.disabled=true; b.textContent='Joining…'; } });
+
   try {
     var res  = await API._fetchDirect('/appointments/'+appointmentId+'/join', { method:'GET' });
     var data = res && res.data;
     if(!data) throw new Error('No session data returned.');
-    /* Mark appointment In Progress */
-    try {
-      await API._fetchDirect('/appointments/'+appointmentId+'/status',{
-        method:'PATCH',
-        body:JSON.stringify({ status:'in_progress', startedAt: new Date().toISOString() })
-      });
-    } catch(_){}
     _dOpenJitsiRoom(data);
   } catch(err){
     if(window.UI && window.UI.showToast) UI.showToast('Could not join: '+(err.message||'Unknown error'),'err');
-    _dLoadTeleSessions();
+    _dLoadTeleSessions(); /* re-render to restore buttons */
   }
 };
 
-/* ── Load Jitsi External API script (once) then resolve ── */
-function _dLoadJitsiScript(){
-  return new Promise(function(resolve, reject){
-    if(window.JitsiMeetExternalAPI){ resolve(); return; }
-    var s = document.createElement('script');
-    s.src = 'https://meet.jit.si/external_api.js';
-    s.onload  = resolve;
-    s.onerror = function(){ reject(new Error('Could not load Jitsi script')); };
-    document.head.appendChild(s);
-  });
-}
-
-/* ── Render the Jitsi video room using JitsiMeetExternalAPI (no iframe) ── */
+/* ── Render the Jitsi video room as a full-screen overlay ── */
 function _dOpenJitsiRoom(session){
   var overlay = document.getElementById('tele-overlay');
   if(!overlay) return;
@@ -4594,24 +4620,11 @@ function _dOpenJitsiRoom(session){
   var other = ((session.patient&&session.patient.firstName)||'') + ' ' + ((session.patient&&session.patient.lastName)||'');
   other = other.trim() || 'Patient';
 
-  /* Get doctor display name */
-  var u = (window._dGetUser && _dGetUser()) || (window.API && API.getStoredUser && API.getStoredUser()) || {};
-  var docName = u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'Doctor');
-
-  /* Derive roomName — backend may send roomName directly or we extract from roomUrl */
-  var roomName = session.roomName ||
-    (session.roomUrl ? session.roomUrl.replace(/^https?:\/\/meet\.jit\.si\//, '').split('?')[0] : null) ||
-    ('nihms-'+session.appointmentId);
-
   overlay.style.display = 'flex';
   overlay.innerHTML =
     '<style>'+
       '@keyframes nilive{0%,100%{opacity:1}50%{opacity:.4}}'+
-      '#tele-jitsi-container{flex:1;min-height:0;width:100%;background:#000;position:relative}'+
-      '#tele-jitsi-container iframe{width:100%!important;height:100%!important;border:none}'+
-      '#tele-notify-bar{position:absolute;top:12px;left:50%;transform:translateX(-50%);'+
-        'background:#1D9E75;color:#fff;font-size:12px;font-weight:600;padding:6px 16px;'+
-        'border-radius:20px;z-index:10;opacity:0;transition:opacity .4s;pointer-events:none}'+
+      '#tele-jitsi-frame{width:100%;border:none;flex:1;min-height:0}'+
     '</style>'+
     /* Top control bar */
     '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#1a1a1a;flex-shrink:0;gap:12px;flex-wrap:wrap">'+
@@ -4622,8 +4635,11 @@ function _dOpenJitsiRoom(session){
       '</div>'+
       '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
         (when?'<span style="color:#888;font-size:11px">🕐 '+when.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+(session.queueToken?' &nbsp;🎫 '+session.queueToken:'')+'</span>':'')+
-        '<button id="tele-end-btn" onclick="_dEndTeleCall(\''+session.appointmentId+'\')" style="padding:8px 16px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px">'+
+        '<button onclick="_dEndTeleCall(\''+session.appointmentId+'\')" style="padding:8px 16px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px">'+
           '📵 End session'+
+        '</button>'+
+        '<button onclick="window.open(\''+session.roomUrl+'\',\'_blank\')" style="padding:8px 16px;border-radius:8px;border:1px solid #444;background:#2a2a2a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">'+
+          '↗ New tab'+
         '</button>'+
       '</div>'+
     '</div>'+
@@ -4634,129 +4650,26 @@ function _dOpenJitsiRoom(session){
       (session.scheduledAt?'<span style="font-size:11px;color:#888;margin-left:8px">Scheduled: '+new Date(session.scheduledAt).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'})+'</span>':'')+
       '<span style="font-size:11px;color:#888;margin-left:auto">Video powered by Jitsi Meet · NIHMS does not record this session by default</span>'+
     '</div>'+
-    /* Jitsi container — JitsiMeetExternalAPI mounts here */
-    '<div id="tele-jitsi-container" style="position:relative">'+
-      '<div id="tele-notify-bar"></div>'+
-      '<div id="tele-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;gap:12px">'+
-        '<div style="width:20px;height:20px;border:3px solid #1D9E75;border-top-color:transparent;border-radius:50%;animation:nilive .8s linear infinite"></div>'+
-        'Starting video session…'+
-      '</div>'+
-    '</div>';
-
-  /* Helper: show a notification bar inside the video area */
-  function _teleNotify(msg, color){
-    var bar = document.getElementById('tele-notify-bar');
-    if(!bar) return;
-    bar.textContent = msg;
-    bar.style.background = color || '#1D9E75';
-    bar.style.opacity = '1';
-    setTimeout(function(){ bar.style.opacity = '0'; }, 3500);
-  }
-
-  /* Load Jitsi External API script then initialise */
-  _dLoadJitsiScript().then(function(){
-    var container = document.getElementById('tele-jitsi-container');
-    var loadingEl = document.getElementById('tele-loading');
-    if(!container) return;
-
-    /* Dispose any previous API instance */
-    if(window._teleJitsiAPI){
-      try { window._teleJitsiAPI.dispose(); } catch(_){}
-      window._teleJitsiAPI = null;
-    }
-
-    window._teleJitsiAPI = new JitsiMeetExternalAPI('meet.jit.si', {
-      roomName:  roomName,
-      parentNode: container,
-      width:     '100%',
-      height:    '100%',
-      userInfo:  { displayName: docName },
-      configOverwrite: {
-        startWithAudioMuted:  false,
-        startWithVideoMuted:  false,
-        disableDeepLinking:   true,
-        prejoinPageEnabled:   false,
-        enableWelcomePage:    false,
-        disableInviteFunctions: true,
-        toolbarButtons: [
-          'microphone','camera','closedcaptions','desktop',
-          'fullscreen','fodeviceselection','hangup',
-          'chat','raisehand','videoquality','tileview'
-        ]
-      },
-      interfaceConfigOverwrite: {
-        SHOW_JITSI_WATERMARK:    false,
-        SHOW_WATERMARK_FOR_GUESTS: false,
-        TOOLBAR_ALWAYS_VISIBLE:  true,
-        DISABLE_JOIN_LEAVE_NOTIFICATIONS: false
-      }
-    });
-
-    /* Hide loading spinner once conference is ready */
-    window._teleJitsiAPI.addEventListener('videoConferenceJoined', function(){
-      if(loadingEl) loadingEl.style.display = 'none';
-      _teleNotify('✅ You are now in the session');
-    });
-
-    /* Participant joined notification */
-    window._teleJitsiAPI.addEventListener('participantJoined', function(e){
-      _teleNotify('👤 '+(e.displayName||'Patient')+' has joined the session');
-    });
-
-    /* Participant left notification */
-    window._teleJitsiAPI.addEventListener('participantLeft', function(e){
-      _teleNotify('👋 '+(e.displayName||'Participant')+' has left the session', '#f59e0b');
-    });
-
-    /* When doctor hangs up via Jitsi's own controls — trigger proper end */
-    window._teleJitsiAPI.addEventListener('videoConferenceLeft', function(){
-      _dEndTeleCall(session.appointmentId);
-    });
-    window._teleJitsiAPI.addEventListener('readyToClose', function(){
-      _dEndTeleCall(session.appointmentId);
-    });
-
-  }).catch(function(err){
-    var container = document.getElementById('tele-jitsi-container');
-    if(container) container.innerHTML =
-      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:14px;flex-direction:column;gap:12px">'+
-        '<div>⚠️ Could not load video: '+(err.message||'unknown error')+'</div>'+
-        '<button onclick="_dJoinTeleSession(\''+session.appointmentId+'\')" style="padding:8px 20px;border-radius:8px;border:none;background:#1D9E75;color:#fff;font-size:13px;cursor:pointer">Retry</button>'+
-      '</div>';
-  });
+    /* Jitsi iframe */
+    '<iframe id="tele-jitsi-frame" src="'+session.iframeUrl+'" '+
+      'allow="camera; microphone; fullscreen; speaker; display-capture; autoplay; clipboard-read; clipboard-write" '+
+      'allowfullscreen></iframe>';
 }
 
-/* ── End call: dispose Jitsi, close overlay, mark appointment completed ── */
+/* ── End call: close overlay, mark appointment completed ── */
 window._dEndTeleCall = async function(appointmentId){
-  /* Prevent double-fire */
-  if(window._teleEndInProgress) return;
-  window._teleEndInProgress = true;
-
-  /* Hang up and dispose the Jitsi API instance */
-  if(window._teleJitsiAPI){
-    try { window._teleJitsiAPI.executeCommand('hangup'); } catch(_){}
-    setTimeout(function(){
-      try { window._teleJitsiAPI.dispose(); } catch(_){}
-      window._teleJitsiAPI = null;
-    }, 800);
-  }
-
-  /* Close the overlay */
   var overlay = document.getElementById('tele-overlay');
   if(overlay){ overlay.style.display='none'; overlay.innerHTML=''; }
-
-  /* Mark appointment completed */
+  if(window.UI && window.UI.showToast) UI.showToast('Session ended','ok');
+  /* Optionally update status to completed */
   if(appointmentId){
     try{
       await API._fetchDirect('/appointments/'+appointmentId+'/status',{
         method:'PATCH',
-        body:JSON.stringify({ status:'completed', endedAt: new Date().toISOString() })
+        body:JSON.stringify({status:'completed'})
       });
-    }catch(e){ /* non-fatal */ }
+    }catch(e){/* non-fatal */}
   }
-
-  window._teleEndInProgress = false;
-  if(window.UI && window.UI.showToast) UI.showToast('✅ Session ended and marked completed','ok');
   _dLoadTeleSessions();
 };
 
@@ -6308,16 +6221,55 @@ window._dSaveRx = async function() {
     var rxId = null;
     try {
       var rxRes = await API._fetchDirect('/prescriptions',{method:'POST',body:JSON.stringify(rxData)});
-      if (!rxRes || rxRes.success === false) {
-        var errMsg = (rxRes && rxRes.message) || 'Server rejected the prescription — please check all fields and try again.';
-        _toast(errMsg,'err');
+
+      /* Detect API-level errors — covers 422/400/500 response shapes */
+      var rxFailed = !rxRes
+        || rxRes.success === false
+        || rxRes.status  === false
+        || rxRes.error
+        || (rxRes.statusCode && rxRes.statusCode >= 400)
+        || (rxRes.status   && typeof rxRes.status === 'number' && rxRes.status >= 400);
+
+      if (rxFailed) {
+        /* Build the most informative error message possible */
+        var errMsg;
+        /* 422 Validation errors — backend often returns {errors:[{field,message}]} or {errors:{field:msg}} */
+        if (rxRes && rxRes.errors) {
+          var errParts = [];
+          if (Array.isArray(rxRes.errors)) {
+            rxRes.errors.forEach(function(e){
+              if (e && e.message) errParts.push((e.field ? e.field+': ' : '') + e.message);
+              else if (typeof e === 'string') errParts.push(e);
+            });
+          } else if (typeof rxRes.errors === 'object') {
+            Object.keys(rxRes.errors).forEach(function(k){
+              errParts.push(k+': '+(rxRes.errors[k]||'invalid'));
+            });
+          }
+          errMsg = errParts.length ? errParts.join(' | ') : (rxRes.message||'Prescription rejected by server.');
+        } else {
+          errMsg = rxRes && (rxRes.message || rxRes.error || rxRes.msg)
+            ? String(rxRes.message || rxRes.error || rxRes.msg)
+            : 'Prescription was not submitted — the server returned an error. Check all fields and try again.';
+        }
+        console.error('[_dSaveRx] Server rejected:', rxRes);
+        _toast(errMsg, 'err');
         return;
       }
+
       rxId = (rxRes && rxRes.data && (rxRes.data._id||rxRes.data.id)) || (rxRes && rxRes._id) || null;
     } catch(apiErr){
-      var apiErrMsg = (apiErr && apiErr.message) || 'Could not save prescription — check your connection and try again.';
+      /* Network / JSON parse error */
+      var apiErrMsg;
+      if (apiErr && apiErr.message && apiErr.message.toLowerCase().includes('network')) {
+        apiErrMsg = 'Prescription not submitted — no connection to the server. Check your network and try again.';
+      } else if (apiErr && apiErr.message && apiErr.message.includes('422')) {
+        apiErrMsg = 'Prescription rejected (422) — required fields are missing or invalid. Check medicine name, dose, route and quantity.';
+      } else {
+        apiErrMsg = (apiErr && apiErr.message) || 'Could not save prescription — check your connection and try again.';
+      }
       console.error('[_dSaveRx] API save failed:', apiErr);
-      _toast(apiErrMsg,'err');
+      _toast(apiErrMsg, 'err');
       return;
     }
 
@@ -6326,7 +6278,11 @@ window._dSaveRx = async function() {
       id:               'ph-q-'+Date.now(),
       ticket:           'P-'+String(Math.floor(Math.random()*900)+100),
       patient:          patName,
-      patientId:        pat.nationalId||pat.mrn||patMongoId||'',
+      patientName:      patName,
+      patientId:        pat.nationalId||pat.idNumber||pat.id_number||pat.mrn||patMongoId||'',
+      idNumber:         pat.nationalId||pat.idNumber||pat.id_number||'',
+      passportNumber:   pat.passport||pat.passportNumber||'',
+      mrn:              pat.mrn||'',
       items:            medications.length,
       waitedMin:        0,
       state:            'waiting',
@@ -6336,6 +6292,7 @@ window._dSaveRx = async function() {
       lines:            lines,
       repeat:           rxData.repeat,
       repeatPrescription: isRepeat,
+      prescribedByObj:  { _id: u._id||u.id||'', firstName: u.firstName||'', lastName: u.lastName||'' },
       prescribedByName: docName,
       prescribedByReg:  docHpcsa,
       prescribedAt:     nowIso,
@@ -6449,7 +6406,8 @@ window._dSaveRx = async function() {
     _D.workflow.prescriptionRef = rxRef;
 
     /* ── Success ── */
-    _toast('Prescription released successfully.','ok');
+    var _successMedSummary = medications.slice(0,2).map(function(m){return m.name+(m.strength?' '+m.strength:'');}).join(', ')+(medications.length>2?' +'+( medications.length-2)+' more':'');
+    _toast('Prescription submitted — Ref: '+rxRef+' · '+_successMedSummary,'ok');
     window._rxMedCount = 1;
 
   } finally {

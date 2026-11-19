@@ -126,9 +126,8 @@ window.Router = (() => {
         { id: 'ph-queue',      icon: 'ti-users',            label: 'Pharmacy queue'          },
         { id: 'ph-history',    icon: 'ti-history',          label: 'Medication history'      },
         { id: 'ph-suppliers',  icon: 'ti-truck',            label: 'Suppliers & orders'      },
-        { id: 'ph-controlled', icon: 'ti-book-lock',        label: 'Controlled register'     },
         { id: 'ph-reminders',  icon: 'ti-bell',             label: 'Refill reminders'        },
-        { id: 'ph-analytics',  icon: 'ti-chart-bar',        label: 'Analytics'               },
+       
       ]
     },
 
