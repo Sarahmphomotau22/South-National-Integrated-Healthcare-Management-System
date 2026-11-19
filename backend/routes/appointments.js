@@ -191,12 +191,32 @@ router.patch('/:id/reschedule', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// PATCH /api/v1/appointments/:id/status — staff update status
-router.patch('/:id/status', authorize('doctor','nurse','admin'), async (req, res, next) => {
+// PATCH /api/v1/appointments/:id/status — staff OR patient update status (patient limited to in_progress/completed for telemedicine)
+router.patch('/:id/status', async (req, res, next) => {
   try {
-    const { status, notes, icd10Code } = req.body;
+    const { status, notes, icd10Code, startedAt, endedAt } = req.body;
+
+    // Patients can only update telemedicine session status (in_progress / completed)
+    if (req.user.role === 'patient') {
+      if (!['in_progress','completed'].includes(status))
+        return res.status(403).json({ success: false, message: 'Patients may only update session status.' });
+      const appt = await Appointment.findById(req.params.id);
+      if (!appt) return res.status(404).json({ success: false, message: 'Appointment not found.' });
+      const p = await Patient.findOne({ user: req.user._id });
+      if (!p || String(appt.patient) !== String(p._id))
+        return res.status(403).json({ success: false, message: 'Access denied.' });
+    } else if (!['doctor','nurse','admin'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, message: 'Not authorised.' });
+    }
+
+    const update = { status };
+    if (notes)     update.notes    = notes;
+    if (icd10Code) update.icd10Code = icd10Code;
+    if (startedAt) update.startedAt = new Date(startedAt);
+    if (endedAt)   update.endedAt   = new Date(endedAt);
+
     const appt = await Appointment.findByIdAndUpdate(
-      req.params.id, { status, notes, icd10Code }, { new: true, runValidators: true }
+      req.params.id, update, { new: true, runValidators: true }
     );
     if (!appt) return res.status(404).json({ success: false, message: 'Appointment not found.' });
     res.json({ success: true, data: appt });
@@ -252,12 +272,12 @@ router.get('/:id/join', async (req, res, next) => {
     if (!appt) return res.status(404).json({ success:false, message:'Appointment not found.' });
 
     const vType = (appt.visitType || '').toLowerCase().trim();
-    const allowedTypes = ['telemedicine','video','consultation','consult'];
+    const allowedTypes = ['telemedicine','video','consultation','consult','tele-medicine','tele medicine'];
     if (!allowedTypes.includes(vType))
-      return res.status(400).json({ success:false, message:`Appointment type '${appt.visitType}' does not support video.` });
+      return res.status(400).json({ success:false, message:`Appointment type '${appt.visitType}' does not support video. Expected telemedicine appointment.` });
 
-    if (['cancelled'].includes(appt.status))
-      return res.status(400).json({ success:false, message:'Cannot join a cancelled appointment.' });
+    if (['cancelled','completed','no_show'].includes(appt.status))
+      return res.status(400).json({ success:false, message:`Cannot join a ${appt.status} appointment.` });
 
     let isDoctor = false;
     if (req.user.role === 'patient') {

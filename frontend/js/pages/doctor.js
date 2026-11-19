@@ -4546,24 +4546,46 @@ window._dLoadTeleSessions = async function(){
   }
 };
 
-/* ── Join a telemedicine session — calls backend, embeds Jitsi iframe ── */
+/* ── Join a telemedicine session — calls backend, opens Jitsi via External API ── */
 window._dJoinTeleSession = async function(appointmentId){
-  /* Find the clicked button and show loading state */
+  /* Show loading state on the clicked button */
   var btns = document.querySelectorAll('#tele-session-list button');
-  btns.forEach(function(b){ if(b.onclick && b.getAttribute('onclick') && b.getAttribute('onclick').includes(appointmentId)){ b.disabled=true; b.textContent='Joining…'; } });
-
+  btns.forEach(function(b){
+    if(b.getAttribute('onclick') && b.getAttribute('onclick').includes(appointmentId)){
+      b.disabled = true; b.textContent = 'Joining…';
+    }
+  });
   try {
     var res  = await API._fetchDirect('/appointments/'+appointmentId+'/join', { method:'GET' });
     var data = res && res.data;
     if(!data) throw new Error('No session data returned.');
+    /* Mark appointment In Progress */
+    try {
+      await API._fetchDirect('/appointments/'+appointmentId+'/status',{
+        method:'PATCH',
+        body:JSON.stringify({ status:'in_progress', startedAt: new Date().toISOString() })
+      });
+    } catch(_){}
     _dOpenJitsiRoom(data);
   } catch(err){
     if(window.UI && window.UI.showToast) UI.showToast('Could not join: '+(err.message||'Unknown error'),'err');
-    _dLoadTeleSessions(); /* re-render to restore buttons */
+    _dLoadTeleSessions();
   }
 };
 
-/* ── Render the Jitsi video room as a full-screen overlay ── */
+/* ── Load Jitsi External API script (once) then resolve ── */
+function _dLoadJitsiScript(){
+  return new Promise(function(resolve, reject){
+    if(window.JitsiMeetExternalAPI){ resolve(); return; }
+    var s = document.createElement('script');
+    s.src = 'https://meet.jit.si/external_api.js';
+    s.onload  = resolve;
+    s.onerror = function(){ reject(new Error('Could not load Jitsi script')); };
+    document.head.appendChild(s);
+  });
+}
+
+/* ── Render the Jitsi video room using JitsiMeetExternalAPI (no iframe) ── */
 function _dOpenJitsiRoom(session){
   var overlay = document.getElementById('tele-overlay');
   if(!overlay) return;
@@ -4572,11 +4594,24 @@ function _dOpenJitsiRoom(session){
   var other = ((session.patient&&session.patient.firstName)||'') + ' ' + ((session.patient&&session.patient.lastName)||'');
   other = other.trim() || 'Patient';
 
+  /* Get doctor display name */
+  var u = (window._dGetUser && _dGetUser()) || (window.API && API.getStoredUser && API.getStoredUser()) || {};
+  var docName = u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'Doctor');
+
+  /* Derive roomName — backend may send roomName directly or we extract from roomUrl */
+  var roomName = session.roomName ||
+    (session.roomUrl ? session.roomUrl.replace(/^https?:\/\/meet\.jit\.si\//, '').split('?')[0] : null) ||
+    ('nihms-'+session.appointmentId);
+
   overlay.style.display = 'flex';
   overlay.innerHTML =
     '<style>'+
       '@keyframes nilive{0%,100%{opacity:1}50%{opacity:.4}}'+
-      '#tele-jitsi-frame{width:100%;border:none;flex:1;min-height:0}'+
+      '#tele-jitsi-container{flex:1;min-height:0;width:100%;background:#000;position:relative}'+
+      '#tele-jitsi-container iframe{width:100%!important;height:100%!important;border:none}'+
+      '#tele-notify-bar{position:absolute;top:12px;left:50%;transform:translateX(-50%);'+
+        'background:#1D9E75;color:#fff;font-size:12px;font-weight:600;padding:6px 16px;'+
+        'border-radius:20px;z-index:10;opacity:0;transition:opacity .4s;pointer-events:none}'+
     '</style>'+
     /* Top control bar */
     '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#1a1a1a;flex-shrink:0;gap:12px;flex-wrap:wrap">'+
@@ -4587,11 +4622,8 @@ function _dOpenJitsiRoom(session){
       '</div>'+
       '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
         (when?'<span style="color:#888;font-size:11px">🕐 '+when.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+(session.queueToken?' &nbsp;🎫 '+session.queueToken:'')+'</span>':'')+
-        '<button onclick="_dEndTeleCall(\''+session.appointmentId+'\')" style="padding:8px 16px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px">'+
+        '<button id="tele-end-btn" onclick="_dEndTeleCall(\''+session.appointmentId+'\')" style="padding:8px 16px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px">'+
           '📵 End session'+
-        '</button>'+
-        '<button onclick="window.open(\''+session.roomUrl+'\',\'_blank\')" style="padding:8px 16px;border-radius:8px;border:1px solid #444;background:#2a2a2a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">'+
-          '↗ New tab'+
         '</button>'+
       '</div>'+
     '</div>'+
@@ -4602,26 +4634,129 @@ function _dOpenJitsiRoom(session){
       (session.scheduledAt?'<span style="font-size:11px;color:#888;margin-left:8px">Scheduled: '+new Date(session.scheduledAt).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'})+'</span>':'')+
       '<span style="font-size:11px;color:#888;margin-left:auto">Video powered by Jitsi Meet · NIHMS does not record this session by default</span>'+
     '</div>'+
-    /* Jitsi iframe */
-    '<iframe id="tele-jitsi-frame" src="'+session.iframeUrl+'" '+
-      'allow="camera; microphone; fullscreen; speaker; display-capture; autoplay; clipboard-read; clipboard-write" '+
-      'allowfullscreen></iframe>';
+    /* Jitsi container — JitsiMeetExternalAPI mounts here */
+    '<div id="tele-jitsi-container" style="position:relative">'+
+      '<div id="tele-notify-bar"></div>'+
+      '<div id="tele-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;gap:12px">'+
+        '<div style="width:20px;height:20px;border:3px solid #1D9E75;border-top-color:transparent;border-radius:50%;animation:nilive .8s linear infinite"></div>'+
+        'Starting video session…'+
+      '</div>'+
+    '</div>';
+
+  /* Helper: show a notification bar inside the video area */
+  function _teleNotify(msg, color){
+    var bar = document.getElementById('tele-notify-bar');
+    if(!bar) return;
+    bar.textContent = msg;
+    bar.style.background = color || '#1D9E75';
+    bar.style.opacity = '1';
+    setTimeout(function(){ bar.style.opacity = '0'; }, 3500);
+  }
+
+  /* Load Jitsi External API script then initialise */
+  _dLoadJitsiScript().then(function(){
+    var container = document.getElementById('tele-jitsi-container');
+    var loadingEl = document.getElementById('tele-loading');
+    if(!container) return;
+
+    /* Dispose any previous API instance */
+    if(window._teleJitsiAPI){
+      try { window._teleJitsiAPI.dispose(); } catch(_){}
+      window._teleJitsiAPI = null;
+    }
+
+    window._teleJitsiAPI = new JitsiMeetExternalAPI('meet.jit.si', {
+      roomName:  roomName,
+      parentNode: container,
+      width:     '100%',
+      height:    '100%',
+      userInfo:  { displayName: docName },
+      configOverwrite: {
+        startWithAudioMuted:  false,
+        startWithVideoMuted:  false,
+        disableDeepLinking:   true,
+        prejoinPageEnabled:   false,
+        enableWelcomePage:    false,
+        disableInviteFunctions: true,
+        toolbarButtons: [
+          'microphone','camera','closedcaptions','desktop',
+          'fullscreen','fodeviceselection','hangup',
+          'chat','raisehand','videoquality','tileview'
+        ]
+      },
+      interfaceConfigOverwrite: {
+        SHOW_JITSI_WATERMARK:    false,
+        SHOW_WATERMARK_FOR_GUESTS: false,
+        TOOLBAR_ALWAYS_VISIBLE:  true,
+        DISABLE_JOIN_LEAVE_NOTIFICATIONS: false
+      }
+    });
+
+    /* Hide loading spinner once conference is ready */
+    window._teleJitsiAPI.addEventListener('videoConferenceJoined', function(){
+      if(loadingEl) loadingEl.style.display = 'none';
+      _teleNotify('✅ You are now in the session');
+    });
+
+    /* Participant joined notification */
+    window._teleJitsiAPI.addEventListener('participantJoined', function(e){
+      _teleNotify('👤 '+(e.displayName||'Patient')+' has joined the session');
+    });
+
+    /* Participant left notification */
+    window._teleJitsiAPI.addEventListener('participantLeft', function(e){
+      _teleNotify('👋 '+(e.displayName||'Participant')+' has left the session', '#f59e0b');
+    });
+
+    /* When doctor hangs up via Jitsi's own controls — trigger proper end */
+    window._teleJitsiAPI.addEventListener('videoConferenceLeft', function(){
+      _dEndTeleCall(session.appointmentId);
+    });
+    window._teleJitsiAPI.addEventListener('readyToClose', function(){
+      _dEndTeleCall(session.appointmentId);
+    });
+
+  }).catch(function(err){
+    var container = document.getElementById('tele-jitsi-container');
+    if(container) container.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:14px;flex-direction:column;gap:12px">'+
+        '<div>⚠️ Could not load video: '+(err.message||'unknown error')+'</div>'+
+        '<button onclick="_dJoinTeleSession(\''+session.appointmentId+'\')" style="padding:8px 20px;border-radius:8px;border:none;background:#1D9E75;color:#fff;font-size:13px;cursor:pointer">Retry</button>'+
+      '</div>';
+  });
 }
 
-/* ── End call: close overlay, mark appointment completed ── */
+/* ── End call: dispose Jitsi, close overlay, mark appointment completed ── */
 window._dEndTeleCall = async function(appointmentId){
+  /* Prevent double-fire */
+  if(window._teleEndInProgress) return;
+  window._teleEndInProgress = true;
+
+  /* Hang up and dispose the Jitsi API instance */
+  if(window._teleJitsiAPI){
+    try { window._teleJitsiAPI.executeCommand('hangup'); } catch(_){}
+    setTimeout(function(){
+      try { window._teleJitsiAPI.dispose(); } catch(_){}
+      window._teleJitsiAPI = null;
+    }, 800);
+  }
+
+  /* Close the overlay */
   var overlay = document.getElementById('tele-overlay');
   if(overlay){ overlay.style.display='none'; overlay.innerHTML=''; }
-  if(window.UI && window.UI.showToast) UI.showToast('Session ended','ok');
-  /* Optionally update status to completed */
+
+  /* Mark appointment completed */
   if(appointmentId){
     try{
       await API._fetchDirect('/appointments/'+appointmentId+'/status',{
         method:'PATCH',
-        body:JSON.stringify({status:'completed'})
+        body:JSON.stringify({ status:'completed', endedAt: new Date().toISOString() })
       });
-    }catch(e){/* non-fatal */}
+    }catch(e){ /* non-fatal */ }
   }
+
+  window._teleEndInProgress = false;
+  if(window.UI && window.UI.showToast) UI.showToast('✅ Session ended and marked completed','ok');
   _dLoadTeleSessions();
 };
 

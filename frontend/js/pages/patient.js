@@ -420,9 +420,14 @@ async function _mhLoad() {
               '<div style="font-size:12px;color:var(--text-muted)">'+new Date(nextAppt.scheduledAt).toLocaleDateString('en-ZA',{weekday:'short',day:'numeric',month:'short',year:'numeric'})+' at '+new Date(nextAppt.scheduledAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'</div>' +
               '<div style="font-size:12px;color:var(--text-muted)">'+(nextAppt.facility&&nextAppt.facility.name||'')+'</div>' +
               '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">' +
-                (nextAppt.visitType==='telemedicine'
-                  ? '<button class="btn btn-sm btn-green" onclick="Router.setPage(\'checkin\')"><i class="ti ti-video"></i>Check in (Telemedicine)</button>'
-                  : '<button class="btn btn-sm" onclick="Router.setPage(\'checkin\')"><i class="ti ti-building-hospital"></i>Visit reception</button>'
+                (nextAppt.visitType==='telemedicine' && new Date(nextAppt.scheduledAt).toDateString()===now.toDateString()
+                  ? (nextAppt.status==='in_progress'
+                      ? '<button class="btn btn-sm btn-green" onclick="_pJoinTeleRoom(\''+nextAppt._id+'\')"><i class="ti ti-video"></i>🔴 Join live session</button>'
+                      : '<button class="btn btn-sm btn-green" onclick="_pJoinTeleRoom(\''+nextAppt._id+'\')"><i class="ti ti-video"></i>Join video session</button>'
+                    )
+                  : nextAppt.visitType==='telemedicine'
+                    ? '<button class="btn btn-sm btn-green" onclick="Router.setPage(\'appointments\')"><i class="ti ti-video"></i>Telemedicine appointment</button>'
+                    : '<button class="btn btn-sm" onclick="Router.setPage(\'checkin\')"><i class="ti ti-building-hospital"></i>Visit reception</button>'
                 ) +
                 '<button class="btn btn-sm" onclick="Router.setPage(\'appointments\')"><i class="ti ti-calendar"></i>All</button>' +
               '</div>' +
@@ -794,28 +799,34 @@ Pages['appointments'] = () => {
       var items = (res.data||[]).sort(function(a,b){ return new Date(a.scheduledAt)-new Date(b.scheduledAt); });
       var now   = new Date();
       wrap.innerHTML = items.length ? items.map(function(a) {
-        var badge = {confirmed:'badge-green',pending:'badge-amber',completed:'badge-green',cancelled:'badge-gray',no_show:'badge-red'}[a.status]||'badge-gray';
+        var badge = {confirmed:'badge-green',pending:'badge-amber',in_progress:'badge-green',completed:'badge-green',cancelled:'badge-gray',no_show:'badge-red'}[a.status]||'badge-gray';
         var isFuture = new Date(a.scheduledAt) > now;
         var canAct   = ['pending','confirmed'].includes(a.status) && isFuture;
         var isToday  = new Date(a.scheduledAt).toDateString() === now.toDateString();
+        var isTele   = a.visitType === 'telemedicine';
+        /* Show Join Video button when: confirmed today (check-in) OR in_progress today (session already started by doctor) */
+        var showTeleJoin = isTele && isToday && (a.status === 'confirmed' || a.status === 'in_progress');
+        var isLive       = isTele && isToday && a.status === 'in_progress';
         return '<div style="padding:14px 0;border-bottom:1px solid var(--border)'+(isToday?';background:var(--green-light);margin:0 -4px;padding-left:4px;padding-right:4px;border-radius:8px':'')+'";>' +
           '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">' +
             '<div style="flex:1;min-width:0">' +
-              (isToday?'<div style="font-size:11px;font-weight:700;color:var(--green-dark);margin-bottom:4px">📅 TODAY</div>':'') +
-              '<div style="font-weight:600;font-size:13px;text-transform:capitalize;margin-bottom:2px"><i class="ti ti-'+(a.visitType==='telemedicine'?'video':'stethoscope')+'" style="font-size:13px;margin-right:5px"></i>'+(a.visitType||'').replace('_',' ')+'</div>' +
+              (isToday?'<div style="font-size:11px;font-weight:700;color:var(--green-dark);margin-bottom:4px">📅 TODAY'+(isLive?' &nbsp;🔴 LIVE':'')+' </div>':'') +
+              '<div style="font-weight:600;font-size:13px;text-transform:capitalize;margin-bottom:2px"><i class="ti ti-'+(isTele?'video':'stethoscope')+'" style="font-size:13px;margin-right:5px"></i>'+(a.visitType||'').replace('_',' ')+'</div>' +
               '<div style="font-size:12px;color:var(--text-muted)">'+new Date(a.scheduledAt).toLocaleDateString('en-ZA',{weekday:'short',day:'numeric',month:'short',year:'numeric'})+' at '+new Date(a.scheduledAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'</div>' +
               '<div style="font-size:12px;color:var(--text-muted)">'+(a.facility&&a.facility.name||'')+'</div>' +
               (a.doctor?'<div style="font-size:12px;color:var(--text-muted)">Dr. '+(a.doctor.firstName||'')+' '+(a.doctor.lastName||'')+'</div>':'') +
             '</div>' +
             '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap">' +
-              '<span class="badge '+badge+'">'+a.status+'</span>' +
+              '<span class="badge '+badge+'">'+(a.status==='in_progress'?'In Progress':a.status)+'</span>' +
               (canAct?'<button class="btn btn-xs" onclick="_showReschedule(\''+a._id+'\',\''+a.visitType+'\',\''+new Date(a.scheduledAt).toISOString().slice(0,16)+'\')"><i class="ti ti-calendar-event"></i>Reschedule</button>':'') +
-              (a.status==='confirmed'&&isToday
-                ? (a.visitType==='telemedicine'
-                    ? '<button class="btn btn-xs btn-green" onclick="_ciDirectCheckin(\''+a._id+'\')"><i class="ti ti-video"></i>Check in (Tele)</button>'
-                    : '<button class="btn btn-xs" style="color:var(--text-muted);cursor:default;pointer-events:none" title="Visit reception to check in"><i class="ti ti-building-hospital"></i>Visit reception</button>'
-                  )
-                : '') +
+              (showTeleJoin
+                ? '<button class="btn btn-xs btn-green" onclick="_pJoinTeleRoom(\''+a._id+'\')" style="'+(isLive?'animation:pulse 2s infinite;box-shadow:0 0 0 0 #1D9E75':'')+'">' +
+                    '<i class="ti ti-video"></i>'+(isLive?'Join live session':'Check in &amp; join video')+
+                  '</button>'
+                : (!isTele&&isToday&&a.status==='confirmed'
+                    ? '<button class="btn btn-xs" style="color:var(--text-muted);cursor:default;pointer-events:none"><i class="ti ti-building-hospital"></i>Visit reception</button>'
+                    : '')
+              ) +
               (canAct?'<button class="btn btn-xs" style="color:var(--red);border-color:var(--red)" onclick="_showCancelAppt(\''+a._id+'\')"><i class="ti ti-x"></i>Cancel</button>':'') +
             '</div>' +
           '</div>' +
@@ -980,12 +991,197 @@ window._ciDirectCheckin = async function(apptId) {
       var stored = JSON.parse(localStorage.getItem('_NIHMS_DOCTOR_QUEUE') || '[]');
       if (!stored.find(function(r){ return r.id === teleReq.id; })) { stored.push(teleReq); localStorage.setItem('_NIHMS_DOCTOR_QUEUE', JSON.stringify(stored)); }
     } catch(_) {}
+    /* ── Open video session for patient immediately after check-in ── */
+    _pJoinTeleRoom(apptId);
     Router.setPage('checkin');
   } catch(e) {
     UI.showToast(e.message||'Check-in failed','err');
     if (btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-video"></i>Check in'; }
   }
 };
+
+/* ══════════════════════════════════════════════════════════════════
+   PATIENT TELEMEDICINE — join a video session via JitsiMeetExternalAPI
+   (replaces iframe approach that blocks WebRTC)
+══════════════════════════════════════════════════════════════════ */
+
+/* Load Jitsi External API script once, resolve when ready */
+function _pLoadJitsiScript(){
+  return new Promise(function(resolve, reject){
+    if(window.JitsiMeetExternalAPI){ resolve(); return; }
+    var s = document.createElement('script');
+    s.src = 'https://meet.jit.si/external_api.js';
+    s.onload  = resolve;
+    s.onerror = function(){ reject(new Error('Could not load Jitsi video library')); };
+    document.head.appendChild(s);
+  });
+}
+
+/* Join a telemedicine room as patient — called after check-in */
+window._pJoinTeleRoom = async function(appointmentId){
+  try {
+    /* Fetch join data from backend (same endpoint as doctor) */
+    var res  = await API._fetchDirect('/appointments/'+appointmentId+'/join', { method:'GET' });
+    var data = res && res.data;
+    if(!data) throw new Error('Could not get session details.');
+    _pOpenTeleRoom(data);
+  } catch(err){
+    UI.showToast(err.message||'Could not join video session','err');
+  }
+};
+
+function _pOpenTeleRoom(session){
+  /* Remove any existing overlay */
+  var old = document.getElementById('pat-tele-overlay');
+  if(old) old.remove();
+
+  var when  = session.scheduledAt ? new Date(session.scheduledAt) : null;
+  var docName = session.doctor
+    ? ('Dr '+((session.doctor.firstName||'')+' '+(session.doctor.lastName||'')).trim()).trim()
+    : 'Your Doctor';
+
+  /* Derive roomName */
+  var roomName = session.roomName ||
+    (session.roomUrl ? session.roomUrl.replace(/^https?:\/\/meet\.jit\.si\//, '').split('?')[0] : null) ||
+    ('nihms-'+session.appointmentId);
+
+  /* Get patient display name */
+  var u = API.getStoredUser ? API.getStoredUser() : {};
+  var patName = ((u.firstName||'')+' '+(u.lastName||'')).trim() || (u.name||'Patient');
+
+  /* Build overlay */
+  var ov = document.createElement('div');
+  ov.id = 'pat-tele-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:#111;z-index:9999;display:flex;flex-direction:column';
+  ov.innerHTML =
+    '<style>'+
+      '@keyframes patLive{0%,100%{opacity:1}50%{opacity:.4}}'+
+      '#pat-jitsi-wrap{flex:1;min-height:0;width:100%;position:relative}'+
+      '#pat-jitsi-wrap iframe{width:100%!important;height:100%!important;border:none}'+
+      '#pat-notify-bar{position:absolute;top:12px;left:50%;transform:translateX(-50%);'+
+        'background:#1D9E75;color:#fff;font-size:12px;font-weight:600;padding:6px 16px;'+
+        'border-radius:20px;z-index:10;opacity:0;transition:opacity .4s;pointer-events:none}'+
+    '</style>'+
+    /* Header bar */
+    '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#1a1a1a;flex-shrink:0;gap:12px;flex-wrap:wrap">'+
+      '<div style="display:flex;align-items:center;gap:12px">'+
+        '<div style="font-size:16px;font-weight:800;color:#fff;letter-spacing:-.3px">NI<span style="color:#1D9E75">HMS</span></div>'+
+        '<div style="width:8px;height:8px;border-radius:50%;background:#1D9E75;animation:patLive 2s infinite"></div>'+
+        '<span style="color:#aaa;font-size:13px">Video session with <strong style="color:#fff">'+docName+'</strong></span>'+
+      '</div>'+
+      '<div style="display:flex;align-items:center;gap:10px">'+
+        (when?'<span style="color:#888;font-size:11px">🕐 '+when.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'</span>':'')+
+        '<button onclick="_pEndTeleRoom()" style="padding:8px 16px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px">'+
+          '📵 Leave session'+
+        '</button>'+
+      '</div>'+
+    '</div>'+
+    /* Info strip */
+    '<div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:#141414;flex-shrink:0;border-bottom:1px solid #333">'+
+      '<span style="font-size:11px;color:#888">Doctor:</span>'+
+      '<span style="font-size:13px;font-weight:600;color:#fff">'+docName+'</span>'+
+      '<span style="font-size:11px;color:#888;margin-left:auto">Video powered by Jitsi Meet · NIHMS does not record this session by default</span>'+
+    '</div>'+
+    /* Jitsi mount point */
+    '<div id="pat-jitsi-wrap" style="position:relative">'+
+      '<div id="pat-notify-bar"></div>'+
+      '<div id="pat-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;gap:12px">'+
+        '<div style="width:20px;height:20px;border:3px solid #1D9E75;border-top-color:transparent;border-radius:50%;animation:patLive .8s linear infinite"></div>'+
+        'Connecting to your consultation…'+
+      '</div>'+
+    '</div>';
+
+  document.body.appendChild(ov);
+
+  function _patNotify(msg, color){
+    var bar = document.getElementById('pat-notify-bar');
+    if(!bar) return;
+    bar.textContent = msg;
+    bar.style.background = color || '#1D9E75';
+    bar.style.opacity = '1';
+    setTimeout(function(){ bar.style.opacity='0'; }, 3500);
+  }
+
+  _pLoadJitsiScript().then(function(){
+    var wrap    = document.getElementById('pat-jitsi-wrap');
+    var loading = document.getElementById('pat-loading');
+    if(!wrap) return;
+
+    if(window._patJitsiAPI){
+      try { window._patJitsiAPI.dispose(); } catch(_){}
+      window._patJitsiAPI = null;
+    }
+
+    window._patJitsiAPI = new JitsiMeetExternalAPI('meet.jit.si', {
+      roomName:  roomName,
+      parentNode: wrap,
+      width:     '100%',
+      height:    '100%',
+      userInfo:  { displayName: patName },
+      configOverwrite: {
+        startWithAudioMuted:  false,
+        startWithVideoMuted:  false,
+        disableDeepLinking:   true,
+        prejoinPageEnabled:   false,
+        enableWelcomePage:    false,
+        disableInviteFunctions: true,
+        toolbarButtons: [
+          'microphone','camera','closedcaptions','desktop',
+          'fullscreen','fodeviceselection','hangup',
+          'chat','raisehand','videoquality','tileview'
+        ]
+      },
+      interfaceConfigOverwrite: {
+        SHOW_JITSI_WATERMARK:    false,
+        SHOW_WATERMARK_FOR_GUESTS: false,
+        TOOLBAR_ALWAYS_VISIBLE:  true
+      }
+    });
+
+    window._patJitsiAPI.addEventListener('videoConferenceJoined', function(){
+      if(loading) loading.style.display='none';
+      _patNotify('✅ You are now connected to your consultation');
+    });
+
+    window._patJitsiAPI.addEventListener('participantJoined', function(e){
+      _patNotify('👨‍⚕️ '+(e.displayName||'Doctor')+' has joined');
+    });
+
+    window._patJitsiAPI.addEventListener('participantLeft', function(e){
+      _patNotify('👋 '+(e.displayName||'Doctor')+' has left the session', '#f59e0b');
+    });
+
+    window._patJitsiAPI.addEventListener('videoConferenceLeft', function(){
+      _pEndTeleRoom();
+    });
+    window._patJitsiAPI.addEventListener('readyToClose', function(){
+      _pEndTeleRoom();
+    });
+
+  }).catch(function(err){
+    var wrap = document.getElementById('pat-jitsi-wrap');
+    if(wrap) wrap.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:14px;flex-direction:column;gap:12px">'+
+        '<div>⚠️ '+err.message+'</div>'+
+        '<button onclick="_pJoinTeleRoom(\''+session.appointmentId+'\')" style="padding:8px 20px;border-radius:8px;border:none;background:#1D9E75;color:#fff;font-size:13px;cursor:pointer">Retry</button>'+
+      '</div>';
+  });
+}
+
+window._pEndTeleRoom = function(){
+  if(window._patJitsiAPI){
+    try { window._patJitsiAPI.executeCommand('hangup'); } catch(_){}
+    setTimeout(function(){
+      try { window._patJitsiAPI.dispose(); } catch(_){}
+      window._patJitsiAPI = null;
+    }, 800);
+  }
+  var ov = document.getElementById('pat-tele-overlay');
+  if(ov) ov.remove();
+  UI.showToast('You have left the consultation','ok');
+};
+
+/* ══════════════════════════════════════════════════════════════════ */
 
 var _rsVisitType = 'consultation';
 var _RSCAL = { year: new Date().getFullYear(), month: new Date().getMonth(), selected: null };
