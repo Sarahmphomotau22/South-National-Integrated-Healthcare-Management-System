@@ -1336,6 +1336,22 @@ function _dConsult(){
   var docHpcsa    = u.hpcsaNumber||u.hpcsa||u.registrationNumber||u.regNo||u.licenseNumber||'';
   var docFacility = (typeof u.facility==='string'?u.facility:'')||(u.facility&&u.facility.name)||(u.primaryFacility&&u.primaryFacility.name)||u.facilityName||'Johannesburg CHC';
 
+  /* ── Enrich patient from API if nationalId or dateOfBirth is missing ── */
+  if (p && (!p.nationalId && !p.idNumber && !p.id_number) && (p._id||p.id) && !p._enriching) {
+    var _enrichId = p._id || p.id;
+    p._enriching = true;
+    API.patients.get(_enrichId).then(function(res){
+      var full = (res && res.data) ? res.data : res;
+      if (!full) return;
+      /* Merge the full record into the patient objects in state */
+      Object.assign(p, full);
+      if (_D.consultPat && (_D.consultPat._id||_D.consultPat.id) === _enrichId) Object.assign(_D.consultPat, full);
+      if (_D.selectedPat && (_D.selectedPat._id||_D.selectedPat.id) === _enrichId) Object.assign(_D.selectedPat, full);
+      delete p._enriching;
+      _dRender();
+    }).catch(function(){ delete p._enriching; });
+  }
+
   /* Resolve patient */
   var patFirst  = p ? (p.firstName||p.first_name||p.name||'') : '';
   var patLast   = p ? (p.lastName||p.last_name||p.surname||'') : '';
@@ -1714,8 +1730,11 @@ function _dPrescriptions(){
     : '—';
   var patAllergies = pat ? (pat.allergies||[]) : [];
 
-  /* Prescriber */
-  var docName     = u.firstName ? ('Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim()) : (u.name||'—');
+  /* Prescriber — prefer the name saved from the consultation form, then login user */
+  var docName     = (_D.workflow && _D.workflow.consultation && _D.workflow.consultation.clinician) ||
+    (u.firstName
+      ? ('Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim())
+      : (u.name||u.displayName||u.fullName||u.username||'—'));
   var docFacility = (typeof u.facility==='string'?u.facility:'') || (u.facility&&u.facility.name) || (u.primaryFacility&&u.primaryFacility.name) || (u.facilityName) || 'Current healthcare facility';
   var docRegNo    = u.hpcsaNumber || u.hpcsa || u.registrationNumber || u.regNo || u.licenseNumber || '';
 
@@ -3525,7 +3544,8 @@ function _dMedicalNotes(){
   var todayIso  = new Date().toISOString().slice(0,10);
 
   var u         = _dGetUser();
-  var docName   = u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'—');
+  var docName   = (_D.workflow && _D.workflow.consultation && _D.workflow.consultation.clinician) ||
+    (u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'—'));
   var docHpcsa  = u.hpcsaNumber||u.hpcsa||u.registrationNumber||'';
   var docFacility = (typeof u.facility==='string'?u.facility:'')
     ||(u.facility&&u.facility.name)||u.facilityName||'Current healthcare facility';
@@ -3629,7 +3649,8 @@ function _dMedicalNotes(){
   };
 
   /* ── Save handler ── */
-  window._dSaveNote = async function(){
+  /* silent=true: called internally (e.g. from _dEndConsult) — skip button UI changes and success toast */
+  window._dSaveNote = async function(silent){
     var gv  = function(id){ var e=document.getElementById(id); return e?e.value.trim():''; };
     var u    = _dGetUser();
     var pat6 = _D.consultPat||_D.pat360Data||_D.selectedPat||{};
@@ -3672,9 +3693,12 @@ function _dMedicalNotes(){
       return false;
     }
 
-    /* Prevent duplicate submissions */
-    var _snBtn = document.getElementById('btn-save-diag');
-    if (_snBtn && _snBtn.getAttribute('data-saving')) return false;
+    /* Prevent duplicate submissions (skip UI mutation when called silently from End Consultation) */
+    var _snBtn = silent ? null : document.getElementById('btn-save-diag');
+    if (!silent) {
+      var _snBtnRaw = document.getElementById('btn-save-diag');
+      if (_snBtnRaw && _snBtnRaw.getAttribute('data-saving')) return false;
+    }
     if (_snBtn) { _snBtn.setAttribute('data-saving','1'); _snBtn.disabled=true; _snBtn.style.opacity='0.7'; _snBtn.textContent='Saving…'; }
 
     var diagName = gv('mn-primary-diag');
@@ -3718,7 +3742,10 @@ function _dMedicalNotes(){
         if (_D.workflow) _D.workflow.diagnosisId = _mnSaved._id || _mnSaved.id;
       }
       _snReset();
-      try{ if(window.UI&&window.UI.showToast) window.UI.showToast('Diagnosis saved successfully','ok'); }catch(_e){}
+      /* Only show the "saved" toast when triggered directly — not when called from End Consultation */
+      if (!silent) {
+        try{ if(window.UI&&window.UI.showToast) window.UI.showToast('Diagnosis saved successfully','ok'); }catch(_e){}
+      }
       return true;
     } catch(err) {
       _snReset();
@@ -3733,7 +3760,18 @@ function _dMedicalNotes(){
     /* Prevent duplicate submissions */
     var btn = document.getElementById('btn-end-consult');
     if (btn && btn.getAttribute('data-submitted')) return;
-    if (btn) btn.setAttribute('data-submitted','1');
+    if (btn) {
+      btn.setAttribute('data-submitted','1');
+      btn.disabled = true;
+      btn.style.opacity = '0.75';
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Ending consultation…';
+    }
+    function _ecReset(){
+      var b = document.getElementById('btn-end-consult');
+      if(!b) return;
+      b.removeAttribute('data-submitted'); b.disabled=false; b.style.opacity='';
+      b.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="20 6 9 17 4 12"/></svg> End Consultation';
+    }
 
     var gv = function(id){ var e=document.getElementById(id); return e?e.value.trim():''; };
     function _ecToast(msg,type){ try{ if(window.UI&&window.UI.showToast)window.UI.showToast(msg,type); else console.warn('[EndConsult]',msg); }catch(_){} }
@@ -3742,7 +3780,7 @@ function _dMedicalNotes(){
     var pat8 = _D.consultPat||_D.selectedPat||_D.pat360Data||{};
     if(!pat8._id && !pat8.id){
       _ecToast('No patient selected — cannot end consultation','err');
-      if(btn)btn.removeAttribute('data-submitted'); return;
+      _ecReset(); return;
     }
 
     /* Field-level validation with red highlights */
@@ -3780,12 +3818,12 @@ function _dMedicalNotes(){
     if (_ecMissing.length) {
       if (_ecEls.length) _ecEls[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
       _ecToast('Please complete: '+_ecMissing.join(' | '),'err');
-      if(btn)btn.removeAttribute('data-submitted'); return;
+      _ecReset(); return;
     }
 
-    /* Save diagnosis — abort end-consult if save fails */
-    var noteSaved = await window._dSaveNote();
-    if (!noteSaved) { if(btn)btn.removeAttribute('data-submitted'); return; }
+    /* Save diagnosis silently — abort end-consult if save fails */
+    var noteSaved = await window._dSaveNote(true);
+    if (!noteSaved) { _ecReset(); return; }
 
     var nowIso = new Date().toISOString();
     var clinician8 = _dGetUser();
@@ -3795,7 +3833,7 @@ function _dMedicalNotes(){
     var consultId  = _D.workflow&&_D.workflow.consultationId;
     if (!consultId) {
       _ecToast('No active consultation found — cannot end consultation. Please refresh and try again.','err');
-      if(btn)btn.removeAttribute('data-submitted'); return;
+      _ecReset(); return;
     }
 
     /* Generate unique survey token */
@@ -3826,12 +3864,12 @@ function _dMedicalNotes(){
       var _ecRes = await API._fetchDirect('/consultations/'+consultId+'/complete',{method:'POST',body:JSON.stringify(completionPayload)});
       if (_ecRes && (_ecRes.error || _ecRes.status === false || _ecRes.statusCode >= 400)) {
         _ecToast((_ecRes.message||_ecRes.error||'Could not complete consultation — please try again.'),'err');
-        if(btn)btn.removeAttribute('data-submitted'); return;
+        _ecReset(); return;
       }
       _ecApiOk = true;
     } catch(ecErr) {
       _ecToast((ecErr&&ecErr.message)||'Could not complete consultation — please try again.','err');
-      if(btn)btn.removeAttribute('data-submitted'); return;
+      _ecReset(); return;
     }
 
     /* Store survey token locally */
@@ -3888,11 +3926,29 @@ function _dMedicalNotes(){
     /* Update task list */
     if(window._dTaskDone) _dTaskDone('T5');
 
-    /* Mark patient as done in doctor queue */
+    /* Mark patient as done in doctor queue and remove from active list */
     if (_D.consultPatId) {
       var qp8 = (window._DOCTOR_QUEUE||[]).find(function(x){return x.id===_D.consultPatId;});
       if (qp8) qp8.status='completed';
+      /* Remove from active consultations array so it no longer shows as ongoing */
+      if (Array.isArray(window._DOCTOR_QUEUE)) {
+        window._DOCTOR_QUEUE = window._DOCTOR_QUEUE.filter(function(x){
+          return x.id !== _D.consultPatId || x.status !== 'completed';
+        });
+      }
     }
+
+    /* ── Bell notification — only after API confirmed success ── */
+    try {
+      if (!window._NIHMS_NOTIFICATIONS) window._NIHMS_NOTIFICATIONS = [];
+      window._NIHMS_NOTIFICATIONS.unshift({
+        id: 'ec-'+Date.now(), type: 'consultation',
+        title: 'Consultation Completed',
+        message: mnPatName+' has been discharged. Consultation status updated to Completed.',
+        time: new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}),
+        read: false,
+      });
+    } catch(_){}
 
     /* Show confirmation */
     var confirmHtml =
@@ -6016,8 +6072,11 @@ window._dSaveConsult = async function() {
     _btnReset(); return;          /* STOP — do not navigate away on failure */
   }
 
-  /* ── Store consultation ID in workflow so diagnosis can link to it ── */
+  /* ── Store consultation ID and clinician name in workflow ── */
   if (savedId && _D.workflow) _D.workflow.consultationId = savedId;
+  if (_D.workflow) _D.workflow.consultation.clinician = clinician;
+  /* Persist clinician name so pharmacy.js can resolve it cross-tab */
+  try { if(clinician) localStorage.setItem('NIHMS_PRESCRIBING_DOCTOR', clinician); } catch(_){}
 
   /* ── Update Patient 360 in-memory cache ── */
   var _consultSummary = {
@@ -6157,8 +6216,14 @@ window._dSaveRx = async function() {
     var u        = _dGetUser();
     var pat      = _D.consultPat || _D.selectedPat || {};
     var patName  = ((pat.firstName||pat.name||'')+' '+(pat.lastName||'')).trim() || 'Unknown patient';
-    var docName  = u.firstName ? ('Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim()) : 'Doctor';
+    /* Prefer clinician name saved from consultation form, then logged-in user */
+    var docName  = (_D.workflow && _D.workflow.consultation && _D.workflow.consultation.clinician) ||
+      (u.firstName
+        ? ('Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim())
+        : (u.name||u.displayName||u.fullName||u.username||''));
     var docHpcsa = u.hpcsaNumber||u.hpcsa||u.registrationNumber||u.regNo||u.licenseNumber||'';
+    /* Write resolved clinician name to localStorage so pharmacy.js can always find it */
+    try { if(docName) localStorage.setItem('NIHMS_PRESCRIBING_DOCTOR', docName); } catch(_){}
     var rxRef    = 'RX-'+(Date.now()%900000+100000)+'-ZA';
     var nowIso   = new Date().toISOString();
     var patMongoId = pat._id||pat.id||'';
@@ -6172,9 +6237,9 @@ window._dSaveRx = async function() {
       return {
         medicationName: m.name+(m.strength?' '+m.strength:''),
         dosage:         m.dose||'',
-        durationDays:   m.duration||'',
+        durationDays:   parseInt(m.duration,10)||1,
         frequency:      m.frequency||'',
-        quantity:       m.quantity,
+        quantity:       parseInt(m.quantity,10)||1,
         unit:           m.unit||'',
         route:          m.route||'',
         instructions:   m.specialInstructions||'',
@@ -6210,6 +6275,8 @@ window._dSaveRx = async function() {
       prescribedByReg:     docHpcsa,
       facility:            (typeof u.facility==='string'?u.facility:'')
                             ||(u.facility&&u.facility.name)||u.facilityName||u.primaryFacility||'',
+      issued:              nowIso.slice(0,10),
+      doctor:              docName,
       prescribedAt:        nowIso,
       submittedAt:         nowIso,
       createdAt:           nowIso,
@@ -6295,6 +6362,8 @@ window._dSaveRx = async function() {
       prescribedByObj:  { _id: u._id||u.id||'', firstName: u.firstName||'', lastName: u.lastName||'' },
       prescribedByName: docName,
       prescribedByReg:  docHpcsa,
+      doctor:           docName,
+      issued:           nowIso.slice(0,10),
       prescribedAt:     nowIso,
       status:           'Submitted',
     };
@@ -6405,9 +6474,51 @@ window._dSaveRx = async function() {
     _D.workflow.prescriptionId  = rxId||rxRef;
     _D.workflow.prescriptionRef = rxRef;
 
-    /* ── Success ── */
+    /* ── Success — bell notification ── */
     var _successMedSummary = medications.slice(0,2).map(function(m){return m.name+(m.strength?' '+m.strength:'');}).join(', ')+(medications.length>2?' +'+( medications.length-2)+' more':'');
-    _toast('Prescription submitted — Ref: '+rxRef+' · '+_successMedSummary,'ok');
+    try {
+      if (!window._NIHMS_NOTIFICATIONS) window._NIHMS_NOTIFICATIONS = [];
+      window._NIHMS_NOTIFICATIONS.unshift({
+        id: 'rx-'+Date.now(), type: 'prescription',
+        title: 'Prescription Submitted',
+        message: 'Rx '+rxRef+' for '+patName+' sent to pharmacy for validation and dispensing.',
+        time: new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}),
+        read: false,
+      });
+    } catch(_){}
+
+    /* ── Success confirmation box (centered) ── */
+    try {
+      var _rxBox = document.createElement('div');
+      _rxBox.id = '_rx-success-box';
+      _rxBox.setAttribute('style',
+        'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;width:320px;'+
+        'background:#fff;border:1.5px solid #bbf7d0;border-radius:12px;'+
+        'box-shadow:0 4px 24px rgba(0,0,0,0.18);font-family:inherit;overflow:hidden;'+
+        'animation:_rxSlideUp .25s ease');
+      _rxBox.innerHTML =
+        '<div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);padding:10px 14px;display:flex;align-items:center;gap:8px">'+
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'+
+          '<span style="color:#fff;font-size:13px;font-weight:700;flex:1">Prescription Submitted</span>'+
+          '<button onclick="(function(){var o=document.getElementById(\'_rx-success-box\');if(o)o.remove();})()" '+
+            'style="background:transparent;border:none;color:rgba(255,255,255,0.8);font-size:16px;cursor:pointer;line-height:1;padding:0">×</button>'+
+        '</div>'+
+        '<div style="padding:12px 14px;font-size:12px;color:#374151;line-height:1.6">'+
+          '<div style="margin-bottom:4px">Sent to pharmacy for validation and dispensing.</div>'+
+          '<div><strong>Ref:</strong> '+rxRef+'</div>'+
+          '<div><strong>Patient:</strong> '+patName+'</div>'+
+          '<div style="color:#64748b;margin-top:2px">'+_successMedSummary+'</div>'+
+        '</div>';
+      if (!document.getElementById('_d-rx-box-anim')) {
+        var _rxS=document.createElement('style'); _rxS.id='_d-rx-box-anim';
+        _rxS.textContent='@keyframes _rxSlideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}';
+        document.head.appendChild(_rxS);
+      }
+      document.body.appendChild(_rxBox);
+      /* Auto-dismiss after 6 seconds */
+      setTimeout(function(){ var o=document.getElementById('_rx-success-box'); if(o)o.remove(); }, 6000);
+    } catch(_){}
+
     window._rxMedCount = 1;
 
   } finally {
@@ -6462,7 +6573,7 @@ window._dSubmitRadiology = async function() {
 
 /* _dSubmitReferral defined in _dReferrals() above */
 
-window._dSaveNote = async function() {
+window._dSaveGenericNote = async function() {
   var data = {
     patient:    (document.getElementById('mn-patient')||{value:''}).value,
     type:       (document.getElementById('mn-type')||{value:'Progress Note'}).value,

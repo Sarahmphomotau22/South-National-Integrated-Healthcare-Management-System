@@ -185,10 +185,20 @@ var _PH = (function() {
         if(!window._phQueue) window._phQueue = [];
         var dupLive = window._phQueue.find(function(x){return x.id===e2.id;});
         if(!dupLive) window._phQueue.push(e2);
-        /* Auto-select the new prescription in the validation panel */
-        if(!dupPh && _PH.prescriptions.length) window._phSelRx = _PH.prescriptions[0];
+        /* Auto-select the newly arrived prescription in the validation panel (not the first in list) */
+        if(!dupPh) window._phSelRx = _PH.prescriptions.find(function(x){return x.code===e2.prescriptionRef;}) || _PH.prescriptions[0] || null;
         try{if(typeof _phRenderValidation==='function')_phRenderValidation();}catch(_){}
         try{if(typeof _phRenderQueue==='function')_phRenderQueue();}catch(_){}
+        /* Emit real-time Socket.IO notification to pharmacy dashboard */
+        try{
+          if(window.socket&&window.socket.emit){
+            window.socket.emit('newPrescription',{
+              queueId:e2.id, ticket:e2.ticket, patient:e2.patientName||e2.patient,
+              prescriptionRef:e2.prescriptionRef, priority:e2.priority||'normal',
+              submittedAt:e2.prescribedAt||new Date().toISOString()
+            });
+          }
+        }catch(_){}
         if(window.UI&&UI.showToast) UI.showToast('📋 New prescription received: '+e2.prescriptionRef,'ok');
       }
     };
@@ -232,7 +242,13 @@ window._phLoadLiveData = async function(silent){
 
       /* Map to _PH.prescriptions shape */
       var patName  = rx.patientName || (rx.patient && (rx.patient.firstName||'') + ' ' + (rx.patient.lastName||'')).trim() || '';
-      var patId    = rx.patientId   || (rx.patient && (rx.patient.mrn||rx.patient._id||'')) || '';
+      /* Prefer SA ID number; fall back to MRN, then MongoDB _id */
+      var patId    = (rx.patient && typeof rx.patient==='object' && (rx.patient.nationalId||rx.patient.idNumber||rx.patient.id_number))
+                  || rx.idNumber || rx.nationalId
+                  || (rx.patient && typeof rx.patient==='object' && rx.patient.mrn)
+                  || rx.patientId
+                  || (rx.patient && typeof rx.patient==='object' && rx.patient._id)
+                  || '';
       /* Doctor name — try all known field shapes; strip generic role fallbacks */
       var docRaw = (rx.prescribedByObj && ((rx.prescribedByObj.firstName||'')+' '+(rx.prescribedByObj.lastName||'')).trim())
         || (rx.prescribedBy && typeof rx.prescribedBy==='object' && ((rx.prescribedBy.firstName||'')+' '+(rx.prescribedBy.lastName||'')).trim())
@@ -254,7 +270,7 @@ window._phLoadLiveData = async function(silent){
       var phEntry = {
         code:        rxRef,
         patientId:   patId,
-        idNumber:    rx.patientId||(rx.patient&&typeof rx.patient==='object'&&rx.patient.nationalId)||rx.idNumber||rx.nationalId||'',
+        idNumber:    (rx.patient&&typeof rx.patient==='object'&&(rx.patient.nationalId||rx.patient.idNumber||rx.patient.id_number))||rx.idNumber||rx.nationalId||'',
         passportNumber: rx.passportNumber||rx.passport||'',
         mrn:         rx.mrn||(rx.patient&&typeof rx.patient==='object'&&rx.patient.mrn)||'',
         patientName: patName,
@@ -263,7 +279,7 @@ window._phLoadLiveData = async function(silent){
         doctor:      docName ? 'Dr. ' + docName : '',
         doctorReg:   rx.prescribedByReg || (rx.prescribedBy && typeof rx.prescribedBy==='object' && rx.prescribedBy.hpcsaNumber) || '',
         facility:    facilityName,
-        issued:      (rx.issuedAt||rx.prescribedAt||rx.createdAt||'').slice(0,10),
+        issued:      (rx.issued||rx.issuedAt||rx.prescribedAt||rx.createdAt||'').slice(0,10),
         validUntil:  rx.validUntil || (rx.repeat && rx.repeat.reviewDate) || '',
         status:      rxStatus,
         submittedAt: rx.createdAt || rx.prescribedAt || '',
@@ -333,11 +349,18 @@ window._phLoadLiveData = async function(silent){
       try{ if(typeof _phRenderValidation==='function') _phRenderValidation(); }catch(_){}
     }
 
-    /* Also refresh overview KPIs inline if visible */
-    var kpiEl = document.getElementById('ph-kpi-queue');
-    if(kpiEl) kpiEl.textContent = String(_PH.queue.filter(function(x){return x.state!=='notified';}).length);
-    var kpiDisp = document.getElementById('ph-kpi-dispensed');
-    if(kpiDisp) kpiDisp.textContent = String(window._phDispensedToday || 0);
+    /* Also refresh all 5 overview KPIs inline if visible */
+    var kpiWaiting = document.getElementById('ph-kpi-waiting');
+    if(kpiWaiting) kpiWaiting.textContent = String(_PH.queue.filter(function(x){return x.state==='waiting';}).length);
+    var kpiInprog  = document.getElementById('ph-kpi-inprog');
+    if(kpiInprog)  kpiInprog.textContent  = String(_PH.queue.filter(function(x){return x.state==='preparing';}).length);
+    var kpiReady   = document.getElementById('ph-kpi-ready');
+    if(kpiReady)   kpiReady.textContent   = String(_PH.queue.filter(function(x){return x.state==='ready';}).length);
+    var kpiDisp    = document.getElementById('ph-kpi-dispensed');
+    if(kpiDisp)    kpiDisp.textContent    = String(window._phDispensedToday || 0);
+    var kpiOos     = document.getElementById('ph-kpi-oos');
+    if(kpiOos)     kpiOos.textContent     = String(_PH.queue.filter(function(x){return x.state==='exception'&&(x.exceptionType==='out_of_stock'||x.outOfStock);}).length
+                     + _PH.stockItems.filter(function(i){return _PH.stockState(i)==='critical';}).length);
 
   } catch(_){ _phFlushRender(); }
 };
@@ -457,33 +480,33 @@ Pages['rx-queue'] = () => {
   var critical = _PH.stockItems.filter(function(i){ return ['critical','low'].includes(_PH.stockState(i)); });
   var expiring  = _PH.stockItems.filter(function(i){ var d=_PH.daysUntil(i.expiry); return d>=0&&d<=45; });
   var dueRefills= _PH.refills.filter(function(r){ return r.dueIn<=2; });
-  var qLen      = _PH.queue.length;
 
-  var liveQLen    = _PH.queue.filter(function(x){return x.state!=='notified';}).length;
-  var readyCount  = _PH.queue.filter(function(x){return x.state==='ready'||x.state==='notified';}).length;
+  var waitingCount   = (_PH.queue||[]).filter(function(x){return x.state==='waiting';}).length;
+  var inProgressCount= (_PH.queue||[]).filter(function(x){return x.state==='preparing';}).length;
+  var readyCount     = (_PH.queue||[]).filter(function(x){return x.state==='ready';}).length;
   var dispensedToday = window._phDispensedToday || 0;
-  var avgWait = _PH.queue.length
-    ? Math.round(_PH.queue.reduce(function(s,x){return s+(x.waitedMin||0);},0)/_PH.queue.length)
-    : 0;
+  var outOfStockCount= (_PH.queue||[]).filter(function(x){return x.state==='exception'&&(x.exceptionType==='out_of_stock'||x.outOfStock);}).length
+                     + _PH.stockItems.filter(function(i){return _PH.stockState(i)==='critical';}).length;
 
   /* Trigger a live refresh in background every time the overview opens */
   setTimeout(function(){ if(typeof window._phLoadLiveData==='function') window._phLoadLiveData(false); }, 200);
 
   var kpis = [
-    {label:'Dispensed today',      value:String(dispensedToday),   delta:'from API',                  id:'ph-kpi-dispensed', icon:'ti-clipboard-check'},
-    {label:'In queue now',         value:String(liveQLen),          delta:readyCount+' ready for collection', id:'ph-kpi-queue',     icon:'ti-users'},
-    {label:'Avg wait time',        value:avgWait ? avgWait+' min' : '—',  delta:'target 20 min',         id:'ph-kpi-wait',      icon:'ti-clock'},
-    {label:'Prescriptions pending',value:String(_PH.prescriptions.filter(function(x){return ['Submitted','Awaiting Pharmacist Review','pending'].indexOf(x.status)>-1;}).length), delta:'awaiting pharmacist', id:'ph-kpi-pending', icon:'ti-alert-triangle'},
+    {label:'Waiting',              value:String(waitingCount),    delta:'newly submitted',          id:'ph-kpi-waiting',  icon:'ti-clock', color:'#777777'},
+    {label:'In Progress',          value:String(inProgressCount), delta:'being dispensed',           id:'ph-kpi-inprog',   icon:'ti-refresh', color:'#1A4A9B'},
+    {label:'Ready for Collection', value:String(readyCount),      delta:'awaiting patient',          id:'ph-kpi-ready',    icon:'ti-package-search', color:'#0F6E56'},
+    {label:'Completed Today',      value:String(dispensedToday),  delta:'collected today',           id:'ph-kpi-dispensed',icon:'ti-clipboard-check', color:'#0F6E56'},
+    {label:'Out of Stock',         value:String(outOfStockCount), delta:'need attention',            id:'ph-kpi-oos',      icon:'ti-alert-triangle', color:'#dc2626'},
   ];
 
-  var kpiHTML = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">' +
+  var kpiHTML = '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px">' +
     kpis.map(function(k){
       return '<div style="background:#ffffff;border:1px solid #e0e0e0;border-radius:16px;padding:18px 20px;box-shadow:0 1px 3px rgba(0,0,0,.05)">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
-          '<span style="font-size:13px;color:#777777">'+k.label+'</span>' +
+          '<span style="font-size:12px;color:#777777">'+k.label+'</span>' +
           _phIcon(k.icon,'16px') +
         '</div>' +
-        '<div id="'+k.id+'" style="font-size:30px;font-weight:700;letter-spacing:-.5px">'+k.value+'</div>' +
+        '<div id="'+k.id+'" style="font-size:28px;font-weight:700;letter-spacing:-.5px;color:'+k.color+'">'+k.value+'</div>' +
         '<div style="font-size:11px;color:#777777;margin-top:4px">'+k.delta+'</div>' +
       '</div>';
     }).join('') + '</div>';
@@ -781,14 +804,17 @@ function _phRenderValidation() {
     });
   } catch(_){}
 
-  var rx      = window._phSelRx || _PH.prescriptions[0];
+  /* Never fall back to prescriptions[0] — only show what was explicitly selected.
+     Falling back to [0] caused the wrong patient's prescription to display when
+     the queue row click targeted a different patient. */
+  var rx      = window._phSelRx || null;
   if (!rx) {
     var el0 = document.getElementById('ph-val-body');
     if(el0) el0.innerHTML=
       '<div style="text-align:center;padding:48px 20px;color:#777777">' +
         '<div style="font-size:40px;margin-bottom:12px">📋</div>' +
-        '<div style="font-size:15px;font-weight:600;margin-bottom:6px">No prescriptions to review</div>' +
-        '<div style="font-size:13px">When a doctor submits a prescription it will appear here for validation.</div>' +
+        '<div style="font-size:15px;font-weight:600;margin-bottom:6px">No prescription selected</div>' +
+        '<div style="font-size:13px">Select a patient from the Pharmacy Queue or search by patient ID / prescription code above.</div>' +
       '</div>';
     return;
   }
@@ -798,20 +824,6 @@ function _phRenderValidation() {
   var isDispensable = ['Submitted','Awaiting Pharmacist Review','Validated','Awaiting Dispensing','Refill Due'].includes(status);
   var isAlreadyDispensed = (status==='Dispensed'||status==='dispensed');
 
-  /* ── Prescription list sidebar ── */
-  var listHTML =
-    '<div style="margin-bottom:16px;border:1px solid #e0e0e0;border-radius:12px;overflow:hidden">'+
-    '<div style="background:#f4f5f0;padding:10px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#777">All Prescriptions ('+_PH.prescriptions.length+')</div>'+
-    _PH.prescriptions.map(function(p,i){
-      var sel = (window._phSelRx && window._phSelRx.code===p.code);
-      return '<div onclick="window._phSelRx=_PH.prescriptions['+i+'];window._phChecked=false;_phRenderValidation()" '+
-        'style="padding:10px 14px;cursor:pointer;border-top:1px solid #e0e0e0;background:'+(sel?'#EDFBF3':'#fff')+'">'+
-        '<div style="font-size:12px;font-weight:700;font-family:monospace;color:#0F6E56">'+p.code+'</div>'+
-        '<div style="font-size:12px;color:#333;margin-top:2px">'+p.patientName+'</div>'+
-        '<div style="margin-top:4px">'+_phBadge(p.status||'Submitted',_PH_STATUS_STYLE[p.status||'Submitted']||'gray')+'</div>'+
-      '</div>';
-    }).join('')+
-    '</div>';
 
   /* ── Repeat prescription section ── */
   var repeatSection = '';
@@ -840,12 +852,47 @@ function _phRenderValidation() {
   }
 
   /* ── Validation gate: check required fields before allowing Validate & Approve ── */
-  /* Resolve doctor name from all possible sources */
+  /* Resolve doctor name from all possible sources including linked queue entry */
   var _docNameRaw = (function(){
     if(rx.prescribedByObj && (rx.prescribedByObj.firstName||rx.prescribedByObj.lastName))
       return ((rx.prescribedByObj.firstName||'')+' '+(rx.prescribedByObj.lastName||'')).trim();
     if(rx.prescribedByName) return rx.prescribedByName;
-    return rx.doctor||'';
+    if(rx.doctor) return rx.doctor;
+    /* Try linked queue entry */
+    var qe = (_PH.queue||[]).find(function(q){ return q.prescriptionRef===rx.code||q.prescriptionId===(rx._id||rx.code); });
+    if(qe){
+      if(qe.prescribedByObj && (qe.prescribedByObj.firstName||qe.prescribedByObj.lastName))
+        return ((qe.prescribedByObj.firstName||'')+' '+(qe.prescribedByObj.lastName||'')).trim();
+      if(qe.prescribedByName) return qe.prescribedByName;
+      if(qe.doctor) return qe.doctor;
+    }
+    /* Try localStorage pharmacy queue for this ref (written by doctor.js on submit) */
+    try {
+      var _lsRxArr = JSON.parse(localStorage.getItem('NIHMS_PHARMACY_PRESCRIPTIONS')||'[]');
+      var _lsMatch = _lsRxArr.find(function(x){
+        return x.prescriptionRef===rx.code || x.prescriptionRef===(rx._id||'') || x.id===(rx._id||rx.code);
+      });
+      if(_lsMatch){
+        if(_lsMatch.prescribedByObj&&(_lsMatch.prescribedByObj.firstName||_lsMatch.prescribedByObj.lastName))
+          return ((_lsMatch.prescribedByObj.firstName||'')+' '+(_lsMatch.prescribedByObj.lastName||'')).trim();
+        if(_lsMatch.prescribedByName) return _lsMatch.prescribedByName;
+        if(_lsMatch.doctor) return _lsMatch.doctor;
+      }
+    } catch(_){}
+    /* Try patient-side prescription cache keyed by patient ID */
+    try {
+      var _patId = rx.patient||(rx.patientId)||'';
+      if(_patId){
+        var _ptRxArr = JSON.parse(localStorage.getItem('NIHMS_PATIENT_PRESCRIPTIONS_'+_patId)||'[]');
+        var _ptMatch = _ptRxArr.find(function(x){return x.prescriptionRef===rx.code||x._id===(rx._id||'');});
+        if(_ptMatch){
+          if(_ptMatch.prescribedBy&&typeof _ptMatch.prescribedBy==='object'&&(_ptMatch.prescribedBy.firstName||_ptMatch.prescribedBy.lastName))
+            return ((_ptMatch.prescribedBy.firstName||'')+' '+(_ptMatch.prescribedBy.lastName||'')).trim();
+          if(_ptMatch.prescribedByName) return _ptMatch.prescribedByName;
+        }
+      }
+    } catch(_){}
+    return '';
   })();
   var _docNameClean = _docNameRaw.replace(/^Dr\.?\s*/i,'').trim();
   var _docNameLow   = _docNameClean.toLowerCase();
@@ -917,8 +964,6 @@ function _phRenderValidation() {
       _phBtn('Search','','primary','_phValSearch(document.getElementById(\'val-q\').value)')+
     '</form>'+
 
-    listHTML+
-
     /* Full prescription header */
     '<div style="background:#f4f5f0;border:1px solid #e0e0e0;border-radius:12px;padding:16px;margin-bottom:14px">'+
       '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:14px">'+
@@ -929,8 +974,9 @@ function _phRenderValidation() {
             var _mid = function(v){ return v && /^[0-9a-f]{24}$/i.test((v+'').trim()); };
             var cands = [rx.idNumber, rx.nationalId, rx.patientIdNumber, rx.passportNumber, rx.passport, rx.mrn];
             for(var ci=0;ci<cands.length;ci++){ if(cands[ci]&&cands[ci]!=='—'&&cands[ci]!==''&&!_mid(cands[ci])) return cands[ci]; }
+            /* patientId only if NOT a Mongo ObjectId */
             if(rx.patientId && !_mid(rx.patientId)) return rx.patientId;
-            return rx.patientId||'—';
+            return '—';
           })()+' · '+rx.code+'</div>'+
         '</div>'+
         _statusBadgeLarge+
@@ -940,12 +986,11 @@ function _phRenderValidation() {
       '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;font-size:13px;margin-bottom:14px">'+
         [
           ['Prescribing Doctor',   _docDisplay],
-          ['Dispensing Pharmacist',_pharmValDisplay],
           ['Facility',             _facilityVal],
           ['Prescription Date',    rx.issued||'—'],
-          ['Valid Until / Review', _validUntilDisplay],
+          (_validUntil ? ['Valid Until / Review', _validUntil] : null),
           ['Submitted',            rx.submittedAt?(new Date(rx.submittedAt).toLocaleString('en-ZA')):'—'],
-        ].map(function(f){
+        ].filter(Boolean).map(function(f){
           return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:2px">'+f[0]+'</div><div style="font-weight:600">'+f[1]+'</div></div>';
         }).join('')+
       '</div>'+
@@ -975,6 +1020,38 @@ function _phRenderValidation() {
         '</div>'+
       '</div>'+
     '</div>'+
+
+    /* ── Allergies & Current Medications (spec §3) ── */
+    (function(){
+      var allergies = rx.allergies || rx.knownAllergies || [];
+      var currentMeds = rx.currentMedications || rx.existingMedications || rx.ongoingMedications || [];
+      if(!allergies.length && !currentMeds.length) return '';
+      var out = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">';
+      if(allergies.length){
+        out += '<div style="border:1.5px solid #FECACA;background:#FEF2F2;border-radius:10px;padding:12px">'+
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#dc2626;margin-bottom:8px">⚠ Known Allergies</div>'+
+          '<ul style="margin:0;padding-left:16px;font-size:13px;display:flex;flex-direction:column;gap:3px">'+
+          allergies.map(function(a){ return '<li style="color:#991B1B;font-weight:600">'+(typeof a==='string'?a:(a.name||a.allergy||JSON.stringify(a)))+'</li>'; }).join('')+
+          '</ul></div>';
+      } else {
+        out += '<div style="border:1px solid #e0e0e0;background:#f8fafc;border-radius:10px;padding:12px">'+
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:6px">Known Allergies</div>'+
+          '<div style="font-size:13px;color:#777">No allergies recorded</div></div>';
+      }
+      if(currentMeds.length){
+        out += '<div style="border:1.5px solid #BFDBFE;background:#EFF6FF;border-radius:10px;padding:12px">'+
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#1D4ED8;margin-bottom:8px">💊 Current Medications</div>'+
+          '<ul style="margin:0;padding-left:16px;font-size:13px;display:flex;flex-direction:column;gap:3px">'+
+          currentMeds.map(function(m){ return '<li>'+(typeof m==='string'?m:(m.name||m.drug||JSON.stringify(m)))+'</li>'; }).join('')+
+          '</ul></div>';
+      } else {
+        out += '<div style="border:1px solid #e0e0e0;background:#f8fafc;border-radius:10px;padding:12px">'+
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:6px">Current Medications</div>'+
+          '<div style="font-size:13px;color:#777">No current medications recorded</div></div>';
+      }
+      out += '</div>';
+      return out;
+    })()+
 
     repeatSection+
 
@@ -1042,29 +1119,14 @@ function _phRenderValidation() {
         '</ul>'+
       '</div>' : '')+
 
-    /* Status update controls */
-    '<div style="border:1px solid #e0e0e0;border-radius:12px;padding:14px;margin-bottom:14px">'+
-      '<div style="font-size:13px;font-weight:700;margin-bottom:10px">Update Prescription Status</div>'+
-      /* Status pills — current status highlighted prominently */
-      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">'+
-      _PH_STATUSES.map(function(s){
-        var active = s===status;
-        var sm2 = _statusMeta[s]||{bg:'#f4f5f0',border:'#e0e0e0',color:'#555',icon:''};
-        return '<button onclick="_phSetRxStatus(\''+s.replace(/'/g,"\\'")+'\')" '+
-          'style="padding:6px 12px;border-radius:7px;border:1.5px solid '+(active?sm2.border:'#e0e0e0')+';background:'+(active?sm2.bg:'#fff')+';color:'+(active?sm2.color:'#555')+';font-size:12px;font-weight:'+(active?'700':'400')+';cursor:pointer;font-family:inherit;transition:all .15s">'+
-          (active?sm2.icon+' ':'')+s+
-        '</button>';
-      }).join('')+
-      '</div>'+
-      /* Action buttons — Validate blocked if gate fails */
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
-        (isAlreadyDispensed
-          ? '<div style="font-size:13px;color:#0F6E56;font-weight:600">✅ Prescription fully dispensed — no further actions available.</div>'
-          : '<button onclick="_phValidateAndApprove()" style="padding:10px 20px;border-radius:8px;border:none;background:'+(_canValidate&&_aiCanApprove?'#0F6E56':'#94a3b8')+';color:#fff;font-size:13px;font-weight:700;cursor:'+(_canValidate&&_aiCanApprove?'pointer':'not-allowed')+';font-family:inherit">✅ Validate &amp; Approve</button>'+
-            (isDispensable ? '<button onclick="_phSetRxStatus(\'Awaiting Dispensing\')" style="padding:10px 20px;border-radius:8px;border:1.5px solid #0F6E56;background:#fff;color:#0F6E56;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Move to Dispensing</button>' : '')+
-            '<button onclick="_phSetRxStatus(\'Rejected \u2014 Requires Correction\')" style="padding:10px 20px;border-radius:8px;border:1.5px solid #dc2626;background:#fff;color:#dc2626;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">✖ Reject — Needs Correction</button>'
-        )+
-      '</div>'+
+    /* Action buttons — Validate blocked if gate fails */
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">'+
+      (isAlreadyDispensed
+        ? '<div style="font-size:13px;color:#0F6E56;font-weight:600">✅ Prescription fully dispensed — no further actions available.</div>'
+        : '<button onclick="_phValidateAndApprove()" style="padding:10px 20px;border-radius:8px;border:none;background:'+(_canValidate&&_aiCanApprove?'#0F6E56':'#94a3b8')+';color:#fff;font-size:13px;font-weight:700;cursor:'+(_canValidate&&_aiCanApprove?'pointer':'not-allowed')+';font-family:inherit">✅ Validate &amp; Approve</button>'+
+          (isDispensable ? '<button onclick="(function(){_phSetRxStatus(\'Awaiting Dispensing\');var rx=window._phSelRx;if(rx){window._phDispRx=rx;window._phDispChecked=[];window._phDispScanned=true;Router.setPage(\'dispensed\');}})();" style="padding:10px 20px;border-radius:8px;border:1.5px solid #0F6E56;background:#fff;color:#0F6E56;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Move to Dispensing</button>' : '')+
+          '<button onclick="_phSetRxStatus(\'Rejected — Requires Correction\')" style="padding:10px 20px;border-radius:8px;border:1.5px solid #dc2626;background:#fff;color:#dc2626;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">✖ Reject — Needs Correction</button>'
+      )+
     '</div>';
 
   var el = document.getElementById('ph-val-body');
@@ -1280,7 +1342,7 @@ function _phRenderDispensing() {
     '<div style="background:#EDFBF3;border:1px solid #0F6E56;border-radius:10px;padding:12px 14px;font-size:13px">' +
       '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:4px">' +
         '<span style="font-weight:700;font-size:14px">'+(rx.patientName||'Unknown patient')+'</span>' +
-        _phBadge(rx.patientId||'—','gray') +
+        _phBadge(rx.idNumber||rx.patientId||'—','gray') +
         _phBadge('Script valid','green') +
       '</div>' +
       '<div style="color:#555;font-size:12px;margin-top:2px">'+
@@ -1296,13 +1358,64 @@ function _phRenderDispensing() {
   var pickRows = items.length
     ? items.map(function(l, i){
         var isCk = checked.includes(String(i));
-        return '<li style="display:flex;align-items:flex-start;gap:12px;border:1px solid '+(isCk?'#0F6E56':'#e0e0e0')+';border-radius:10px;padding:12px 14px;background:'+(isCk?'#EDFBF3':'#fff')+';transition:background .15s">' +
-          '<input type="checkbox" '+(isCk?'checked':'')+' onchange="_phToggleDisp(\''+i+'\')" style="margin-top:3px;width:16px;height:16px;cursor:pointer;accent-color:#0F6E56">' +
+        var drugLower = (l.drug||l.name||'').toLowerCase();
+
+        /* Find matching stock batches for this drug */
+        var matchingBatches = (_PH.stockItems||[]).filter(function(s){
+          var sLow = (s.drug||'').toLowerCase();
+          return sLow && drugLower && (sLow.includes(drugLower.split(' ')[0]) || drugLower.includes(sLow.split(' ')[0]));
+        });
+
+        /* Out-of-stock / expired warning */
+        var availableBatches = matchingBatches.filter(function(s){
+          return s.quantity > 0 && _PH.daysUntil(s.expiry) >= 0;
+        });
+        var expiredBatches = matchingBatches.filter(function(s){ return _PH.daysUntil(s.expiry) < 0; });
+        var outOfStock = matchingBatches.length > 0 && availableBatches.length === 0;
+        var noStock    = matchingBatches.length === 0;
+
+        /* Stock status banner */
+        var stockBanner = '';
+        if(outOfStock){
+          stockBanner = '<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:12px;color:#dc2626;font-weight:600">⛔ OUT OF STOCK — no valid batches available</div>';
+        } else if(noStock){
+          stockBanner = '<div style="background:#FFF9E6;border:1px solid #FCD34D;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:12px;color:#92400E">⚠ Medication not found in inventory — verify stock</div>';
+        }
+
+        /* Batch selector dropdown */
+        var batchSelect = '';
+        if(availableBatches.length > 0){
+          batchSelect = '<div style="margin-top:8px">'+
+            '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#777;display:block;margin-bottom:3px">Select Batch</label>'+
+            '<select id="ph-batch-'+i+'" style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:12px;font-family:inherit;outline:none">'+
+            availableBatches.map(function(s){
+              var daysLeft = _PH.daysUntil(s.expiry);
+              var expiryWarning = daysLeft <= 45 ? ' ⚠ expires in '+daysLeft+'d' : '';
+              return '<option value="'+s.id+'">Batch: '+s.batch+' · Expiry: '+s.expiry+' · Qty: '+s.quantity+expiryWarning+'</option>';
+            }).join('')+
+            '</select>'+
+            (expiredBatches.length?'<div style="font-size:11px;color:#B45309;margin-top:3px">'+expiredBatches.length+' expired batch(es) excluded</div>':'')+
+          '</div>';
+        }
+
+        /* Quantity dispensed input */
+        var qtyInput = '<div style="display:flex;gap:8px;align-items:center;margin-top:6px">'+
+          '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#777;white-space:nowrap">Qty to Dispense</label>'+
+          '<input id="ph-qty-'+i+'" type="number" min="1" value="'+(l.quantity||1)+'" '+
+          'style="width:80px;padding:5px 8px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:13px;font-family:inherit;outline:none">'+
+          (l.unit?'<span style="font-size:12px;color:#777">'+l.unit+'</span>':'')+
+        '</div>';
+
+        return '<li style="display:flex;align-items:flex-start;gap:12px;border:1px solid '+(outOfStock?'#FECACA':isCk?'#0F6E56':'#e0e0e0')+';border-radius:10px;padding:12px 14px;background:'+(outOfStock?'#FFF8F8':isCk?'#EDFBF3':'#fff')+';transition:background .15s">' +
+          '<input type="checkbox" '+(isCk?'checked':'')+' '+(outOfStock?'disabled':'')+' onchange="_phToggleDisp(\''+i+'\')" style="margin-top:3px;width:16px;height:16px;cursor:'+(outOfStock?'not-allowed':'pointer')+';accent-color:#0F6E56">' +
           '<div style="flex:1">' +
             '<div style="font-size:13px;font-weight:600;color:#1e293b">'+(l.drug||l.name||'—')+(l.quantity?' — '+l.quantity+(l.unit?' '+l.unit:''):'')+'</div>' +
             '<div style="font-size:12px;color:#777777;margin-top:2px">'+(l.dosage||((l.dose||'')+(l.frequency?' '+l.frequency:'')))+'</div>' +
             (l.duration?'<div style="font-size:12px;color:#777777">Duration: '+l.duration+'</div>':'')+
             (l.route?'<div style="font-size:12px;color:#777777">Route: '+l.route+'</div>':'')+
+            stockBanner+
+            (!outOfStock&&!noStock?batchSelect:'')+
+            (!outOfStock?qtyInput:'')+
           '</div>' +
           (isCk?'<span style="color:#0F6E56;font-size:18px;font-weight:700;line-height:1">✓</span>':'')+
         '</li>';
@@ -1342,7 +1455,7 @@ function _phRenderDispensing() {
             'Qty: '+qty+' &nbsp;·&nbsp; Issued: '+(rx.issued||new Date().toISOString().slice(0,10))+
             (rx.validUntil?' &nbsp;·&nbsp; Exp: '+rx.validUntil:'')+
           '</div>' +
-          '<div style="font-size:11px;color:#333;margin-top:4px"><strong>'+(rx.patientName||'—')+'</strong> &nbsp;·&nbsp; '+(rx.patientId||'—')+'</div>' +
+          '<div style="font-size:11px;color:#333;margin-top:4px"><strong>'+(rx.patientName||'—')+'</strong> &nbsp;·&nbsp; '+(rx.idNumber||rx.patientId||'—')+'</div>' +
           '<div style="font-size:11px;color:#777">'+facility+' &nbsp;·&nbsp; '+phName+'</div>' +
           '<div style="margin-top:6px;font-size:10px;color:#e53e3e;font-weight:600">⚠ KEEP OUT OF REACH OF CHILDREN</div>' +
         '</div>';
@@ -1441,7 +1554,7 @@ function _phShowAlreadyDispensedModal(rx, dispensedOn, dispensedBy){
           '<div style="background:#f4f5f0;border-radius:8px;padding:10px 12px">' +
             '<div style="font-size:10px;text-transform:uppercase;color:#777;margin-bottom:2px">Patient</div>' +
             '<div style="font-weight:700">'+(rx.patientName||'—')+'</div>' +
-            '<div style="font-family:monospace;font-size:12px;color:#0F6E56">'+(rx.patientId||'—')+'</div>' +
+            '<div style="font-family:monospace;font-size:12px;color:#0F6E56">'+(rx.idNumber||rx.patientId||'—')+'</div>' +
           '</div>' +
           '<div style="background:#f4f5f0;border-radius:8px;padding:10px 12px">' +
             '<div style="font-size:10px;text-transform:uppercase;color:#777;margin-bottom:2px">Dispensed</div>' +
@@ -1526,7 +1639,7 @@ function _phShowDuplicateWarning(rx, recentHits){
         '<span style="font-size:28px;line-height:1">⚠️</span>' +
         '<div>' +
           '<div style="font-size:15px;font-weight:800;color:#92400E">Possible Duplicate Collection Detected</div>' +
-          '<div style="font-size:13px;color:#78350F;margin-top:3px">'+rx.patientName+' ('+rx.patientId+') recently collected the same medication.</div>' +
+          '<div style="font-size:13px;color:#78350F;margin-top:3px">'+rx.patientName+' ('+(rx.idNumber||rx.patientId)+') recently collected the same medication.</div>' +
         '</div>' +
       '</div>' +
 
@@ -1764,11 +1877,71 @@ window._phCompleteDispense = function(){
   if(!counselled){
     UI.showToast('Confirm patient counselling before completing','err'); return;
   }
+
+  /* ── Collect batch selections from DOM dropdowns ── */
+  window._phDispBatch = window._phDispBatch || {};
+  items.forEach(function(l, i){
+    var sel = document.getElementById('ph-batch-'+i);
+    if(sel && sel.value) window._phDispBatch[i] = sel.value;
+  });
+
+  /* ── Batch selection & expiry validation ── */
+  var dispBatches = window._phDispBatch || {};
+  var today = new Date(); today.setHours(0,0,0,0);
+  var batchErrors = [];
+  items.forEach(function(l, i){
+    var drugLower = (l.drug||l.name||'').toLowerCase();
+    var hasStock = (_PH.stockItems||[]).some(function(s){
+      var sLow = (s.drug||'').toLowerCase();
+      return sLow && drugLower && (sLow.includes(drugLower.split(' ')[0]) || drugLower.includes(sLow.split(' ')[0]));
+    });
+    if(!hasStock) return; /* no-stock items skip batch check; handled by out-of-stock flow */
+    var selId = dispBatches[i];
+    if(!selId){
+      batchErrors.push('Select a batch for: '+(l.drug||l.name||'item '+(i+1)));
+      return;
+    }
+    var batch = (_PH.stockItems||[]).find(function(s){ return s.id===selId||s._id===selId; });
+    if(!batch){ batchErrors.push('Batch not found for: '+(l.drug||l.name||'item '+(i+1))); return; }
+    var expDate = batch.expiry ? new Date(batch.expiry) : null;
+    if(expDate){ expDate.setHours(0,0,0,0); }
+    if(expDate && expDate < today){
+      batchErrors.push((l.drug||l.name||'item '+(i+1))+': selected batch '+batch.batch+' expired on '+batch.expiry);
+    }
+  });
+  if(batchErrors.length){
+    UI.showToast(batchErrors[0],'err'); return;
+  }
+
   var notes = (document.getElementById('ph-disp-notes')||{value:''}).value.trim();
 
   /* Mark as Dispensed via shared status setter */
   window._phSelRx = rx;
   _phSetRxStatus('Dispensed');
+
+  /* ── Deduct stock from inventory for each dispensed item ── */
+  var collectedBatches = [];
+  items.forEach(function(l, i){
+    var selId = (window._phDispBatch||{})[i];
+    if(!selId) return;
+    var stock = (_PH.stockItems||[]).find(function(s){ return s.id===selId||s._id===selId; });
+    if(!stock) return;
+    var qtyEl = document.getElementById('ph-qty-'+i);
+    var qtyDispensed = qtyEl ? (parseInt(qtyEl.value,10)||l.quantity||1) : (l.quantity||1);
+    /* Deduct locally */
+    if(typeof stock.quantity === 'number') stock.quantity = Math.max(0, stock.quantity - qtyDispensed);
+    /* Record for history */
+    collectedBatches.push({ drug: l.drug||l.name, batch: stock.batch, expiry: stock.expiry, qty: qtyDispensed, stockId: selId });
+    /* PATCH inventory via API */
+    try {
+      if(window.API&&window.API._fetchDirect){
+        API._fetchDirect('/pharmacy/stock/'+selId, {
+          method:'PATCH',
+          body: JSON.stringify({ quantityDeducted: qtyDispensed, reason:'Dispensed', prescriptionRef: rx.code||rx._id })
+        }).catch(function(){});
+      }
+    } catch(_){}
+  });
 
   /* Push to API */
   try {
@@ -1776,7 +1949,7 @@ window._phCompleteDispense = function(){
       var rxId = rx._id || rx.prescriptionId || rx.code;
       API._fetchDirect('/prescriptions/'+rxId, {
         method:'PATCH',
-        body: JSON.stringify({ status:'Dispensed', dispensedAt: new Date().toISOString(), dispensingNotes: notes })
+        body: JSON.stringify({ status:'Dispensed', dispensedAt: new Date().toISOString(), dispensingNotes: notes, dispenseLines: collectedBatches })
       }).catch(function(){});
     }
   } catch(_){}
@@ -1791,28 +1964,59 @@ window._phCompleteDispense = function(){
     _qEntry.state = 'ready';
     /* _phAdvanceQueue sets state → "notified" and sends SMS + email */
     try{ window._phAdvanceQueue(_qEntry.id); }catch(_){}
-    /* Remove from active queue after a brief moment so the "Patient notified" badge is visible */
+    /* Keep the entry in _PH.queue with state "notified" so it appears permanently
+       in the Completed tab. Only remove it from the live working copy (_phQueue)
+       after the notification badge has been visible briefly. */
     setTimeout(function(){
       if(window._phQueue){
         window._phQueue = window._phQueue.filter(function(q){
           return q.prescriptionRef !== rx.code && q.prescriptionId !== (rx._id||rx.code);
         });
       }
-      _PH.queue = _PH.queue.filter(function(q){
-        return q.prescriptionRef !== rx.code;
-      });
+      /* Keep _PH.queue entry — just ensure its state is "notified" (Completed) */
+      var pqIdx = _PH.queue.findIndex(function(q){ return q.prescriptionRef === rx.code; });
+      if(pqIdx >= 0){
+        _PH.queue[pqIdx].state = 'notified';
+        _PH.queue[pqIdx].status = 'Completed';
+      } else {
+        /* Entry wasn't in _PH.queue yet — add it so Completed tab shows it */
+        _PH.queue.push({
+          id: _qEntry.id,
+          state: 'notified',
+          status: 'Completed',
+          prescriptionRef: rx.code,
+          prescriptionId: rx._id||rx.code,
+          patient: _qEntry.patient||'',
+          patientId: _qEntry.patientId||'',
+          ticket: _qEntry.ticket||'',
+          prescribedByName: _qEntry.prescribedByName||_qEntry.doctor||'',
+          prescribedAt: _qEntry.prescribedAt||_qEntry.submittedAt||new Date().toISOString()
+        });
+      }
       try{ if(typeof _phRenderQueue==='function') _phRenderQueue(); }catch(_){}
     }, 4000);
   } else {
-    /* Entry not in queue (e.g. dispensed from validation panel directly) — just remove */
+    /* Entry not in queue working copy — ensure _PH.queue has it as Completed */
     if(window._phQueue){
       window._phQueue = window._phQueue.filter(function(q){
         return q.prescriptionRef !== rx.code && q.prescriptionId !== (rx._id||rx.code);
       });
     }
-    _PH.queue = _PH.queue.filter(function(q){
-      return q.prescriptionRef !== rx.code;
-    });
+    var pqIdx2 = _PH.queue.findIndex(function(q){ return q.prescriptionRef === rx.code; });
+    if(pqIdx2 >= 0){
+      _PH.queue[pqIdx2].state = 'notified';
+      _PH.queue[pqIdx2].status = 'Completed';
+    } else {
+      _PH.queue.push({
+        id: rx._id||rx.code,
+        state: 'notified',
+        status: 'Completed',
+        prescriptionRef: rx.code,
+        prescriptionId: rx._id||rx.code,
+        patient: (rx.patientId||''),
+        prescribedAt: rx.prescribedAt||new Date().toISOString()
+      });
+    }
   }
 
   /* Show full confirmation banner before resetting panel */
@@ -1822,6 +2026,7 @@ window._phCompleteDispense = function(){
   window._phDispChecked = [];
   window._phDispScanned = false;
   window._phDispCounselled = false;
+  window._phDispBatch = {};
   _phRenderDispensing();
 };
 
@@ -1861,7 +2066,7 @@ function _phShowDispenseConfirm(rx, notes){
           '<div style="background:#f4f5f0;border-radius:8px;padding:10px 14px">' +
             '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#777;margin-bottom:3px">Patient</div>'+
             '<div style="font-weight:700;font-size:14px">'+(rx.patientName||'—')+'</div>' +
-            '<div style="font-family:monospace;font-size:12px;color:#0F6E56">'+(rx.patientId||'')+'</div>' +
+            '<div style="font-family:monospace;font-size:12px;color:#0F6E56">'+(rx.idNumber||rx.patientId||'')+'</div>' +
           '</div>' +
           '<div style="background:#f4f5f0;border-radius:8px;padding:10px 14px">' +
             '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#777;margin-bottom:3px">Dispensed by</div>'+
@@ -1973,20 +2178,32 @@ Pages['ph-queue'] = () => {
 
 /* Active tab state: 'waiting' | 'preparing' | 'ready' | 'notified' */
 if(typeof window._phQueueTab === 'undefined') window._phQueueTab = 'waiting';
+/* Reset if previously on the removed Exceptions tab */
+if(window._phQueueTab === 'exception') window._phQueueTab = 'waiting';
+if(typeof window._phQueueSearch === 'undefined') window._phQueueSearch = '';
 
 function _phRenderQueue() {
   var el = document.getElementById('ph-queue-body'); if (!el) return;
   var q = window._phQueue || [];
 
-  /* Tab definitions */
+  /* Tab definitions — 4 tabs (Exceptions removed) */
   var tabs = [
     { key:'waiting',   label:'Waiting',     stateLabel:'Waiting' },
     { key:'preparing', label:'In Progress',  stateLabel:'In Progress' },
-    { key:'ready',     label:'Ready',        stateLabel:'Ready' },
+    { key:'ready',     label:'Ready',        stateLabel:'Ready for Collection' },
     { key:'notified',  label:'Completed',    stateLabel:'Completed' },
   ];
 
   var activeTab = window._phQueueTab || 'waiting';
+
+  /* Search/filter bar */
+  var searchVal = window._phQueueSearch || '';
+  var searchBar = '<div style="margin-bottom:14px">'+
+    '<input id="ph-queue-search" type="text" placeholder="Search patient name, ID, queue number, prescription ref…" value="'+searchVal.replace(/"/g,'&quot;')+'" '+
+    'oninput="window._phQueueSearch=this.value;_phRenderQueue()" '+
+    'style="width:100%;box-sizing:border-box;padding:9px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none" '+
+    'onfocus="this.style.borderColor=\'#0F6E56\'" onblur="this.style.borderColor=\'#e0e0e0\'">'+
+    '</div>';
 
   /* Tab bar — matches _phShell underline style */
   var tabBar = '<div style="display:flex;gap:2px;overflow-x:auto;border-bottom:2px solid #e0e0e0;margin-bottom:16px;flex-wrap:wrap">' +
@@ -2005,11 +2222,20 @@ function _phRenderQueue() {
     '<button onclick="window._phLoadLiveData(false)" style="margin-left:auto;display:inline-flex;align-items:center;padding:8px 10px;border:none;background:transparent;font-size:14px;color:#777777;cursor:pointer;font-family:inherit" title="Refresh">↻</button>'+
   '</div>';
 
-  /* Filter to active tab */
-  var filtered = q.filter(function(e){ return e.state===activeTab; });
+  /* Filter to active tab + search query */
+  var srch = (window._phQueueSearch||'').toLowerCase().trim();
+  var filtered = q.filter(function(e){
+    if(e.state !== activeTab) return false;
+    if(!srch) return true;
+    var haystack = [
+      e.patient||'', e.patientId||'', e.ticket||'',
+      e.prescriptionRef||'', e.prescribedByName||'', e.doctor||''
+    ].join(' ').toLowerCase();
+    return haystack.indexOf(srch) > -1;
+  });
 
   /* Badge label per state */
-  var badgeLabel = { waiting:'Waiting', preparing:'In Progress', ready:'Ready', notified:'Completed' };
+  var badgeLabel = { waiting:'Waiting', preparing:'In Progress', ready:'Ready for Collection', notified:'Completed' };
   var badgeStyle = {
     waiting:   'background:#f4f5f0;color:#777777',
     preparing: 'background:#EEF7FF;color:#1A4A9B',
@@ -2026,31 +2252,92 @@ function _phRenderQueue() {
     } catch(_){ return ''; }
   }
 
-  /* Open Rx handler — inline string for onclick */
+  /* Open Rx handler — inline string for onclick.
+     Looks up the prescription by prescriptionRef first, then by prescriptionId,
+     so each queue row always opens the correct patient's prescription regardless
+     of what was previously selected. */
   function _openRxScript(e){
+    var ref  = (e.prescriptionRef||'').replace(/'/g,"\\'");
+    var pid  = (e.prescriptionId||e.id||'').replace(/'/g,"\\'");
+    var pref = (e.patientId||'').replace(/'/g,"\\'");
     return '(function(){'+
-      'var rx=_PH.prescriptions.find(function(x){return x.code===\''+e.prescriptionRef+'\';});'+
+      /* 1. Match by prescription code (most precise) */
+      'var rx=_PH.prescriptions.find(function(x){return x.code===\''+ref+'\';});'+
+      /* 2. Fall back: match by prescriptionId stored on the queue entry */
+      'if(!rx&&\''+pid+'\') rx=_PH.prescriptions.find(function(x){return x._id===\''+pid+'\'||x.code===\''+pid+'\';});'+
+      /* 3. Last resort: first prescription belonging to this patient */
+      'if(!rx&&\''+pref+'\') rx=_PH.prescriptions.find(function(x){return x.patientId===\''+pref+'\';});'+
       'if(rx){'+
         'var ds=[\'Validated\',\'Awaiting Dispensing\',\'Approved for Dispensing\'];'+
-        'if(ds.indexOf(rx.status)>-1){window._phDispRx=rx;window._phDispChecked=[];window._phDispScanned=true;UI.renderContent(\'dispensed\');}'+
-        'else{window._phSelRx=rx;window._phChecked=false;UI.renderContent(\'ph-validation\');}'+
-      '}else{UI.renderContent(\'ph-validation\');}'+
+        'if(ds.indexOf(rx.status)>-1){window._phDispRx=rx;window._phDispChecked=[];window._phDispScanned=true;Router.setPage(\'dispensed\');}'+
+        'else{window._phSelRx=rx;window._phChecked=false;Router.setPage(\'ph-validation\');}'+
+      '}else{'+
+        'UI.showToast(\'Prescription not found — please search manually\',\'err\');'+
+      '}'+
     '})()';
+  }
+
+  /* Priority label helper */
+  function _priorityBadge(e){
+    var p = (e.priority||'').toLowerCase();
+    if(p==='urgent'||p==='high') return '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:#FEF2F2;color:#dc2626;margin-left:6px">URGENT</span>';
+    if(p==='medium') return '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:#FFFBEB;color:#D97706;margin-left:6px">MEDIUM</span>';
+    return '';
+  }
+
+  /* Wait time helper */
+  function _waitLabel(e){
+    var mins = e.waitedMin;
+    if(!mins && e.prescribedAt) mins = Math.round((Date.now()-new Date(e.prescribedAt).getTime())/60000);
+    if(!mins || isNaN(mins) || mins<0) return '';
+    if(mins < 60) return mins+'m wait';
+    return Math.floor(mins/60)+'h '+(mins%60)+'m wait';
+  }
+
+  /* Exception type label */
+  function _exLabel(e){
+    var t = (e.exceptionType||e.status||'').toLowerCase();
+    if(t.indexOf('stock')>-1) return 'OUT OF STOCK';
+    if(t.indexOf('hold')>-1) return 'ON HOLD';
+    if(t.indexOf('reject')>-1) return 'REJECTED';
+    if(t.indexOf('cancel')>-1) return 'CANCELLED';
+    if(t.indexOf('partial')>-1) return 'PARTIAL';
+    return 'EXCEPTION';
   }
 
   var listHTML;
   if(!filtered.length){
-    listHTML = '<div style="text-align:center;padding:32px 20px;color:#9ca3af;font-size:13px">No patients in this category.</div>';
+    var emptyMsg = srch ? 'No results for "'+srch+'".' : (
+      activeTab==='waiting'  ? 'No prescriptions are currently waiting in the pharmacy queue.' :
+      activeTab==='preparing'? 'No prescriptions are currently in progress.' :
+      activeTab==='ready'    ? 'No medication is currently ready for collection.' :
+      activeTab==='notified' ? 'No completed prescriptions today.' : ''
+    );
+    listHTML = '<div style="text-align:center;padding:32px 20px;color:#9ca3af;font-size:13px">'+emptyMsg+'</div>';
   } else {
     listHTML = '<ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1px">' +
       filtered.map(function(e, i){
-        var timeStr = _timeLabel(e);
-        var subline = e.ticket + (timeStr?' · '+timeStr:'');
-        var badge = badgeLabel[e.state]||e.state;
+        var timeStr  = _timeLabel(e);
+        var waitStr  = _waitLabel(e);
+        var doctorStr= e.prescribedByName||e.doctor||'';
+        var patIdStr = (function(){
+          function _isMid(v){ return v && /^[0-9a-f]{24}$/i.test((v+'').trim()); }
+          var cands = [e.idNumber, e.nationalId, e.passportNumber, e.patientId];
+          for(var ci=0;ci<cands.length;ci++){ var c=cands[ci]; if(c&&c!=='—'&&!_isMid(c)) return c; }
+          return e.patientId||'';
+        })();
+        var badge  = badgeLabel[e.state]||e.state;
         var bStyle = badgeStyle[e.state]||'background:#f3f4f6;color:#374151';
         var isFirst = i===0;
         var isLast  = i===filtered.length-1;
         var radius  = isFirst&&isLast?'10px':isFirst?'10px 10px 0 0':isLast?'0 0 10px 10px':'0';
+
+        /* CONFIRM COLLECTION button for ready tab */
+        var confirmBtn = (activeTab==='ready') ?
+          ' <button onclick="event.stopPropagation();_phConfirmCollection(\''+e.id+'\',\''+e.ticket+'\')" '+
+          'style="flex-shrink:0;padding:6px 14px;border-radius:6px;border:none;background:#0F6E56;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">'+
+          'Confirm Collection</button>' : '';
+
         return '<li onclick="'+_openRxScript(e)+'" style="'+
           'display:flex;align-items:center;justify-content:space-between;gap:12px;'+
           'padding:14px 16px;background:#fff;cursor:pointer;'+
@@ -2058,11 +2345,24 @@ function _phRenderQueue() {
           (isFirst?'':'border-top:none;')+
           'transition:background .12s" '+
           'onmouseover="this.style.background=\'#f4f5f0\'" onmouseout="this.style.background=\'#fff\'">' +
-          '<div>'+
-            '<div style="font-weight:600;font-size:14px;color:#111;margin-bottom:3px">'+e.patient+'</div>'+
-            '<div style="font-size:12px;color:#9ca3af">'+subline+'</div>'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:3px">'+
+              '<span style="font-weight:600;font-size:14px;color:#111">'+e.patient+'</span>'+
+              _priorityBadge(e)+
+            '</div>'+
+            '<div style="font-size:12px;color:#9ca3af;display:flex;flex-wrap:wrap;gap:6px">'+
+              '<span style="font-family:monospace;color:#0F6E56">'+e.ticket+'</span>'+
+              (patIdStr?'<span>ID: '+patIdStr+'</span>':'')+
+              (e.prescriptionRef?'<span>Rx: '+e.prescriptionRef+'</span>':'')+
+              (doctorStr?'<span>Dr. '+doctorStr.replace(/^Dr\.?\s*/i,'')+'</span>':'')+
+              (timeStr?'<span>'+timeStr+'</span>':'')+
+              (waitStr?'<span style="color:'+(e.waitedMin>30?'#dc2626':'#777777')+'">⏱ '+waitStr+'</span>':'')+
+            '</div>'+
           '</div>'+
-          '<span style="flex-shrink:0;padding:4px 12px;border-radius:999px;font-size:12px;font-weight:600;'+bStyle+'">'+badge+'</span>'+
+          '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">'+
+            '<span style="padding:4px 12px;border-radius:999px;font-size:12px;font-weight:600;'+bStyle+'">'+badge+'</span>'+
+            confirmBtn+
+          '</div>'+
         '</li>';
       }).join('') +
     '</ul>';
@@ -2071,49 +2371,169 @@ function _phRenderQueue() {
   el.innerHTML =
     '<div style="background:#ffffff;border-radius:16px;border:1px solid #e0e0e0;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,.06)">' +
       '<h2 style="font-size:15px;font-weight:600;letter-spacing:-.3px;margin:0 0 14px">Queue</h2>' +
+      searchBar +
       tabBar +
       listHTML +
     '</div>';
 }
 
+/* CONFIRM COLLECTION modal — called from queue row button */
+window._phConfirmCollection = function(id, ticket) {
+  var q = window._phQueue || [];
+  var e = q.find(function(x){ return x.id===id; });
+  if(!e){ UI.showToast('Queue entry not found','err'); return; }
+
+  var overlay = document.createElement('div');
+  overlay.id = 'ph-collect-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+
+  var rxObj = (_PH.prescriptions||[]).find(function(p){ return p.code===e.prescriptionRef; });
+  var medList = (rxObj&&rxObj.items&&rxObj.items.length)
+    ? rxObj.items.map(function(it){return '<li style="font-size:13px;padding:3px 0">• '+it.drug+(it.quantity?' · '+it.quantity+(it.unit?' '+it.unit:''):'')+'</li>';}).join('')
+    : '<li style="font-size:13px;padding:3px 0;color:#777">Refer to prescription</li>';
+
+  overlay.innerHTML =
+    '<div style="background:#fff;border-radius:16px;padding:28px 32px;max-width:480px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2)">' +
+      '<div style="font-size:18px;font-weight:800;color:#0F6E56;margin-bottom:4px">Confirm Patient Collection</div>'+
+      '<div style="font-size:13px;color:#777;margin-bottom:20px">Verify identity before handing over medication</div>'+
+      '<div style="background:#f8fafc;border:1px solid #e0e0e0;border-radius:10px;padding:14px;margin-bottom:16px">'+
+        '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:8px">Patient Details</div>'+
+        '<div style="font-weight:700;font-size:15px">'+e.patient+'</div>'+
+        '<div style="font-size:12px;color:#777;font-family:monospace">Queue: '+ticket+' · Rx: '+(e.prescriptionRef||'—')+'</div>'+
+      '</div>'+
+      '<div style="background:#EDFBF3;border:1px solid #0F6E56;border-radius:10px;padding:12px;margin-bottom:16px">'+
+        '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#0F6E56;margin-bottom:6px">Medication to Hand Over</div>'+
+        '<ul style="margin:0;padding:0;list-style:none">'+medList+'</ul>'+
+      '</div>'+
+      '<div style="margin-bottom:16px">'+
+        '<label style="font-size:12px;font-weight:600;color:#333;display:block;margin-bottom:4px">Identity Verified (ID/Passport) *</label>'+
+        '<input id="ph-collect-idverify" type="text" placeholder="Enter patient ID number or passport number" '+
+        'style="width:100%;box-sizing:border-box;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
+      '</div>'+
+      '<div style="margin-bottom:20px">'+
+        '<label style="font-size:12px;font-weight:600;color:#333;display:block;margin-bottom:4px">Pharmacist Notes (optional)</label>'+
+        '<textarea id="ph-collect-notes" rows="2" placeholder="Any notes about the collection…" '+
+        'style="width:100%;box-sizing:border-box;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none;resize:none"></textarea>'+
+      '</div>'+
+      '<div style="display:flex;gap:10px">'+
+        '<button onclick="document.getElementById(\'ph-collect-overlay\').remove()" '+
+        'style="flex:1;padding:11px;border-radius:8px;border:1.5px solid #e0e0e0;background:#fff;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>'+
+        '<button id="ph-collect-confirm-btn" onclick="window._phDoConfirmCollection(\''+id+'\',\''+ticket+'\')" '+
+        'style="flex:2;padding:11px;border-radius:8px;border:none;background:#0F6E56;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">✓ Confirm Collection</button>'+
+      '</div>'+
+    '</div>';
+
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', function(ev){ if(ev.target===overlay) overlay.remove(); });
+  setTimeout(function(){ var inp = document.getElementById('ph-collect-idverify'); if(inp) inp.focus(); }, 100);
+};
+
+window._phDoConfirmCollection = async function(id, ticket) {
+  var idVerify = (document.getElementById('ph-collect-idverify')||{}).value||'';
+  if(!idVerify.trim()){ UI.showToast('Please enter the patient\'s ID or passport number','err'); return; }
+
+  var notes = (document.getElementById('ph-collect-notes')||{}).value||'';
+  var btn   = document.getElementById('ph-collect-confirm-btn');
+  if(btn){ btn.disabled=true; btn.textContent='Confirming…'; }
+
+  var q = window._phQueue || [];
+  var e = q.find(function(x){ return x.id===id; });
+  if(!e){ UI.showToast('Queue entry not found','err'); return; }
+
+  /* Update status */
+  e.state           = 'notified';
+  e.collectedAt     = new Date().toISOString();
+  e.collectedById   = idVerify;
+  e.collectionNotes = notes;
+  var pharmUser = (window.API&&window.API.getStoredUser&&window.API.getStoredUser())||{};
+  e.collectedByPharmacist = pharmUser.firstName ? (pharmUser.firstName+' '+(pharmUser.lastName||'')).trim() : 'Pharmacist';
+
+  /* PATCH prescription status to Collected */
+  if(e.prescriptionRef || e.prescriptionId){
+    try {
+      var patchId = e.prescriptionId || e.prescriptionRef;
+      await API._fetchDirect('/prescriptions/'+patchId, {
+        method:'PATCH',
+        body: JSON.stringify({
+          status: 'Collected',
+          collectedAt: e.collectedAt,
+          collectedBy: e.collectedByPharmacist,
+          collectionNotes: notes,
+        })
+      }).catch(function(){});
+    } catch(_){}
+  }
+
+  /* Write history entry */
+  var rxObj = (_PH.prescriptions||[]).find(function(p){ return p.code===e.prescriptionRef; });
+  _PH.history.unshift({
+    id:              'HIST-COLLECT-'+Date.now(),
+    patientName:     e.patient,
+    patientId:       e.patientId||idVerify,
+    prescriptionRef: e.prescriptionRef||'—',
+    drug:            (rxObj&&rxObj.items&&rxObj.items[0]&&rxObj.items[0].drug)||'—',
+    status:          'Collected',
+    dispensedAt:     e.collectedAt,
+    pharmacist:      e.collectedByPharmacist,
+    doctor:          e.prescribedByName||'—',
+    items:           (rxObj&&rxObj.items)||[],
+  });
+
+  /* Emit Socket.IO collected notification */
+  try {
+    if(window.socket && window.socket.emit) {
+      window.socket.emit('pharmacyCollected', {
+        queueId:         id,
+        ticket:          ticket,
+        patient:         e.patient,
+        prescriptionRef: e.prescriptionRef,
+        collectedAt:     e.collectedAt,
+      });
+    }
+  } catch(_){}
+
+  document.getElementById('ph-collect-overlay').remove();
+  _phRenderQueue();
+  UI.showToast(e.patient+' — medication collected ✓', 'ok');
+};
+
 window._phAdvanceQueue = async function(id) {
   var q = window._phQueue;
   var e = q.find(function(x){ return x.id===id; }); if(!e) return;
-  var next = e.state==='waiting'?'preparing':e.state==='preparing'?'ready':'notified';
+  /* waiting → preparing → ready (not directly to notified — collection requires CONFIRM COLLECTION) */
+  var next = e.state==='waiting'?'preparing':e.state==='preparing'?'ready':null;
+  if(!next) return;
   e.state = next;
 
   if (next==='ready') {
-    UI.showToast(e.patient+' — medication ready for collection','ok');
-  }
-
-  if (next==='notified') {
-    /* Send real SMS + email to patient */
+    /* Send in-system + SMS/email notification that medication is ready */
     try {
-      /* Try to find patient contact details by patientId */
       var pRes = await API._fetchDirect('/patients?limit=50', {method:'GET'}).catch(function(){return {data:[]};});
-      var patients = pRes.data || [];
+      var patients = (pRes&&(pRes.data||pRes))||[];
+      if(!Array.isArray(patients)) patients = [];
       var pt = patients.find(function(p){
         return p.mrn === e.patientId || p._id === e.patientId ||
                (p.firstName+' '+p.lastName).toLowerCase() === e.patient.toLowerCase();
       });
 
-      var smsMsg = 'NIHMS Pharmacy: Your medication is ready for collection at window 2. ' +
-        'Ticket: ' + e.ticket + '. Patient: ' + e.patient + '. Please come to the pharmacy counter now.';
+      var smsMsg = 'NIHMS Pharmacy: Your medication is ready for collection. '+
+        'Ticket: '+e.ticket+'. Patient: '+e.patient+'. '+
+        'Please bring your identification document when collecting your medication.';
 
       var emailHtml =
         '<div style="font-family:Arial;max-width:520px;margin:0 auto">' +
         '<div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);padding:20px;border-radius:10px 10px 0 0;text-align:center">' +
         '<h2 style="color:#fff;margin:0">Your Medication is Ready</h2></div>' +
         '<div style="padding:24px;background:#f9f9f9;border-radius:0 0 10px 10px;text-align:center">' +
-        '<p>Dear <strong>' + e.patient + '</strong>,</p>' +
-        '<p>Your medication has been prepared and is ready for collection at the pharmacy.</p>' +
+        '<p>Dear <strong>'+e.patient+'</strong>,</p>' +
+        '<p>Your medication has been prepared and is ready for collection at the NIHMS pharmacy.</p>' +
         '<div style="margin:20px 0;padding:20px;background:#fff;border-radius:10px;border:2px solid #0F6E56">' +
-        '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#888;margin-bottom:6px">Your Ticket</div>' +
-        '<div style="font-size:56px;font-weight:900;color:#0F6E56;font-family:monospace;line-height:1.1">' + e.ticket + '</div>' +
+        '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#888;margin-bottom:6px">Your Queue Number</div>' +
+        '<div style="font-size:56px;font-weight:900;color:#0F6E56;font-family:monospace;line-height:1.1">'+e.ticket+'</div>' +
         '</div>' +
         '<div style="padding:12px;background:#EDFBF3;border-radius:8px;font-size:14px;font-weight:600;color:#0F6E56;margin-bottom:16px">' +
         '💊 Please proceed to <strong>Pharmacy Window 2</strong> now</div>' +
-        '<p style="font-size:12px;color:#888">Please bring your ID or patient card when collecting your medication.</p>' +
+        '<p style="font-size:12px;color:#888">Please bring your identification document when collecting your medication.</p>' +
         '</div></div>';
 
       if (pt && pt.phone) {
@@ -2125,15 +2545,36 @@ window._phAdvanceQueue = async function(id) {
         API._fetchDirect('/notifications/email', {
           method:'POST', body:JSON.stringify({
             to:pt.email,
-            subject:'NIHMS — Your medication is ready: Ticket '+e.ticket,
+            subject:'NIHMS — Your medication is ready for collection: '+e.ticket,
             html:emailHtml,
           })
         }).catch(function(){});
       }
 
-      UI.showToast('SMS & email sent to '+e.patient+' — Ticket '+e.ticket,'ok');
+      /* In-system notification via Socket.IO */
+      try {
+        if(window.socket && window.socket.emit) {
+          window.socket.emit('pharmacyReady', {
+            queueId:e.id, ticket:e.ticket, patient:e.patient,
+            prescriptionRef:e.prescriptionRef
+          });
+        }
+      } catch(_){}
+
+      UI.showToast('Notification sent to '+e.patient+' — medication ready · '+e.ticket,'ok');
     } catch(_) {
-      UI.showToast('Notified '+e.patient+' — Ticket '+e.ticket+' · window 2','ok');
+      UI.showToast(e.patient+' — medication ready for collection · '+e.ticket,'ok');
+    }
+  }
+
+  /* PATCH prescription status */
+  if(e.prescriptionRef || e.prescriptionId){
+    var statusMap = {preparing:'In Progress', ready:'Ready for Collection'};
+    if(statusMap[next]){
+      API._fetchDirect('/prescriptions/'+(e.prescriptionId||e.prescriptionRef), {
+        method:'PATCH',
+        body:JSON.stringify({status:statusMap[next]})
+      }).catch(function(){});
     }
   }
 
@@ -2144,7 +2585,7 @@ window._phAdvanceQueue = async function(id) {
    PAGE 6 — MEDICATION HISTORY
 ═══════════════════════════════════════════════════════════════ */
 Pages['ph-history'] = () => {
-  window._phHistFilters = {doctor:'all',type:'all',status:'all'};
+  window._phHistFilters = {doctor:'all',type:'all',status:'all',dateFrom:'',dateTo:'',medication:'',pharmacist:'all',search:''};
   setTimeout(_phRenderHistory, 0);
   return _phShell('ph-history','Medication history','Full dispensing records per patient',
     '<div id="ph-hist-body">Loading...</div>');
@@ -2289,20 +2730,96 @@ function _phRenderHistory() {
   /* Merge any newly dispensed entries from validation actions */
   var allHistory = _PH.history.slice();
 
+  /* ── Reporting totals ── */
+  var totalReceived   = (_PH.prescriptions||[]).length;
+  var totalDispensed  = allHistory.filter(function(h){return h.status==='Collected';}).length;
+  var totalPartial    = allHistory.filter(function(h){return h.status==='Partial'||h.status==='Partially Dispensed';}).length;
+  var totalOutOfStock = allHistory.filter(function(h){return h.status==='Out of Stock';}).length;
+  var totalRepeats    = allHistory.filter(function(h){
+    var rs = h.repeatSequence; return rs && (rs.used>0 || (typeof rs==='string'&&rs.includes('/')));
+  }).length;
+  var outstanding     = (_PH.queue||[]).filter(function(q){return q.state==='waiting'||q.state==='preparing';}).length;
+
+  /* Average dispensing time (minutes): from prescribedAt / submittedAt to dispensedAt */
+  var dispenseTimes = allHistory.filter(function(h){ return h.dispensedAt && (h.submittedAt||h.prescribedAt||h.issued); })
+    .map(function(h){
+      var start = new Date(h.submittedAt||h.prescribedAt||h.issued||0);
+      var end   = new Date(h.dispensedAt);
+      return (end-start)/(1000*60);
+    }).filter(function(t){ return t>0 && t<1440; }); /* ignore >24h outliers */
+  var avgTime = dispenseTimes.length ? Math.round(dispenseTimes.reduce(function(a,b){return a+b;},0)/dispenseTimes.length) : null;
+
+  var reportingCards = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">'+
+    [
+      {label:'Total Received',    val: totalReceived,   color:'#1A4A9B', icon:'ti-inbox'},
+      {label:'Total Dispensed',   val: totalDispensed,  color:'#0F6E56', icon:'ti-clipboard-check'},
+      {label:'Outstanding',       val: outstanding,     color:'#EF9F27', icon:'ti-clock'},
+      {label:'Avg Dispense Time', val: avgTime!==null?avgTime+'m':'—',    color:'#777',   icon:'ti-stopwatch'},
+    ].map(function(c){
+      return '<div style="border:1.5px solid #e0e0e0;border-radius:10px;padding:12px 14px">'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'+
+          '<i class="ti '+c.icon+'" style="color:'+c.color+';font-size:16px"></i>'+
+          '<span style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777">'+c.label+'</span>'+
+        '</div>'+
+        '<div style="font-size:22px;font-weight:700;color:'+c.color+'">'+c.val+'</div>'+
+      '</div>';
+    }).join('')+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px">'+
+    [
+      {label:'Partial Dispenses',  val: totalPartial,    color:'#EF9F27'},
+      {label:'Stock Shortages',    val: totalOutOfStock, color:'#dc2626'},
+      {label:'Repeat Dispenses',   val: totalRepeats,    color:'#1A4A9B'},
+    ].map(function(c){
+      return '<div style="border:1px solid #e0e0e0;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between">'+
+        '<span style="font-size:12px;color:#555">'+c.label+'</span>'+
+        '<span style="font-weight:700;font-size:16px;color:'+c.color+'">'+c.val+'</span>'+
+      '</div>';
+    }).join('')+
+    '</div>';
+
+  /* ── Apply all filters ── */
   var filtered = allHistory.filter(function(h){
-    return (f.doctor==='all'||h.doctor===f.doctor) &&
-           (f.type==='all'||h.type===f.type) &&
-           (f.status==='all'||h.status===f.status);
+    if(f.doctor !== 'all' && h.doctor !== f.doctor) return false;
+    if(f.type   !== 'all' && h.type   !== f.type)   return false;
+    if(f.status !== 'all' && h.status !== f.status) return false;
+    if(f.pharmacist !== 'all' && h.pharmacist !== f.pharmacist) return false;
+    if(f.medication && f.medication.trim()){
+      var medLow = f.medication.trim().toLowerCase();
+      var drugStr = _drugLabel(h).toLowerCase();
+      if(!drugStr.includes(medLow)) return false;
+    }
+    if(f.dateFrom){
+      var hDate = new Date(h.dispensedAt||h.submittedAt||h.date||0);
+      if(hDate < new Date(f.dateFrom)) return false;
+    }
+    if(f.dateTo){
+      var hDate2 = new Date(h.dispensedAt||h.submittedAt||h.date||0);
+      if(hDate2 > new Date(f.dateTo+'T23:59:59')) return false;
+    }
+    if(f.search && f.search.trim()){
+      var srch = f.search.trim().toLowerCase();
+      var haystack = [_patientName(h), _patientId(h), _rxRef(h), _drugLabel(h), h.pharmacist||''].join(' ').toLowerCase();
+      if(!haystack.includes(srch)) return false;
+    }
+    return true;
   });
 
-  var doctors  = ['all'].concat([...new Set(allHistory.map(function(h){return h.doctor;}).filter(Boolean))]);
-  var types    = ['all'].concat([...new Set(allHistory.map(function(h){return h.type;}))]);
-  var statuses = ['all','Prescribed','Awaiting Dispensing','Collected','Partial','Missed'];
+  var doctors     = ['all'].concat([...new Set(allHistory.map(function(h){return h.doctor;}).filter(Boolean))]);
+  var types       = ['all'].concat([...new Set(allHistory.map(function(h){return h.type;}))]);
+  var statuses    = ['all','Prescribed','Awaiting Dispensing','Collected','Partial','Missed','Out of Stock'];
+  var pharmacists = ['all'].concat([...new Set(allHistory.map(function(h){return h.pharmacist;}).filter(Boolean))]);
 
   function sel(id, opts, val, field, label) {
     return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:4px">'+label+'</div>'+
       '<select id="'+id+'" onchange="window._phHistFilters.'+field+'=this.value;_phRenderHistory()" style="width:100%;padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none">'+
       opts.map(function(o){ return '<option value="'+o+'"'+(val===o?' selected':'')+'>'+( o==='all'?'All':o)+'</option>'; }).join('')+'</select></div>';
+  }
+
+  function dateField(id, val, field, label){
+    return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:4px">'+label+'</div>'+
+      '<input type="date" id="'+id+'" value="'+(val||'')+'" onchange="window._phHistFilters.'+field+'=this.value;_phRenderHistory()" '+
+      'style="width:100%;padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box"></div>';
   }
 
   /* Status colour mapping */
@@ -2390,7 +2907,6 @@ function _phRenderHistory() {
                 ['Medication',            drugLabel],
                 ['Quantity Dispensed',    qtyDisplay],
                 ['Dosage Instructions',   dosageDisplay],
-                ['Dispensing Pharmacist', pharmDisplay],
                 ['Prescribing Doctor',    docDisplay],
                 ['Facility',              facilityDisplay],
                 ['Repeat Sequence',       repeatDisplay],
@@ -2406,19 +2922,26 @@ function _phRenderHistory() {
       }).join('')+'</ol>'
     : '<div style="border:1.5px dashed #e0e0e0;border-radius:10px;padding:32px;text-align:center;font-size:13px;color:#777">No records match these filters.</div>';
 
-  var legend = '';
-
-  var searchBox = '';
-
-  el.innerHTML = _phCard('ti-history','Patient Medication History',
-    filtered.length+' record'+(filtered.length!==1?'s':'')+' · '+
-    allHistory.filter(function(h){return h.status==='Collected';}).length+' dispensed',
+  el.innerHTML = _phCard('ti-history','Dispensing History & Reports',
+    filtered.length+' record'+(filtered.length!==1?'s':'')+' · '+totalDispensed+' dispensed today',
     _phBtn('Export PDF','ti-download','outline','UI.showToast(\''+filtered.length+' records prepared as PDF\',\'ok\')'),
-    searchBox+
-    '<div style="display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:16px">'+
-      sel('hist-status',statuses,f.status,'status','Dispensing Status')+
+    reportingCards+
+    /* Search bar */
+    '<div style="margin-bottom:12px"><input type="text" id="ph-hist-search" placeholder="Search patient name, ID, prescription ref, medication…" value="'+(f.search||'').replace(/"/g,'&quot;')+'" '+
+    'oninput="window._phHistFilters.search=this.value;_phRenderHistory()" '+
+    'style="width:100%;padding:9px 14px;border:1.5px solid #e0e0e0;border-radius:9px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box"></div>'+
+    /* Filter grid */
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'+
+      sel('hist-status',statuses,f.status,'status','Status')+
+      sel('hist-pharmacist',pharmacists,f.pharmacist,'pharmacist','Pharmacist')+
+      '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:4px">Medication</div>'+
+        '<input type="text" id="hist-med" placeholder="Drug name…" value="'+(f.medication||'')+'" oninput="window._phHistFilters.medication=this.value;_phRenderHistory()" '+
+        'style="width:100%;padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box"></div>'+
     '</div>'+
-    legend+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">'+
+      dateField('hist-from',f.dateFrom,'dateFrom','Date From')+
+      dateField('hist-to',  f.dateTo,  'dateTo',  'Date To')+
+    '</div>'+
     timeline);
 }
 

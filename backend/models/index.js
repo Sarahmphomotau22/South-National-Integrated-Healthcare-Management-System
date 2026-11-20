@@ -200,8 +200,6 @@ const ConsultationNote = mongoose.model('ConsultationNote', consultationNoteSche
 // ════════════════════════════════════════
 // EXPORTS  ← ConsultationNote added here
 // ════════════════════════════════════════
-module.exports = { Facility, Appointment, Medication, Prescription, LabOrder, ConsultationNote };
-
  //═══════════════════════════════════════════════════════
  //SURVEY RESULT
 // ════════════════════════════════════════
