@@ -55,8 +55,10 @@ async function _getMyPatientRecord() {
 ══════════════════════════════════════════════════ */
 Pages['myhealth'] = () => {
   if (window._mhInt) clearInterval(window._mhInt);
-  /* Close previous BroadcastChannel if the page was navigated away and back */
+  /* Close previous BroadcastChannels if the page was navigated away and back */
   try { if (window._mhCheckinBC) { window._mhCheckinBC.close(); window._mhCheckinBC = null; } } catch(_) {}
+  try { if (window._mhTeleBC)    { window._mhTeleBC.close();    window._mhTeleBC    = null; } } catch(_) {}
+
   /* Listen for token issuance from the receptionist tab – refresh immediately */
   try {
     window._mhCheckinBC = new BroadcastChannel('nihms_checkin');
@@ -64,9 +66,36 @@ Pages['myhealth'] = () => {
       if (ev.data && ev.data.type === 'token_issued') _mhLoad();
     };
   } catch(_) {}
+
+  /* ── Listen for doctor starting / ending a telemedicine session ── */
+  try {
+    window._mhTeleBC = new BroadcastChannel('nihms_tele_notify');
+    window._mhTeleBC.onmessage = function(ev) {
+      var d = ev && ev.data;
+      if (!d) return;
+      if (d.type === 'TELE_START') {
+        _mhShowTeleBanner(d);
+      } else if (d.type === 'TELE_END') {
+        _mhHideTeleBanner();
+        if (window.UI && window.UI.showToast) UI.showToast('Your consultation session has ended', 'ok');
+      }
+    };
+  } catch(_) {}
+
+  /* Check localStorage — catch a session that started before this tab was open */
+  setTimeout(function(){
+    try {
+      var stored = JSON.parse(localStorage.getItem('nihms_tele_session') || 'null');
+      if (stored && stored.type === 'TELE_START' && stored.ts && (Date.now() - stored.ts) < 3600000) {
+        _mhShowTeleBanner(stored);
+      }
+    } catch(_) {}
+  }, 400);
+
   setTimeout(_mhLoad, 0);
   window._mhInt = setInterval(_mhLoad, 30000);
-  return '<div id="mh-alerts"></div>' +
+  return '<div id="mh-tele-banner" style="display:none"></div>' +
+    '<div id="mh-alerts"></div>' +
     '<div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);border-radius:16px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:14px">' +
       '<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;flex-shrink:0">' +
         '<i class="ti ti-heart-rate-monitor" style="font-size:22px;color:#fff"></i>' +
@@ -790,6 +819,25 @@ async function _mrLoadVitals() {
 
 
 Pages['appointments'] = () => {
+  /* Re-mount telemedicine BC listener so the banner appears on this page too */
+  try { if (window._mhTeleBC) { window._mhTeleBC.close(); window._mhTeleBC = null; } } catch(_) {}
+  try {
+    window._mhTeleBC = new BroadcastChannel('nihms_tele_notify');
+    window._mhTeleBC.onmessage = function(ev) {
+      var d = ev && ev.data;
+      if (!d) return;
+      if (d.type === 'TELE_START') _mhShowTeleBanner(d);
+      else if (d.type === 'TELE_END') _mhHideTeleBanner();
+    };
+  } catch(_) {}
+  /* Check localStorage for in-progress session */
+  setTimeout(function(){
+    try {
+      var stored = JSON.parse(localStorage.getItem('nihms_tele_session') || 'null');
+      if (stored && stored.type === 'TELE_START' && stored.ts && (Date.now() - stored.ts) < 3600000) _mhShowTeleBanner(stored);
+    } catch(_) {}
+  }, 400);
+
   setTimeout(async function() {
     var wrap = document.getElementById('appt-list'); if (!wrap) return;
     try {
@@ -836,7 +884,8 @@ Pages['appointments'] = () => {
     } catch(e) { if(wrap) wrap.innerHTML='<div class="alert-box alert-danger"><i class="ti ti-alert-circle"></i>'+e.message+'</div>'; }
   }, 0);
 
-  return '<div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);border-radius:16px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:14px">' +
+  return '<div id="mh-tele-banner" style="display:none"></div>' +
+    '<div style="background:linear-gradient(135deg,#0F6E56,#1A4A9B);border-radius:16px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:14px">' +
       '<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;flex-shrink:0">' +
         '<i class="ti ti-calendar-event" style="font-size:22px;color:#fff"></i>' +
       '</div>' +
@@ -1001,184 +1050,186 @@ window._ciDirectCheckin = async function(apptId) {
 };
 
 /* ══════════════════════════════════════════════════════════════════
-   PATIENT TELEMEDICINE — join a video session via JitsiMeetExternalAPI
-   (replaces iframe approach that blocks WebRTC)
+   PATIENT TELEMEDICINE — opens Jitsi in a new browser tab
+   Presence tracked via BroadcastChannel nihms_tele_presence
 ══════════════════════════════════════════════════════════════════ */
 
-/* Load Jitsi External API script once, resolve when ready */
-function _pLoadJitsiScript(){
-  return new Promise(function(resolve, reject){
-    if(window.JitsiMeetExternalAPI){ resolve(); return; }
-    var s = document.createElement('script');
-    s.src = 'https://meet.jit.si/external_api.js';
-    s.onload  = resolve;
-    s.onerror = function(){ reject(new Error('Could not load Jitsi video library')); };
-    document.head.appendChild(s);
-  });
+/* ── Presence key helpers (mirror of doctor side) ── */
+function _pTelePresenceKey(appointmentId){ return 'nihms_tele_presence_' + appointmentId; }
+function _pTelePresenceGet(appointmentId){
+  try { return JSON.parse(localStorage.getItem(_pTelePresenceKey(appointmentId)) || 'null') || {}; } catch(_){ return {}; }
+}
+function _pTelePresenceSet(appointmentId, patch){
+  var cur = _pTelePresenceGet(appointmentId);
+  try { localStorage.setItem(_pTelePresenceKey(appointmentId), JSON.stringify(Object.assign({}, cur, patch))); } catch(_){}
 }
 
-/* Join a telemedicine room as patient — called after check-in */
+/* ── Broadcast PATIENT_LEFT when the patient leaves ── */
+function _pBroadcastPatientLeft(appointmentId){
+  if(!appointmentId) return;
+  _pTelePresenceSet(appointmentId, { patientLeft: true });
+  try {
+    var ch = new BroadcastChannel('nihms_tele_presence');
+    ch.postMessage({ type:'PATIENT_LEFT', appointmentId: appointmentId });
+    ch.close();
+  } catch(_){}
+}
+
+/* ── Handle patient closing the tab mid-session ── */
+function _pHandlePatientTabClose(){
+  var apptId = window._pActiveTeleApptId;
+  if(apptId) _pBroadcastPatientLeft(apptId);
+}
+
+/* ── Join a telemedicine room as patient — opens Jitsi in new tab ── */
 window._pJoinTeleRoom = async function(appointmentId){
   try {
-    /* Fetch join data from backend (same endpoint as doctor) */
+    /* Fetch join data from backend — gets the same room the doctor joined */
     var res  = await API._fetchDirect('/appointments/'+appointmentId+'/join', { method:'GET' });
-    var data = res && res.data;
-    if(!data) throw new Error('Could not get session details.');
-    _pOpenTeleRoom(data);
+    var data = (res && res.data) || {};
+
+    /* Build deterministic Jitsi URL */
+    var u = API.getStoredUser ? API.getStoredUser() : {};
+    var patName = ((u.firstName||'')+' '+(u.lastName||'')).trim() || (u.name||'Patient');
+    var roomName = data.roomName ||
+      ('nihms-' + String(appointmentId).replace(/[^a-zA-Z0-9]/g,'').toLowerCase());
+    var baseUrl = data.roomUrl || ('https://meet.jit.si/' + roomName);
+    /* Append display name and config params */
+    var jitsiUrl = baseUrl +
+      (baseUrl.indexOf('#') === -1 ? '#' : '&') +
+      'userInfo.displayName="' + encodeURIComponent(patName) + '"' +
+      '&config.prejoinPageEnabled=false' +
+      '&config.startWithAudioMuted=false' +
+      '&config.startWithVideoMuted=false' +
+      '&config.disableDeepLinking=true';
+
+    /* Reset patient-left flag for this session */
+    _pTelePresenceSet(appointmentId, { patientLeft: false });
+    window._pActiveTeleApptId = appointmentId;
+
+    /* Register tab-close handler */
+    window.removeEventListener('beforeunload', _pHandlePatientTabClose);
+    window.addEventListener('beforeunload', _pHandlePatientTabClose, { once: true });
+
+    /* Start listening for DOCTOR_LEFT so the patient portal can show a toast */
+    _pStartPresenceListener(appointmentId);
+
+    /* Open Jitsi in a new tab */
+    var tab = window.open(jitsiUrl, '_blank');
+    if(!tab){
+      UI.showToast('Pop-up blocked — please allow pop-ups for NIHMS and try again','warn');
+    } else {
+      UI.showToast('Consultation room opened in a new tab','ok');
+    }
+
   } catch(err){
     UI.showToast(err.message||'Could not join video session','err');
   }
 };
 
-function _pOpenTeleRoom(session){
-  /* Remove any existing overlay */
-  var old = document.getElementById('pat-tele-overlay');
-  if(old) old.remove();
-
-  var when  = session.scheduledAt ? new Date(session.scheduledAt) : null;
-  var docName = session.doctor
-    ? ('Dr '+((session.doctor.firstName||'')+' '+(session.doctor.lastName||'')).trim()).trim()
-    : 'Your Doctor';
-
-  /* Derive roomName */
-  var roomName = session.roomName ||
-    (session.roomUrl ? session.roomUrl.replace(/^https?:\/\/meet\.jit\.si\//, '').split('?')[0] : null) ||
-    ('nihms-'+session.appointmentId);
-
-  /* Get patient display name */
-  var u = API.getStoredUser ? API.getStoredUser() : {};
-  var patName = ((u.firstName||'')+' '+(u.lastName||'')).trim() || (u.name||'Patient');
-
-  /* Build overlay */
-  var ov = document.createElement('div');
-  ov.id = 'pat-tele-overlay';
-  ov.style.cssText = 'position:fixed;inset:0;background:#111;z-index:9999;display:flex;flex-direction:column';
-  ov.innerHTML =
-    '<style>'+
-      '@keyframes patLive{0%,100%{opacity:1}50%{opacity:.4}}'+
-      '#pat-jitsi-wrap{flex:1;min-height:0;width:100%;position:relative}'+
-      '#pat-jitsi-wrap iframe{width:100%!important;height:100%!important;border:none}'+
-      '#pat-notify-bar{position:absolute;top:12px;left:50%;transform:translateX(-50%);'+
-        'background:#1D9E75;color:#fff;font-size:12px;font-weight:600;padding:6px 16px;'+
-        'border-radius:20px;z-index:10;opacity:0;transition:opacity .4s;pointer-events:none}'+
-    '</style>'+
-    /* Header bar */
-    '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#1a1a1a;flex-shrink:0;gap:12px;flex-wrap:wrap">'+
-      '<div style="display:flex;align-items:center;gap:12px">'+
-        '<div style="font-size:16px;font-weight:800;color:#fff;letter-spacing:-.3px">NI<span style="color:#1D9E75">HMS</span></div>'+
-        '<div style="width:8px;height:8px;border-radius:50%;background:#1D9E75;animation:patLive 2s infinite"></div>'+
-        '<span style="color:#aaa;font-size:13px">Video session with <strong style="color:#fff">'+docName+'</strong></span>'+
-      '</div>'+
-      '<div style="display:flex;align-items:center;gap:10px">'+
-        (when?'<span style="color:#888;font-size:11px">🕐 '+when.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'</span>':'')+
-        '<button onclick="_pEndTeleRoom()" style="padding:8px 16px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px">'+
-          '📵 Leave session'+
-        '</button>'+
-      '</div>'+
-    '</div>'+
-    /* Info strip */
-    '<div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:#141414;flex-shrink:0;border-bottom:1px solid #333">'+
-      '<span style="font-size:11px;color:#888">Doctor:</span>'+
-      '<span style="font-size:13px;font-weight:600;color:#fff">'+docName+'</span>'+
-      '<span style="font-size:11px;color:#888;margin-left:auto">Video powered by Jitsi Meet · NIHMS does not record this session by default</span>'+
-    '</div>'+
-    /* Jitsi mount point */
-    '<div id="pat-jitsi-wrap" style="position:relative">'+
-      '<div id="pat-notify-bar"></div>'+
-      '<div id="pat-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;gap:12px">'+
-        '<div style="width:20px;height:20px;border:3px solid #1D9E75;border-top-color:transparent;border-radius:50%;animation:patLive .8s linear infinite"></div>'+
-        'Connecting to your consultation…'+
-      '</div>'+
-    '</div>';
-
-  document.body.appendChild(ov);
-
-  function _patNotify(msg, color){
-    var bar = document.getElementById('pat-notify-bar');
-    if(!bar) return;
-    bar.textContent = msg;
-    bar.style.background = color || '#1D9E75';
-    bar.style.opacity = '1';
-    setTimeout(function(){ bar.style.opacity='0'; }, 3500);
-  }
-
-  _pLoadJitsiScript().then(function(){
-    var wrap    = document.getElementById('pat-jitsi-wrap');
-    var loading = document.getElementById('pat-loading');
-    if(!wrap) return;
-
-    if(window._patJitsiAPI){
-      try { window._patJitsiAPI.dispose(); } catch(_){}
-      window._patJitsiAPI = null;
-    }
-
-    window._patJitsiAPI = new JitsiMeetExternalAPI('meet.jit.si', {
-      roomName:  roomName,
-      parentNode: wrap,
-      width:     '100%',
-      height:    '100%',
-      userInfo:  { displayName: patName },
-      configOverwrite: {
-        startWithAudioMuted:  false,
-        startWithVideoMuted:  false,
-        disableDeepLinking:   true,
-        prejoinPageEnabled:   false,
-        enableWelcomePage:    false,
-        disableInviteFunctions: true,
-        toolbarButtons: [
-          'microphone','camera','closedcaptions','desktop',
-          'fullscreen','fodeviceselection','hangup',
-          'chat','raisehand','videoquality','tileview'
-        ]
-      },
-      interfaceConfigOverwrite: {
-        SHOW_JITSI_WATERMARK:    false,
-        SHOW_WATERMARK_FOR_GUESTS: false,
-        TOOLBAR_ALWAYS_VISIBLE:  true
+/* ── Listen for DOCTOR_LEFT to show toast & update UI ── */
+function _pStartPresenceListener(appointmentId){
+  try { if(window._pPresenceBC){ window._pPresenceBC.close(); window._pPresenceBC = null; } } catch(_){}
+  try {
+    window._pPresenceBC = new BroadcastChannel('nihms_tele_presence');
+    window._pPresenceBC.onmessage = function(ev){
+      var d = ev && ev.data;
+      if(!d || d.appointmentId !== appointmentId) return;
+      if(d.type === 'DOCTOR_LEFT'){
+        _pTelePresenceSet(appointmentId, { doctorLeft: true });
+        if(window.UI && window.UI.showToast) UI.showToast('Your doctor has left the session','info');
       }
-    });
-
-    window._patJitsiAPI.addEventListener('videoConferenceJoined', function(){
-      if(loading) loading.style.display='none';
-      _patNotify('✅ You are now connected to your consultation');
-    });
-
-    window._patJitsiAPI.addEventListener('participantJoined', function(e){
-      _patNotify('👨‍⚕️ '+(e.displayName||'Doctor')+' has joined');
-    });
-
-    window._patJitsiAPI.addEventListener('participantLeft', function(e){
-      _patNotify('👋 '+(e.displayName||'Doctor')+' has left the session', '#f59e0b');
-    });
-
-    window._patJitsiAPI.addEventListener('videoConferenceLeft', function(){
-      _pEndTeleRoom();
-    });
-    window._patJitsiAPI.addEventListener('readyToClose', function(){
-      _pEndTeleRoom();
-    });
-
-  }).catch(function(err){
-    var wrap = document.getElementById('pat-jitsi-wrap');
-    if(wrap) wrap.innerHTML =
-      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:14px;flex-direction:column;gap:12px">'+
-        '<div>⚠️ '+err.message+'</div>'+
-        '<button onclick="_pJoinTeleRoom(\''+session.appointmentId+'\')" style="padding:8px 20px;border-radius:8px;border:none;background:#1D9E75;color:#fff;font-size:13px;cursor:pointer">Retry</button>'+
-      '</div>';
-  });
+    };
+  } catch(_){}
 }
 
-window._pEndTeleRoom = function(){
-  if(window._patJitsiAPI){
-    try { window._patJitsiAPI.executeCommand('hangup'); } catch(_){}
-    setTimeout(function(){
-      try { window._patJitsiAPI.dispose(); } catch(_){}
-      window._patJitsiAPI = null;
-    }, 800);
+/* ── Patient explicitly leaves (e.g. from a "Leave" button on the portal) ── */
+window._pEndTeleRoom = function(appointmentId){
+  var apptId = appointmentId || window._pActiveTeleApptId;
+  if(apptId){
+    _pBroadcastPatientLeft(apptId);
+    window._pActiveTeleApptId = null;
   }
-  var ov = document.getElementById('pat-tele-overlay');
-  if(ov) ov.remove();
-  UI.showToast('You have left the consultation','ok');
+  /* Stop presence listener */
+  try { if(window._pPresenceBC){ window._pPresenceBC.close(); window._pPresenceBC = null; } } catch(_){}
+  window.removeEventListener('beforeunload', _pHandlePatientTabClose);
+  _mhHideTeleBanner();
+  if(window.UI && window.UI.showToast) UI.showToast('You have left the consultation','ok');
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   TELEMEDICINE NOTIFICATION BANNER
+   Shown when the doctor starts a session — prompts patient to join
+══════════════════════════════════════════════════════════════════ */
+
+window._mhShowTeleBanner = function(session){
+  var banner = document.getElementById('mh-tele-banner');
+  if(!banner) return;
+
+  /* Animate in */
+  if(!document.getElementById('nihms-tele-banner-css')){
+    var st = document.createElement('style');
+    st.id = 'nihms-tele-banner-css';
+    st.textContent =
+      '@keyframes telePulse{0%,100%{opacity:1}50%{opacity:.5}}' +
+      '@keyframes teleSlide{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}' +
+      '#mh-tele-banner-inner{animation:teleSlide .35s ease-out}';
+    document.head.appendChild(st);
+  }
+
+  var apptId   = session.appointmentId || '';
+  var docName  = session.doctorName    || 'Your Doctor';
+
+  banner.style.display = 'block';
+  banner.innerHTML =
+    '<div id="mh-tele-banner-inner" style="'+
+      'background:linear-gradient(135deg,#0F6E56,#1A4A9B);'+
+      'border-radius:14px;padding:16px 20px;margin-bottom:16px;'+
+      'display:flex;align-items:center;gap:14px;flex-wrap:wrap">'+
+
+      /* Pulsing live dot */
+      '<div style="width:14px;height:14px;border-radius:50%;background:#4ade80;flex-shrink:0;animation:telePulse 1.4s infinite"></div>'+
+
+      /* Text */
+      '<div style="flex:1;min-width:200px">'+
+        '<div style="font-size:15px;font-weight:800;color:#fff;margin-bottom:3px">'+
+          '📹 Your doctor is ready — consultation is live'+
+        '</div>'+
+        '<div style="font-size:12px;color:rgba(255,255,255,.8)">'+
+          docName+' has started your telemedicine session. Click <strong>Join now</strong> to connect.'+
+        '</div>'+
+      '</div>'+
+
+      /* Join button */
+      '<button onclick="_mhJoinFromBanner(\''+apptId+'\')" '+
+        'style="padding:11px 24px;border-radius:50px;border:none;background:#fff;color:#0F6E56;'+
+        'font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0;'+
+        'box-shadow:0 2px 8px rgba(0,0,0,.18);display:flex;align-items:center;gap:7px">'+
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>'+
+        'Join now'+
+      '</button>'+
+
+      /* Dismiss */
+      '<button onclick="_mhHideTeleBanner()" '+
+        'style="background:none;border:none;cursor:pointer;color:rgba(255,255,255,.6);font-size:20px;line-height:1;padding:0;flex-shrink:0" '+
+        'title="Dismiss">✕</button>'+
+
+    '</div>';
+};
+
+window._mhHideTeleBanner = function(){
+  var banner = document.getElementById('mh-tele-banner');
+  if(banner){ banner.style.display='none'; banner.innerHTML=''; }
+};
+
+/* Called when patient clicks Join now in the banner */
+window._mhJoinFromBanner = async function(appointmentId){
+  if(!appointmentId){
+    if(window.Router) Router.setPage('appointments');
+    return;
+  }
+  _mhHideTeleBanner();
+  await window._pJoinTeleRoom(appointmentId);
 };
 
 /* ══════════════════════════════════════════════════════════════════ */
@@ -1188,6 +1239,13 @@ var _RSCAL = { year: new Date().getFullYear(), month: new Date().getMonth(), sel
 window._showReschedule = function(id, currentType, currentDt) {
   _rsApptId = id;
   _rsVisitType = currentType || 'consultation';
+  // Rebuild minute options based on visit type
+  var _rsMSel = document.getElementById('rs-t-m');
+  if (_rsMSel) {
+    var _rsIsTele = (_rsVisitType || '').toLowerCase() === 'telemedicine';
+    var _rsMins = _rsIsTele ? ['00','10','20','30','40','50'] : ['00','30'];
+    _rsMSel.innerHTML = _rsMins.map(function(m){ return '<option value="'+m+'">'+m+'</option>'; }).join('');
+  }
   _RSCAL.selected = null;
   // Move to body to escape overflow:hidden
   var modal = document.getElementById('reschedule-modal');
@@ -1732,35 +1790,48 @@ window._uploadIdDoc = async function(input) {
 /* ══════════════════════════════════════════════════
    BOOK A VISIT — slot grid (no calendar overlay)
 ══════════════════════════════════════════════════ */
-/* ── Slot availability — mirrors receptionist.js exactly ── */
-var _BK_ALL_SLOTS_WEEKDAY = [
-  '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
-  '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
-  '15:00','15:30','16:00','16:30'
-];
-var _BK_ALL_SLOTS_SAT = [
-  '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
-  '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
-  '15:00','15:30','16:00','16:30','17:00'
-];
+/* ── Slot availability ── */
+/* Return YYYY-MM-DD in LOCAL time (avoids UTC-shift that makes SAST dates appear as the wrong day) */
+function _localDateStr(d) {
+  d = d || new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/* Generate all HH:MM slots between startH:00 and endH:00 (exclusive) at `stepMins` intervals */
+function _bkGenSlots(startH, endH, stepMins) {
+  var slots = [];
+  for (var m = startH * 60; m < endH * 60; m += stepMins) {
+    slots.push(String(Math.floor(m / 60)).padStart(2,'0') + ':' + String(m % 60).padStart(2,'0'));
+  }
+  return slots;
+}
+
+/* Return the interval (minutes) for the currently selected visit type */
+function _bkSlotInterval() {
+  var vt = (document.getElementById('bk-visit-type') || {value:''}).value;
+  return (vt || '').toLowerCase() === 'telemedicine' ? 10 : 30;
+}
+
 function _bkGetSlots(dateStr) {
   /* Normalise dateStr to YYYY-MM-DD regardless of separator (handles 2026/11/04 or 2026-11-04) */
   var normDate = dateStr.replace(/\//g, '-');
   var d = new Date(normDate + 'T00:00:00');
   var day = d.getDay();
   if (day === 0) return [];
-  var all = day === 6 ? _BK_ALL_SLOTS_SAT : _BK_ALL_SLOTS_WEEKDAY;
+  var step = _bkSlotInterval();
+  /* Weekday: 07:00–17:00 (last slot starts before 17:00); Saturday same range */
+  var all = _bkGenSlots(7, 17, step);
   /* Build today string in local time (not UTC) to avoid midnight-offset mismatch */
   var now = new Date();
   var todayStr = now.getFullYear() + '-' +
     String(now.getMonth() + 1).padStart(2, '0') + '-' +
     String(now.getDate()).padStart(2, '0');
-  if (normDate !== todayStr) return all.slice();
-  /* Today: filter out slots within 30 minutes of current local time */
-  var cutoff = now.getHours() * 60 + now.getMinutes() + 30;
+  if (normDate !== todayStr) return all;
+  /* Today: hide slots whose start time has already passed */
+  var nowMins = now.getHours() * 60 + now.getMinutes();
   return all.filter(function(s) {
     var parts = s.split(':');
-    return parseInt(parts[0]) * 60 + parseInt(parts[1]) >= cutoff;
+    return parseInt(parts[0]) * 60 + parseInt(parts[1]) > nowMins;
   });
 }
 
@@ -1820,11 +1891,11 @@ Pages['book'] = () => {
     var dateEl = document.getElementById('bk-slot-date');
     if (dateEl) {
       if (!dateEl.value) {
-        /* Set default date: tomorrow (skip Sunday) */
+        /* Set default date: tomorrow in local time (skip Sunday) */
         var def = new Date();
         def.setDate(def.getDate() + 1);
         if (def.getDay() === 0) def.setDate(def.getDate() + 1);
-        dateEl.value = def.toISOString().slice(0, 10);
+        dateEl.value = _localDateStr(def);
       }
       /* Ensure _BKC.selectedDate is set immediately (before async completes) */
       window._BKC.selectedDate = dateEl.value;
@@ -1887,7 +1958,7 @@ Pages['book'] = () => {
       <!-- Date picker -->
       <div style="margin-bottom:14px">
         <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">DATE</div>
-        <input type="date" id="bk-slot-date" min="${new Date().toISOString().slice(0,10)}"
+        <input type="date" id="bk-slot-date" min="${_localDateStr()}"
           style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius);font-size:13px;font-family:inherit;background:#fff;outline:none;color:var(--text)"
           onchange="window._bkDateChange(this.value)">
       </div>
@@ -2216,8 +2287,8 @@ window._bkSubmit = async function() {
   if (!dateStr)   { showErr('Please select a date first.'); return; }
   if (!slotTime)  { showErr('Please select a time slot.'); return; }
 
-  /* Build scheduledAt ISO string */
-  var scheduledAt = new Date(dateStr + 'T' + slotTime + ':00').toISOString();
+  /* Build scheduledAt ISO string — append SAST offset (+02:00) so the date is never UTC-shifted */
+  var scheduledAt = new Date(dateStr + 'T' + slotTime + ':00+02:00').toISOString();
   var dtObj = new Date(scheduledAt);
   if (dtObj <= new Date()) { showErr('Please select a future date and time.'); return; }
 
@@ -2227,7 +2298,7 @@ window._bkSubmit = async function() {
     var p = window._BKC._patient || await _getMyPatientRecord();
     if (!p) { showErr('Patient record not found. Please log in again.'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-calendar-check"></i> Confirm booking';} return; }
 
-    var dateLabel = dtObj.toLocaleDateString('en-ZA',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+    var dateLabel = dtObj.toLocaleDateString('en-ZA',{weekday:'long',year:'numeric',month:'long',day:'numeric',timeZone:'Africa/Johannesburg'});
     var timeLabel = slotTime;
     var ref       = 'APT-' + Date.now().toString().slice(-5);
 

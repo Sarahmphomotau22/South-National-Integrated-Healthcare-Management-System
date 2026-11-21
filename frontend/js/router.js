@@ -120,13 +120,7 @@ window.Router = (() => {
       default: 'rx-queue',
       nav: [
         { id: 'rx-queue',      icon: 'ti-layout-dashboard', label: 'Overview'                },
-        { id: 'stock',         icon: 'ti-package-search',   label: 'Stock management'        },
-        { id: 'ph-validation', icon: 'ti-shield-check',     label: 'Prescription validation' },
-        { id: 'dispensed',     icon: 'ti-clipboard-check',  label: 'Dispensing & labels'     },
-        { id: 'ph-queue',      icon: 'ti-users',            label: 'Pharmacy queue'          },
-        { id: 'ph-history',    icon: 'ti-history',          label: 'Medication history'      },
-        { id: 'ph-suppliers',  icon: 'ti-truck',            label: 'Suppliers & orders'      },
-        { id: 'ph-reminders',  icon: 'ti-bell',             label: 'Refill reminders'        },
+       
        
       ]
     },

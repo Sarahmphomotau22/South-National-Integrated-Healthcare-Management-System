@@ -3879,6 +3879,34 @@ function _dMedicalNotes(){
     _D.workflow.completedAt   = nowIso;
     if (_ecApiOk) _D.workflow.consultStatus = 'Completed';
 
+    /* ── PATCH appointment status → completed (non-fatal) ── */
+    /* Resolve appointment ID from: workflow state, consultPat queue entry,
+       active telemedicine session, or patient's appointments list */
+    (async function(){
+      try {
+        var _apptId =
+          (_D.workflow && _D.workflow.appointmentId) ||
+          (pat8.appointmentId || pat8.apptId || pat8._apptId) ||
+          window._dActiveTeleApptId ||
+          (function(){
+            /* Look for a scheduled/in_progress appointment for this patient */
+            var appts = pat8.appointments || ((_D.pat360Data||{}).appointments) || [];
+            if (!Array.isArray(appts)) return null;
+            var active = appts.find(function(a){
+              var s = (a.status||'').toLowerCase();
+              return s === 'scheduled' || s === 'in_progress' || s === 'confirmed';
+            });
+            return active ? (active._id||active.id) : null;
+          })();
+        if (_apptId && _apptId !== 'undefined') {
+          await API._fetchDirect('/appointments/'+_apptId+'/status',{
+            method: 'PATCH',
+            body: JSON.stringify({ status: 'completed', completedAt: nowIso })
+          });
+        }
+      } catch(_e){ /* non-fatal — consultation is already marked complete */ }
+    })();
+
     /* ── Send survey via SMS + email (async, non-blocking) ── */
     var smsMsg = 'Thank you for visiting our healthcare facility. Please take a moment to share your experience by completing our patient feedback survey: '+surveyUrl+'. Your feedback helps us improve our services.';
     var emailHtml =
@@ -3949,6 +3977,9 @@ function _dMedicalNotes(){
         read: false,
       });
     } catch(_){}
+
+    /* Toast confirmation — user requirement: exact message */
+    _ecToast('Consultation has been successfully ended.','ok');
 
     /* Show confirmation */
     var confirmHtml =
@@ -4555,9 +4586,7 @@ function _dTelemedicine(){
         '</div>'+
         '<div id="tele-session-list"><div style="padding:20px;text-align:center;color:'+C.muted+'">Loading sessions…</div></div>'
       )+
-    '</div>'+
-    /* Full-screen video overlay — hidden until a session starts */
-    '<div id="tele-overlay" style="display:none;position:fixed;inset:0;background:#111;z-index:9999;flex-direction:column"></div>';
+    '</div>';
 }
 
 /* ── Load telemedicine appointments from API ── */
@@ -4631,7 +4660,10 @@ window._dLoadTeleSessions = async function(){
           '</div>'+
           '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0">'+
             (canJoin?'<button onclick="_dJoinTeleSession(\''+a._id+'\')" style="padding:9px 18px;border-radius:8px;border:none;background:'+C.green+';color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px">'+
-              '📹 '+(isLive?'Rejoin session':isSoon?'Join now':'Start session')+
+              '📹 '+(isLive?'Rejoin (new tab)':isSoon?'Start Consultation':'Start Consultation')+
+            '</button>':'')+
+            (isLive?'<button onclick="_dEndTeleCall(\''+a._id+'\')" style="padding:9px 18px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px">'+
+              '📵 End Session'+
             '</button>':'')+
             '<div style="display:flex;gap:6px">'+
               (canAct?'<button onclick="_docReschedule(\''+a._id+'\',\'telemedicine\',\''+new Date(a.scheduledAt).toISOString().slice(0,16)+'\')" style="padding:5px 10px;border-radius:6px;border:1px solid '+C.border+';background:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">↩ Reschedule</button>':'')+
@@ -4650,83 +4682,220 @@ window._dLoadTeleSessions = async function(){
   }
 };
 
-/* ── Join a telemedicine session — calls backend, embeds Jitsi iframe ── */
+/* ── Broadcast helper: notify patient tab that session started / ended ── */
+function _dTeleNotify(type, payload){
+  try {
+    var ch = new BroadcastChannel('nihms_tele_notify');
+    ch.postMessage(Object.assign({ type: type }, payload || {}));
+    ch.close();
+  } catch(_) {}
+  /* Also persist to localStorage so a patient tab that opens later catches up */
+  try {
+    localStorage.setItem('nihms_tele_session', JSON.stringify(Object.assign({
+      type: type, ts: Date.now()
+    }, payload || {})));
+  } catch(_) {}
+}
+
+/* ── Build deterministic Jitsi URL from appointmentId ── */
+function _dBuildJitsiUrl(appointmentId, displayName){
+  var roomName = 'nihms-' + String(appointmentId).replace(/[^a-zA-Z0-9]/g,'').toLowerCase();
+  var dn = encodeURIComponent(displayName || 'Doctor');
+  return 'https://meet.jit.si/' + roomName +
+    '#userInfo.displayName="' + dn + '"' +
+    '&config.prejoinPageEnabled=false' +
+    '&config.startWithAudioMuted=false' +
+    '&config.startWithVideoMuted=false' +
+    '&config.disableDeepLinking=true';
+}
+
+/* ── Shared presence key ── */
+function _dTelePresenceKey(appointmentId){ return 'nihms_tele_presence_' + appointmentId; }
+
+/* ── Read / write presence state ── */
+function _dTelePresenceGet(appointmentId){
+  try { return JSON.parse(localStorage.getItem(_dTelePresenceKey(appointmentId)) || 'null') || {}; } catch(_){ return {}; }
+}
+function _dTelePresenceSet(appointmentId, patch){
+  var cur = _dTelePresenceGet(appointmentId);
+  var next = Object.assign({}, cur, patch);
+  try { localStorage.setItem(_dTelePresenceKey(appointmentId), JSON.stringify(next)); } catch(_){}
+  return next;
+}
+
+/* ── Both-left → mark appointment completed ── */
+window._dTeleCheckComplete = async function(appointmentId){
+  var p = _dTelePresenceGet(appointmentId);
+  if(!p.doctorLeft || !p.patientLeft) return; /* still waiting for one side */
+
+  /* Record end time */
+  _dTelePresenceSet(appointmentId, { endTime: new Date().toISOString() });
+
+  /* Notify patient tab: session is fully over */
+  _dTeleNotify('TELE_END', { appointmentId: appointmentId });
+  try { localStorage.removeItem('nihms_tele_session'); } catch(_){}
+
+  /* PATCH appointment → completed with timing */
+  if(appointmentId){
+    var pr = _dTelePresenceGet(appointmentId);
+    try {
+      await API._fetchDirect('/appointments/'+appointmentId+'/status',{
+        method:'PATCH',
+        body: JSON.stringify({
+          status: 'completed',
+          startTime: pr.startTime || null,
+          endTime:   pr.endTime   || null
+        })
+      });
+    } catch(e){ /* non-fatal */ }
+  }
+
+  if(window.UI && window.UI.showToast) UI.showToast('Consultation completed — both participants have left','ok');
+  if(window._dDashTeleLoad) window._dDashTeleLoad();
+  if(typeof _dLoadTeleSessions === 'function') _dLoadTeleSessions();
+};
+
+/* ── Presence broadcast channel listener (doctor side) ── */
+function _dStartPresenceListener(appointmentId){
+  /* Close any existing listener */
+  try { if(window._dPresenceBC){ window._dPresenceBC.close(); window._dPresenceBC = null; } } catch(_){}
+  try {
+    window._dPresenceBC = new BroadcastChannel('nihms_tele_presence');
+    window._dPresenceBC.onmessage = function(ev){
+      var d = ev && ev.data;
+      if(!d || d.appointmentId !== appointmentId) return;
+      if(d.type === 'PATIENT_LEFT'){
+        _dTelePresenceSet(appointmentId, { patientLeft: true });
+        window._dTeleCheckComplete(appointmentId);
+      }
+    };
+  } catch(_){}
+
+  /* Also poll localStorage as fallback for cross-origin / blocked BC */
+  window._dPresencePoll = setInterval(function(){
+    var p = _dTelePresenceGet(appointmentId);
+    if(p.patientLeft && p.doctorLeft){
+      clearInterval(window._dPresencePoll);
+      window._dTeleCheckComplete(appointmentId);
+    }
+  }, 5000);
+}
+
+/* ── Join a telemedicine session — opens Jitsi in new tab, notifies patient ── */
 window._dJoinTeleSession = async function(appointmentId){
-  /* Find the clicked button and show loading state */
-  var btns = document.querySelectorAll('#tele-session-list button');
-  btns.forEach(function(b){ if(b.onclick && b.getAttribute('onclick') && b.getAttribute('onclick').includes(appointmentId)){ b.disabled=true; b.textContent='Joining…'; } });
+  /* Show loading state on the clicked button */
+  var allBtns = document.querySelectorAll('#tele-session-list button, #dash-tele-list button');
+  allBtns.forEach(function(b){
+    var oc = b.getAttribute('onclick') || '';
+    if(oc.includes(appointmentId)){ b.disabled=true; b.innerHTML='<span style="opacity:.7">Opening…</span>'; }
+  });
 
   try {
+    /* 1. Call /join — backend returns room URL and session details */
     var res  = await API._fetchDirect('/appointments/'+appointmentId+'/join', { method:'GET' });
-    var data = res && res.data;
-    if(!data) throw new Error('No session data returned.');
-    _dOpenJitsiRoom(data);
+    var data = (res && res.data) || {};
+
+    /* 2. Build deterministic room URL */
+    var u = _dGetUser();
+    var displayName = u.firstName ? 'Dr '+((u.firstName||'')+' '+(u.lastName||'')).trim() : (u.name||'Doctor');
+    var jitsiUrl = data.roomUrl || _dBuildJitsiUrl(appointmentId, displayName);
+
+    /* 3. Record start time + reset presence state */
+    var startTime = new Date().toISOString();
+    _dTelePresenceSet(appointmentId, {
+      startTime: startTime,
+      doctorLeft: false,
+      patientLeft: false,
+      endTime: null,
+      appointmentId: appointmentId
+    });
+
+    /* 4. Mark appointment as in_progress */
+    try {
+      await API._fetchDirect('/appointments/'+appointmentId+'/status', {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'in_progress', startTime: startTime })
+      });
+    } catch(_) { /* non-fatal */ }
+
+    /* 5. Notify patient tab: "Your doctor is ready — please join" */
+    var roomName = data.roomName || ('nihms-' + String(appointmentId).replace(/[^a-zA-Z0-9]/g,'').toLowerCase());
+    _dTeleNotify('TELE_START', {
+      appointmentId: appointmentId,
+      roomName:   roomName,
+      roomUrl:    data.roomUrl || ('https://meet.jit.si/'+roomName),
+      patientId:  (data.patient && (data.patient._id || data.patient.id)) || '',
+      doctorName: displayName,
+      scheduledAt: data.scheduledAt || ''
+    });
+
+    /* 6. Open Jitsi in a new browser tab for the doctor */
+    var tab = window.open(jitsiUrl, '_blank');
+    if(!tab){
+      UI.showToast('Pop-up blocked — please allow pop-ups for NIHMS and try again','warn');
+    } else {
+      UI.showToast('Video room opened in a new tab. Return here to manage the session.','ok');
+    }
+
+    /* 7. Start listening for patient departure */
+    _dStartPresenceListener(appointmentId);
+
+    /* 8. Register beforeunload to broadcast DOCTOR_LEFT if the NIHMS tab itself is closed */
+    window._dActiveTeleApptId = appointmentId;
+    /* Also persist on workflow so _dEndConsult can resolve it */
+    if (_D.workflow) _D.workflow.appointmentId = appointmentId;
+    window.addEventListener('beforeunload', _dHandleDoctorTabClose, { once: true });
+
+    /* 9. Refresh dashboard tele list */
+    setTimeout(function(){ if(window._dDashTeleLoad) window._dDashTeleLoad(); }, 1500);
+
   } catch(err){
-    if(window.UI && window.UI.showToast) UI.showToast('Could not join: '+(err.message||'Unknown error'),'err');
-    _dLoadTeleSessions(); /* re-render to restore buttons */
+    if(window.UI && window.UI.showToast) UI.showToast('Could not start session: '+(err.message||'Unknown error'),'err');
+    if(typeof _dLoadTeleSessions === 'function') _dLoadTeleSessions();
   }
 };
 
-/* ── Render the Jitsi video room as a full-screen overlay ── */
-function _dOpenJitsiRoom(session){
-  var overlay = document.getElementById('tele-overlay');
-  if(!overlay) return;
-
-  var when  = session.scheduledAt ? new Date(session.scheduledAt) : null;
-  var other = ((session.patient&&session.patient.firstName)||'') + ' ' + ((session.patient&&session.patient.lastName)||'');
-  other = other.trim() || 'Patient';
-
-  overlay.style.display = 'flex';
-  overlay.innerHTML =
-    '<style>'+
-      '@keyframes nilive{0%,100%{opacity:1}50%{opacity:.4}}'+
-      '#tele-jitsi-frame{width:100%;border:none;flex:1;min-height:0}'+
-    '</style>'+
-    /* Top control bar */
-    '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#1a1a1a;flex-shrink:0;gap:12px;flex-wrap:wrap">'+
-      '<div style="display:flex;align-items:center;gap:12px">'+
-        '<div style="font-size:16px;font-weight:800;color:#fff;letter-spacing:-.3px">NI<span style="color:#1D9E75">HMS</span></div>'+
-        '<div style="width:8px;height:8px;border-radius:50%;background:#1D9E75;animation:nilive 2s infinite"></div>'+
-        '<span style="color:#aaa;font-size:13px">Video session with <strong style="color:#fff">'+other+'</strong></span>'+
-      '</div>'+
-      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
-        (when?'<span style="color:#888;font-size:11px">🕐 '+when.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+(session.queueToken?' &nbsp;🎫 '+session.queueToken:'')+'</span>':'')+
-        '<button onclick="_dEndTeleCall(\''+session.appointmentId+'\')" style="padding:8px 16px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px">'+
-          '📵 End session'+
-        '</button>'+
-        '<button onclick="window.open(\''+session.roomUrl+'\',\'_blank\')" style="padding:8px 16px;border-radius:8px;border:1px solid #444;background:#2a2a2a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">'+
-          '↗ New tab'+
-        '</button>'+
-      '</div>'+
-    '</div>'+
-    /* Patient info strip */
-    '<div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:#141414;flex-shrink:0;border-bottom:1px solid #333">'+
-      '<span style="font-size:11px;color:#888">Patient:</span>'+
-      '<span style="font-size:13px;font-weight:600;color:#fff">'+other+'</span>'+
-      (session.scheduledAt?'<span style="font-size:11px;color:#888;margin-left:8px">Scheduled: '+new Date(session.scheduledAt).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'})+'</span>':'')+
-      '<span style="font-size:11px;color:#888;margin-left:auto">Video powered by Jitsi Meet · NIHMS does not record this session by default</span>'+
-    '</div>'+
-    /* Jitsi iframe */
-    '<iframe id="tele-jitsi-frame" src="'+session.iframeUrl+'" '+
-      'allow="camera; microphone; fullscreen; speaker; display-capture; autoplay; clipboard-read; clipboard-write" '+
-      'allowfullscreen></iframe>';
+/* ── Called by beforeunload when NIHMS tab closes mid-session ── */
+function _dHandleDoctorTabClose(){
+  var apptId = window._dActiveTeleApptId;
+  if(!apptId) return;
+  _dTelePresenceSet(apptId, { doctorLeft: true });
+  try {
+    var ch = new BroadcastChannel('nihms_tele_presence');
+    ch.postMessage({ type:'DOCTOR_LEFT', appointmentId: apptId });
+    ch.close();
+  } catch(_){}
 }
 
-/* ── End call: close overlay, mark appointment completed ── */
-window._dEndTeleCall = async function(appointmentId){
-  var overlay = document.getElementById('tele-overlay');
-  if(overlay){ overlay.style.display='none'; overlay.innerHTML=''; }
-  if(window.UI && window.UI.showToast) UI.showToast('Session ended','ok');
-  /* Optionally update status to completed */
-  if(appointmentId){
-    try{
-      await API._fetchDirect('/appointments/'+appointmentId+'/status',{
-        method:'PATCH',
-        body:JSON.stringify({status:'completed'})
-      });
-    }catch(e){/* non-fatal */}
-  }
-  _dLoadTeleSessions();
+/* ── Doctor explicitly ends the session from the NIHMS dashboard ── */
+window._dEndTeleCall = function(appointmentId){
+  var apptId = appointmentId || window._dActiveTeleApptId;
+  if(!apptId) return;
+
+  /* Mark doctor as left and broadcast */
+  _dTelePresenceSet(apptId, { doctorLeft: true });
+  try {
+    var ch = new BroadcastChannel('nihms_tele_presence');
+    ch.postMessage({ type:'DOCTOR_LEFT', appointmentId: apptId });
+    ch.close();
+  } catch(_){}
+
+  /* Clear beforeunload listener since we're handling it explicitly */
+  window.removeEventListener('beforeunload', _dHandleDoctorTabClose);
+  window._dActiveTeleApptId = null;
+
+  /* Stop polling */
+  if(window._dPresencePoll){ clearInterval(window._dPresencePoll); window._dPresencePoll = null; }
+  try { if(window._dPresenceBC){ window._dPresenceBC.close(); window._dPresenceBC = null; } } catch(_){}
+
+  UI.showToast('You have left the session. Waiting for patient to leave before marking complete…','ok');
+
+  /* Check immediately in case patient already left */
+  window._dTeleCheckComplete(apptId);
+
+  /* Refresh views */
+  if(window._dDashTeleLoad) window._dDashTeleLoad();
+  if(typeof _dLoadTeleSessions === 'function') _dLoadTeleSessions();
 };
 
 /* ══════════════════════════════════════════════════════════════════
@@ -6075,6 +6244,13 @@ window._dSaveConsult = async function() {
   /* ── Store consultation ID and clinician name in workflow ── */
   if (savedId && _D.workflow) _D.workflow.consultationId = savedId;
   if (_D.workflow) _D.workflow.consultation.clinician = clinician;
+  /* Store appointment ID so _dEndConsult can PATCH it to completed */
+  if (_D.workflow && !_D.workflow.appointmentId) {
+    var _cApptId =
+      (_cPat && (_cPat.appointmentId || _cPat.apptId || _cPat._apptId)) ||
+      window._dActiveTeleApptId || null;
+    if (_cApptId) _D.workflow.appointmentId = _cApptId;
+  }
   /* Persist clinician name so pharmacy.js can resolve it cross-tab */
   try { if(clinician) localStorage.setItem('NIHMS_PRESCRIBING_DOCTOR', clinician); } catch(_){}
 
@@ -6352,7 +6528,7 @@ window._dSaveRx = async function() {
       mrn:              pat.mrn||'',
       items:            medications.length,
       waitedMin:        0,
-      state:            'waiting',
+      state:            'new-request',
       prescriptionRef:  rxRef,
       prescriptionId:   rxId||rxRef,
       medications:      medications,
